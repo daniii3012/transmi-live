@@ -1,0 +1,27 @@
+/* Controles de MapLibre con el lenguaje del proyecto: rectos, oscuros, líneas de 1 px. */
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-attrib.maplibregl-compact {
+  background: rgba(7, 9, 11, 0.72) !important;
+  color: var(--fg-2);
+  border: 1px solid var(--line-1);
+  border-radius: 0 !important;
+  font: 10px/16px var(--font-mono);
+  letter-spacing: 0.02em;
+  min-height: 20px;
+  padding: 1px 22px 1px 6px !important;
+  margin: 0 var(--sp-3) var(--sp-3) 0 !important;
+}
+.maplibregl-ctrl-attrib.maplibregl-compact:not(.maplibregl-compact-show) { padding: 0 !important; min-width: 20px; }
+.maplibregl-ctrl-attrib a { color: var(--fg-1); text-decoration: none; }
+.maplibregl-ctrl-attrib a:hover { color: var(--fg-0); }
+.maplibregl-ctrl-attrib-button {
+  background-color: transparent !important;
+  border-radius: 0 !important;
+  width: 20px !important; height: 20px !important;
+  filter: invert(0.75);
+  top: -1px !important; right: -1px !important;
+}
+.maplibregl-ctrl-bottom-right { right: var(--safe-right); bottom: var(--safe-bottom); }
+.maplibregl-canvas { outline: none; }
+.maplibregl-canvas-container.maplibregl-interactive { cursor: default; }
+.maplibregl-canvas-container.maplibregl-interactive:active { cursor: grabbing; }
