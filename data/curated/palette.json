@@ -1,0 +1,28 @@
+{
+  "_nota": "Paleta propia. El GTFS trae un color por sistema (rojo, verde, azul primarios). Troncal y dual toman el color de la primera letra de su código. Ver docs/DISENO.md del repositorio del Worker.",
+  "zones": {
+    "A": { "name": "Caracas", "color": "#4f6bed" },
+    "B": { "name": "Autonorte", "color": "#7cc242" },
+    "C": { "name": "Suba", "color": "#f2b705" },
+    "D": { "name": "Calle 80", "color": "#a066d3" },
+    "E": { "name": "NQS central", "color": "#b07d4f" },
+    "F": { "name": "Américas", "color": "#e5483b" },
+    "G": { "name": "NQS sur", "color": "#1fb5c9" },
+    "H": { "name": "Caracas sur", "color": "#f07f1d" },
+    "J": { "name": "Eje Ambiental", "color": "#d6b98c" },
+    "K": { "name": "Calle 26", "color": "#c99a5b" },
+    "L": { "name": "Carrera 10", "color": "#10a37f" },
+    "M": { "name": "Carrera 7", "color": "#e06aa8" },
+    "P": { "name": "Av. 68", "color": "#e07000" },
+    "S": { "name": "Soacha", "color": "#8f9bb3" },
+    "Z": { "name": "Tibanica", "color": "#7d8aa0" }
+  },
+  "numbered": "#eceff2",
+  "systems": {
+    "troncal": { "name": "Troncal", "color": "#e5483b" },
+    "dual": { "name": "Dual", "color": "#e06aa8" },
+    "alimentador": { "name": "Alimentador", "color": "#3fbf6f" },
+    "zonal": { "name": "Zonal", "color": "#3d8bfd" },
+    "cable": { "name": "TransMiCable", "color": "#e30613" }
+  }
+}
