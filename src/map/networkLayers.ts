@@ -40,7 +40,9 @@ export class NetworkLayers {
     m.addSource('routes-zonal', { type: 'geojson', data: empty(), tolerance: 0.6 });
     m.addSource('routes-core', { type: 'geojson', data: this.routesFC(['troncal', 'dual', 'cable']), tolerance: 0.3 });
     m.addSource('route-focus', { type: 'geojson', data: empty(), lineMetrics: true });
-    m.addSource('stations', { type: 'geojson', data: this.stationsFC() });
+    m.addSource('stations', { type: 'geojson', data: this.stationsFC(), promoteId: 'id' });
+    m.addSource('selected-place', { type: 'geojson', data: empty() });
+    m.addSource('user', { type: 'geojson', data: empty() });
     m.addSource('street-stops', { type: 'geojson', data: empty() });
 
     m.addLayer({
@@ -88,7 +90,22 @@ export class NetworkLayers {
         'icon-ignore-placement': true,
         'symbol-sort-key': ['case', ['==', ['get', 'kind'], 'portal'], 0, 1],
       },
-      paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 11, 1] },
+      paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 11, ['case', ['boolean', ['feature-state', 'dim'], false], 0.22, 1]] },
+    });
+    m.addLayer({
+      id: 'selected-place', type: 'symbol', source: 'selected-place',
+      layout: { 'icon-image': 'sel', 'icon-allow-overlap': true, 'icon-ignore-placement': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 17, 1.1] },
+    });
+    m.addLayer({
+      id: 'user-accuracy', type: 'circle', source: 'user',
+      paint: {
+        'circle-radius': ['interpolate', ['exponential', 2], ['zoom'], 10, ['/', ['get', 'acc'], 76], 20, ['*', ['get', 'acc'], 13]],
+        'circle-color': '#eceff2', 'circle-opacity': 0.06, 'circle-stroke-color': '#eceff2', 'circle-stroke-opacity': 0.25, 'circle-stroke-width': 1,
+      },
+    });
+    m.addLayer({
+      id: 'user', type: 'circle', source: 'user',
+      paint: { 'circle-radius': 5, 'circle-color': '#ffffff', 'circle-stroke-color': '#07090b', 'circle-stroke-width': 2.5 },
     });
     m.addLayer({
       id: 'stations-label', type: 'symbol', source: 'stations', minzoom: 12.5,
@@ -105,7 +122,7 @@ export class NetworkLayers {
         'symbol-sort-key': ['case', ['==', ['get', 'kind'], 'portal'], 0, 1],
       },
       paint: {
-        'text-color': ['case', ['get', 'closed'], '#4d5560', '#a3abb5'],
+        'text-color': ['case', ['get', 'closed'], '#4d5560', ['boolean', ['feature-state', 'dim'], false], '#3a414a', '#a3abb5'],
         'text-halo-color': BG, 'text-halo-width': 1.6,
       },
     });
@@ -127,6 +144,21 @@ export class NetworkLayers {
     (this.map.getSource('street-stops') as GeoJSONSource).setData({ type: 'FeatureCollection', features });
   }
 
+  /** Marca de selección (escuadras) sobre una estación o paradero; `null` la quita. */
+  setSelectedPlace(id: string | null) {
+    const s = id ? this.net.stations.get(id) ?? this.net.streetStops.get(id) : undefined;
+    (this.map.getSource('selected-place') as GeoJSONSource).setData(s
+      ? { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [s.lon, s.lat] } }] }
+      : empty());
+  }
+
+  setUserLocation(c: [number, number], accuracy: number) {
+    (this.map.getSource('user') as GeoJSONSource).setData({
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', properties: { acc: Math.min(accuracy, 500) }, geometry: { type: 'Point', coordinates: c } }],
+    });
+  }
+
   /** Sistemas ocultos por el filtro. */
   setHidden(hidden: Set<SystemKey>) {
     this.hidden = hidden;
@@ -142,6 +174,7 @@ export class NetworkLayers {
     if (!routeId) {
       src.setData(empty());
       this.applyFilters();
+      this.dimStations(null);
       return;
     }
     const r = this.net.routes.get(routeId);
@@ -152,6 +185,7 @@ export class NetworkLayers {
       features: [{ type: 'Feature', properties: { color: r.color }, geometry: { type: 'LineString', coordinates: coords(path.lonlat) } }],
     });
     this.applyFilters();
+    this.dimStations(r.id);
     const t0 = performance.now();
     const dur = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 900;
     const step = () => {
@@ -161,6 +195,13 @@ export class NetworkLayers {
       if (k < 1) this.drawAnim = requestAnimationFrame(step);
     };
     step();
+  }
+
+  /** Con una ruta en foco, las estaciones donde no para se atenúan. */
+  private dimStations(routeId: string | null) {
+    for (const s of this.net.stations.values()) {
+      this.map.setFeatureState({ source: 'stations', id: s.id }, { dim: !!routeId && !s.routes.includes(routeId) });
+    }
   }
 
   private applyFilters() {
@@ -223,6 +264,15 @@ export class NetworkLayers {
     this.map.addImage('st', make(9, '#dfe3e8', BG), { pixelRatio: 2 });
     this.map.addImage('st-portal', make(13, '#ffffff', BG), { pixelRatio: 2 });
     this.map.addImage('st-closed', make(9, '#4d5560', BG, true), { pixelRatio: 2 });
+    // Escuadras de selección: cuatro ángulos, el mismo gesto que el bus seleccionado.
+    const px = 64, c = new OffscreenCanvas(px, px), g = c.getContext('2d')!;
+    g.fillStyle = '#eceff2';
+    const arm = 14, th = 3;
+    for (const [x, y, sx, sy] of [[0, 0, 1, 1], [px, 0, -1, 1], [0, px, 1, -1], [px, px, -1, -1]]) {
+      g.fillRect(sx > 0 ? x : x - arm, sy > 0 ? y : y - th, arm, th);
+      g.fillRect(sx > 0 ? x : x - th, sy > 0 ? y : y - arm, th, arm);
+    }
+    this.map.addImage('sel', g.getImageData(0, 0, px, px), { pixelRatio: 2 });
   }
 }
 

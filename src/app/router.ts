@@ -1,0 +1,29 @@
+/** Vistas con dirección propia: cada una se puede compartir y el botón atrás funciona. */
+export type View =
+  | { kind: 'home' }
+  | { kind: 'route'; id: string }
+  | { kind: 'bus'; id: string }
+  | { kind: 'station'; id: string }
+  | { kind: 'stop'; id: string };
+
+const SEG: Record<View['kind'], string> = { home: '', route: 'ruta', bus: 'bus', station: 'estacion', stop: 'paradero' };
+const BY_SEG = Object.fromEntries(Object.entries(SEG).map(([k, v]) => [v, k])) as Record<string, View['kind']>;
+
+export function parse(hash = location.hash): View {
+  const m = /^#\/([a-z]+)\/(.+)$/.exec(hash);
+  const kind = m && BY_SEG[m[1]];
+  if (!m || !kind || kind === 'home') return { kind: 'home' };
+  return { kind, id: decodeURIComponent(m[2]) } as View;
+}
+
+export function href(v: View): string {
+  return v.kind === 'home' ? '#/' : `#/${SEG[v.kind]}/${encodeURIComponent(v.id)}`;
+}
+
+export function go(v: View, replace = false) {
+  const h = href(v);
+  if (location.hash === h) return;
+  if (replace) history.replaceState(null, '', h);
+  else location.hash = h;
+  if (replace) dispatchEvent(new HashChangeEvent('hashchange'));
+}

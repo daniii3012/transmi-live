@@ -39,6 +39,8 @@ export interface Bus {
   t1: number;
   /** Velocidad media reciente (m/s) a lo largo del recorrido. */
   speed: number | null;
+  /** Lecturas sobre el recorrido de los últimos 8 min (para el ritmo frente al horario). */
+  hist: { at: number; s: number }[];
   bornAt: number;
   /** Posición del último cuadro (metros) y rumbo (vector unitario este/norte). */
   x: number;
@@ -118,7 +120,7 @@ export class Fleet {
           id, label: d.label[i], plate: d.plate[i], routeId, route, path: this.net.paths.get(routeId), sys: route?.sys,
           fixX: x, fixY: y, fixAt, age, stopId: d.stop[i], seq: d.seq[i], start: d.start[i],
           onPath: false, offPath: Infinity, sFix: 0, s0: 0, s1: 0, x0: x, y0: y, x1: x, y1: y, t0: now, t1: now,
-          speed: null, bornAt: b ? b.bornAt : now, x, y, hx: 1, hy: 0, s: 0,
+          speed: null, hist: [], bornAt: b ? b.bornAt : now, x, y, hx: 1, hy: 0, s: 0,
         };
         if (b) { fresh.x = b.x; fresh.y = b.y; fresh.hx = b.hx; fresh.hy = b.hy; }
         this.place(fresh, x, y, fixAt, now, true);
@@ -159,6 +161,9 @@ export class Fleet {
         const teleport = !wasOn || target < cur || target - cur > MAX_JUMP;
         b.onPath = true;
         b.offPath = hit.d;
+        if (!wasOn || hit.s < b.sFix - HOLD_BACK) b.hist = [];
+        b.hist.push({ at: fixAt, s: Math.max(hit.s, b.hist.length ? b.hist[b.hist.length - 1].s : 0) });
+        while (b.hist.length > 2 && fixAt - b.hist[0].at > 8 * 60_000) b.hist.shift();
         b.sFix = hit.s;
         b.fixAt = fixAt;
         b.fixX = x;
