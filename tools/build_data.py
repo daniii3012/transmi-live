@@ -145,16 +145,41 @@ def band_of(start_s: int) -> int:
 SMALL = {'de', 'del', 'la', 'las', 'el', 'los', 'y', 'e', 'a', 'en'}
 
 
+# Abreviaturas de la nomenclatura de Bogotá que aparecen en los destinos.
+ABBR = [
+    (r'\bA[Kk]\b\.?', 'Av. Carrera'), (r'\bA[Cc]\b\.?', 'Av. Calle'),
+    (r'\b(?:KR|Kr|CRA|Cra|KRA|Kra)\b\.?', 'Carrera'), (r'\b(?:CLL|Cll|CL|Cl)\b\.?', 'Calle'),
+    (r'\b(?:DG|Dg)\b\.?', 'Diagonal'), (r'\b(?:TV|Tv)\b\.?', 'Transversal'), (r'\b(?:AV|Av)\b\.?(?!\.)', 'Av.'),
+]
+KEEP_UPPER = {'CAD', 'CDS', 'UAN', 'JFK', 'SENA', 'ETB', 'UPN', 'II', 'III', 'IV', 'CC', 'CL', 'NQS'}
+
+
 def nice(s: str) -> str:
-    """Nombre legible: sin mayúsculas sostenidas, «P.» → «Portal», «ElDorado» → «El Dorado»."""
+    """Nombre legible: sin mayúsculas sostenidas, «P.» → «Portal», nomenclatura desplegada
+    («KR 7 CLL 107A» → «Carrera 7 Calle 107A»)."""
     s = clean(s)
     s = re.sub(r'^P\.\s*', 'Portal ', s)
+    s = re.sub(r'^P\s+(?=[A-ZÁÉÍÓÚ])', 'Portal ', s)
     s = re.sub(r'^PElDorado$', 'Portal El Dorado', s)
     s = s.replace('ElDorado', 'El Dorado')
-    if s.isupper() or (sum(c.isupper() for c in s) > 0.7 * sum(c.isalpha() for c in s)):
-        words = s.lower().split(' ')
-        s = ' '.join(w if (k and w in SMALL) else w[:1].upper() + w[1:] for k, w in enumerate(words))
-    return s
+    words = s.split(' ')
+    out = []
+    for k, w in enumerate(words):
+        letters = [c for c in w if c.isalpha()]
+        if letters and all(c.isupper() for c in letters) and w not in KEEP_UPPER and (len(letters) >= 4 or not any(c.isdigit() for c in w)):
+            lw = w.lower()
+            w = lw if (k and lw in SMALL) else lw[:1].upper() + lw[1:]
+        out.append(w)
+    s = ' '.join(out)
+    s = re.sub(r'\b(?:CLL|CL|Cl)(?=\d)', 'Calle ', s)
+    s = re.sub(r'\b(?:KR|Kr|CRA)(?=\d)', 'Carrera ', s)
+    for pat, rep in ABBR:
+        s = re.sub(pat, rep, s)
+    s = re.sub(r'\b20 de julio\b', '20 de Julio', s)
+    # Destinos son nombres propios: palabras en minúscula de 4 letras o más, con mayúscula inicial.
+    s = re.sub(r'(?<=\s)([a-záéíóúñ])(?=[a-záéíóúñ]{3,}\b)', lambda m: m.group(1).upper(), s)
+    s = re.sub(r'\b(\d+)([a-z])\b', lambda m: m.group(1) + m.group(2).upper(), s)
+    return s.replace('Av.. ', 'Av. ')
 
 
 def short(name: str) -> str:
@@ -353,7 +378,7 @@ def main():
             parts = [nice(strip_code(x, all_codes)) for x in long_name.split('||')]
             dest, origin = parts[0], parts[-1]
         else:
-            dest = nice(long_name)
+            dest = nice(strip_code(long_name, all_codes))
             origin = place_of(pat[0]) if pat else None
         route_info.append({
             'id': rid, 'code': code, 'name': long_name, 'dest': dest, 'origin': origin, **({'loop': True} if loop else {}),
