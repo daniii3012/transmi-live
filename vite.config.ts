@@ -1,9 +1,64 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
   base: './',
-  plugins: [svelte()],
+  plugins: [
+    svelte(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      injectRegister: false,
+      includeAssets: ['favicon.svg', 'icons/apple-touch-icon.png'],
+      manifest: {
+        name: 'TransMi Live',
+        short_name: 'TransMi Live',
+        description: 'Todo TransMilenio en tiempo real sobre el mapa de Bogotá.',
+        lang: 'es-CO',
+        dir: 'ltr',
+        start_url: './',
+        scope: './',
+        display: 'standalone',
+        orientation: 'any',
+        background_color: '#07090b',
+        theme_color: '#07090b',
+        categories: ['travel', 'navigation', 'utilities'],
+        icons: [
+          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: 'icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+      },
+      workbox: {
+        // Armazón y fuentes en la precarga; los datos de la red y las teselas, en caché de uso.
+        globPatterns: ['**/*.{js,css,html,woff2,svg,png}'],
+        // Subconjuntos de letra que el español no usa: el navegador los pide solo si hacen falta.
+        globIgnores: ['data/**', '**/*-{cyrillic,cyrillic-ext,greek,vietnamese,symbols2}-*'],
+        navigateFallback: 'index.html',
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        cleanupOutdatedCaches: true,
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.includes('/data/') && url.pathname.endsWith('.json'),
+            handler: 'StaleWhileRevalidate',
+            options: { cacheName: 'red', expiration: { maxEntries: 20 } },
+          },
+          {
+            urlPattern: ({ url }) => url.hostname === 'tiles.openfreemap.org' && /\.pbf$/.test(url.pathname) && !url.pathname.startsWith('/fonts'),
+            handler: 'CacheFirst',
+            options: { cacheName: 'teselas', expiration: { maxEntries: 2500, maxAgeSeconds: 7 * 24 * 3600 }, cacheableResponse: { statuses: [0, 200] } },
+          },
+          {
+            urlPattern: ({ url }) => url.hostname === 'tiles.openfreemap.org' && (url.pathname.startsWith('/fonts') || url.pathname === '/planet'),
+            handler: 'StaleWhileRevalidate',
+            options: { cacheName: 'mapa-base', expiration: { maxEntries: 200, maxAgeSeconds: 30 * 24 * 3600 }, cacheableResponse: { statuses: [0, 200] } },
+          },
+          // El API en vivo nunca pasa por la caché: un dato viejo presentado como actual es peor que ninguno.
+        ],
+      },
+      devOptions: { enabled: false },
+    }),
+  ],
   server: { port: 5173, host: true },
   worker: { format: 'es' },
   build: { target: 'es2022', sourcemap: true, chunkSizeWarningLimit: 1200 },
