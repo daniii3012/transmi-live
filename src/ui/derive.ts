@@ -2,7 +2,7 @@ import type { Network } from '../data/network';
 import type { Fleet, Bus } from '../live/fleet';
 import { DROP_AGE } from '../live/fleet';
 import type { Route } from '../domain/types';
-import { bandIndex, bandTimes, timeAt, pace } from '../domain/eta';
+import { bandIndex, bandTimes, timeAt, pace, adjust } from '../domain/eta';
 import { bogotaSeconds, dayType } from '../domain/time';
 
 /** Buses por ruta, recalculado una vez por instantánea. */
@@ -46,7 +46,7 @@ export function arrivals(net: Network, fleet: Fleet, version: number, stopIds: S
       const k = idx.find((i) => p.s[i] > b.sFix + 8);
       if (k === undefined) continue;
       const fixAge = (now - b.fixAt) / 1000;
-      const sec = Math.max(0, (t[k] - timeAt(p, t, b.sFix)) * pace(p, t, b.hist) - fixAge);
+      const sec = Math.max(0, adjust(t[k] - timeAt(p, t, b.sFix), pace(p, t, b.hist)) - fixAge);
       if (sec > 75 * 60) continue;
       out.push({ route, bus: b, seconds: sec, meters: p.s[k] - b.sFix, stopId: p.stops[k] });
     }

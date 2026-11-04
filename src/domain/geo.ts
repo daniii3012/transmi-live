@@ -26,8 +26,11 @@ export class MetricPath {
   readonly y: Float64Array;
   readonly cum: Float64Array;
   readonly length: number;
+  readonly lonlat: Float64Array;
 
-  constructor(readonly lonlat: Float64Array) {
+  // Sin propiedades de parámetro: el dominio corre tal cual en Node (herramientas) y se puede portar.
+  constructor(lonlat: Float64Array) {
+    this.lonlat = lonlat;
     const n = lonlat.length / 2;
     this.x = new Float64Array(n);
     this.y = new Float64Array(n);

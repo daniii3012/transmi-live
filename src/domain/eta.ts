@@ -60,6 +60,17 @@ export function pace(p: Pattern, t: number[], hist: Sample[]): number {
 export interface Eta { index: number; stopId: string; s: number; seconds: number; meters: number }
 
 /**
+ * El ritmo observado vale para lo inmediato: se aplica solo a los primeros `PACE_SPAN` segundos (2 min) del
+ * horario y el resto va al ritmo del horario. Aplicado a todo el trayecto empeoraba los horizontes
+ * largos (validación con las lecturas del 16 sep.; ver PRUEBAS.md en el repositorio del Worker).
+ */
+export let PACE_SPAN = 120;
+export const setPaceSpan = (s: number) => (PACE_SPAN = s);
+
+/** Segundos del horario `sched` ajustados por el ritmo `k`. */
+export const adjust = (sched: number, k: number) => sched + (k - 1) * Math.min(sched, PACE_SPAN);
+
+/**
  * Llegadas estimadas a las paradas que le quedan al bus. `sFix` es la abscisa de la última lectura
  * y `fixAge` cuántos segundos han pasado desde ella: se descuentan.
  */
@@ -69,7 +80,7 @@ export function etas(p: Pattern, band: number, sFix: number, fixAge: number, k =
   const t0 = timeAt(p, t, sFix);
   const out: Eta[] = [];
   for (let i = nextStopIndex(p, sFix); i < p.stops.length && out.length < limit; i++) {
-    const sec = Math.max(0, (t[i] - t0) * k - fixAge);
+    const sec = Math.max(0, adjust(t[i] - t0, k) - fixAge);
     out.push({ index: i, stopId: p.stops[i], s: p.s[i], seconds: sec, meters: Math.max(0, p.s[i] - sFix) });
   }
   return out;
