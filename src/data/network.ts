@@ -31,17 +31,21 @@ export class Network {
   meta!: Meta;
   hash = '';
   bands: string[] = [];
+  /** Tramos de corredor troncal con su letra (o null si no se pudo deducir). */
+  corridors: { z: string | null; c: [number, number][] }[] = [];
   private patterns?: Record<string, Pattern>;
   private service?: Record<string, RouteService>;
   private pending = new Map<string, Promise<unknown>>();
 
   static async load(): Promise<Network> {
     const n = new Network();
-    const [meta, net, core] = await Promise.all([
+    const [meta, net, core, corr] = await Promise.all([
       getJSON<Meta>('meta.json'),
       getJSON<NetworkFile>('network.json'),
       getJSON<ShapesFile>('shapes-core.json'),
+      getJSON<{ segments: { z: string | null; c: [number, number][] }[] }>('corridors.json'),
     ]);
+    n.corridors = corr.segments;
     n.meta = meta;
     n.hash = net.hash;
     n.systems = net.systems;

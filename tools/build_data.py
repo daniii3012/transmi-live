@@ -310,6 +310,52 @@ def main():
             fl[1] = max(fl[1], start)
     del t_seq, t_stop, t_arr
 
+    # ── Corredores ───────────────────────────────────────────────────────────────────────────
+    # Los vagones troncales llevan la letra de su corredor en el código («B096» → Autonorte). Una
+    # estación de cruce tiene varias; el tramo entre dos estaciones toma la letra que comparten.
+    letters_of: dict[str, set] = defaultdict(set)
+    for s in stops:
+        par = s.get('parent_station')
+        m = re.match(r'^([A-HJ-MS])\d{2,4}T?$', s.get('stop_code') or '')
+        if par and m:
+            letters_of[par].add(m.group(1))
+
+    def letters(si: int) -> set:
+        sid = stops[si]['stop_id']
+        return letters_of.get(parent.get(sid, sid), set())
+
+    corridor_segments: dict[tuple, dict] = {}
+
+    def route_letters(pat) -> list:
+        """Letra de corredor de cada tramo del patrón. Primero la que comparten las dos estaciones (o la
+        única que tiene una si la otra no tiene ninguna); luego los tramos sin letra la toman de sus
+        vecinos sobre la misma ruta, si coinciden o si solo uno la tiene."""
+        out = []
+        for k in range(len(pat) - 1):
+            a, b = letters(pat[k]), letters(pat[k + 1])
+            common = a & b
+            if len(common) == 1:
+                out.append(next(iter(common)))
+            elif not common and len(a) == 1 and not b:
+                out.append(next(iter(a)))
+            elif not common and len(b) == 1 and not a:
+                out.append(next(iter(b)))
+            else:
+                out.append(None)
+        for _ in range(3):
+            for k, z in enumerate(out):
+                if z:
+                    continue
+                left = next((out[j] for j in range(k - 1, -1, -1) if out[j]), None)
+                right = next((out[j] for j in range(k + 1, len(out)) if out[j]), None)
+                if left and right and left == right:
+                    out[k] = left
+                elif left and not right:
+                    out[k] = left
+                elif right and not left:
+                    out[k] = right
+        return out
+
     # ── Salidas por ruta ─────────────────────────────────────────────────────────────────────
     all_codes = {clean(r['route_short_name']) for r in routes}
 
@@ -330,7 +376,13 @@ def main():
         sys_key, sub = SYSTEM_BY_AGENCY.get(r['agency_id'], ('zonal', None))
         code = clean(r['route_short_name'])
         zl = zone_letter(code) if sys_key in ('troncal', 'dual') else None
-        if sys_key in ('troncal', 'dual'):
+        if sys_key == 'troncal' and not zl and pat_count.get(ri):
+            # Servicios numerados: el color de la troncal de su destino (no blanco: se confundía
+            # con las estaciones). Si la estación de destino es de cruce, la del último tramo conocido.
+            seq = route_letters(pat_count[ri].most_common(1)[0][0])
+            zl_dest = next((z for z in reversed(seq) if z), None)
+            color = palette['zones'][zl_dest]['color'] if zl_dest in palette['zones'] else palette['numbered']
+        elif sys_key in ('troncal', 'dual'):
             color = palette['zones'][zl]['color'] if zl in palette['zones'] else palette['numbered']
         else:
             color = palette['systems'][sys_key]['color']
@@ -354,6 +406,23 @@ def main():
                     stops_s.append(round(hit[0]))
                     max_off.append(hit[1])
                     seg = hit[2]
+            if sys_key == 'troncal' and shp and len(stops_s) == len(pat):
+                seq = route_letters(pat)
+                for k in range(len(pat) - 1):
+                    letter = seq[k]
+                    pa = parent.get(stops[pat[k]]['stop_id'], stops[pat[k]]['stop_id'])
+                    pb = parent.get(stops[pat[k + 1]]['stop_id'], stops[pat[k + 1]]['stop_id'])
+                    key = tuple(sorted((pa, pb)))
+                    if key in corridor_segments or pa == pb:
+                        continue
+                    s0, s1 = stops_s[k], stops_s[k + 1]
+                    if s1 - s0 < 5 or s1 - s0 > 6000:
+                        continue
+                    ll, m, cum = shp
+                    seg = [p for p, c in zip(ll, cum) if s0 <= c <= s1]
+                    if len(seg) < 2:
+                        continue
+                    corridor_segments[key] = {'z': letter, 'c': [[round(x, 6), round(y, 6)] for x, y in seg]}
             for si in pat:
                 stop_routes[si].add(ri)
                 if stops[si]['stop_id'] in parent:
@@ -483,6 +552,7 @@ def main():
     core = {r['id'] for r in route_info if r['sys'] in ('troncal', 'dual', 'cable')}
     write('shapes-core.json', {'v': 1, 'hash': digest, 'scale': E6, 'shapes': {k: v for k, v in shapes_out.items() if k in core}})
     write('shapes-zonal.json', {'v': 1, 'hash': digest, 'scale': E6, 'shapes': {k: v for k, v in shapes_out.items() if k not in core}})
+    write('corridors.json', {'v': 1, 'hash': digest, 'segments': list(corridor_segments.values())})
     write('stops.json', {'v': 1, 'hash': digest, 'cols': ['id', 'code', 'name', 'lon', 'lat', 'routes'], 'stops': street})
     write('patterns.json', {'v': 1, 'hash': digest, 'bands': [k for _, _, k in BANDS], 'patterns': patterns_out})
     write('service.json', {'v': 1, 'hash': digest, 'service': service_out})
