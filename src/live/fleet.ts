@@ -72,7 +72,10 @@ const SIZE: Record<SystemKey, number> = { troncal: 1, dual: 1, alimentador: 0.68
  * se estima por el tipo de servicio (urbano, padrón de 12 m; complementario, busetón de ~10 m;
  * especial, buseta de ~8,5 m, la de las rutas de ladera). */
 function sizeOf(b: Bus): number {
+  // Por el tipo del bus: biarticulado 27 m, articulado y articulado dual 18 m, padrón dual 12 m.
   if (b.kind === 'biarticulated') return 1.5;
+  if (b.kind === 'articulated' || b.kind === 'dual-articulated') return 1;
+  if (b.kind === 'dual' || b.sys === 'dual') return 0.67;
   if (b.sys === 'zonal') return b.route?.sub === 'especial' ? 0.47 : b.route?.sub === 'complementario' ? 0.56 : 0.66;
   return b.sys ? SIZE[b.sys] : 0.66;
 }
@@ -153,7 +156,7 @@ export class Fleet {
       if (!b || b.routeId !== routeId) {
         const route = this.net.routes.get(routeId);
         const fresh: Bus = {
-          id, label: d.label[i], plate: d.plate[i], routeId, route, path: this.net.paths.get(routeId), sys: route?.sys, kind: busKind(d.label[i]),
+          id, label: d.label[i], plate: d.plate[i], routeId, route, path: this.net.paths.get(routeId), sys: route?.sys, kind: busKind(d.label[i], route?.code),
           fixX: x, fixY: y, fixAt, age, stopId: d.stop[i], seq: d.seq[i], start: d.start[i],
           onPath: false, offPath: Infinity, sFix: 0, s0: 0, s1: 0, x0: x, y0: y, x1: x, y1: y, t0: now, t1: now,
           speed: null, hist: [], bornAt: b ? b.bornAt : now, pingAt: 0, seed: seedOf(id), x, y, hx: 1, hy: 0, s: 0,

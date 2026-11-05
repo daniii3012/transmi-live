@@ -42,6 +42,10 @@ biarticulado de 27 m.
 - **Volvo B340M y Gran Artic 300**, **Scania K**, **Mercedes-Benz O500** — chasis articulados y
   biarticulados. <https://www.volvobuses.com>
 - **BYD** — buses eléctricos de la flota zonal y troncal (modelo pendiente). <https://www.byd.com>
+- **Tipo de bus por numeración** — clasificación propia (lecturas de la flota, trabajo previo del
+  simulador), afinada con la flota en vivo y con las notas de la Alcaldía sobre los padrones duales y los
+  articulados duales eléctricos de 2026.
+  <https://bogota.gov.co/mi-ciudad/movilidad/bogota-pone-rodar-50-buses-duales-articulados-electricos-en-2026>
 
 ## Trabajo previo
 

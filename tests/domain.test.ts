@@ -5,6 +5,7 @@ import { beforeEach } from 'vitest';
 import { textOn, ago, meters } from '../src/domain/time';
 import type { Pattern } from '../src/domain/types';
 import { undeltaPatterns } from '../src/domain/patterns';
+import { busKind } from '../src/domain/fleetTypes';
 
 // Recorrido recto hacia el este de 1.000 m, en lon/lat alrededor de Bogotá.
 const lon0 = -74.1, lat0 = 4.65;
@@ -103,5 +104,17 @@ describe('patrones v2', () => {
     expect(f.v).toBe(1);
     // Una segunda llamada no vuelve a sumar.
     expect(undeltaPatterns(f).r.s).toEqual([0, 500, 1200]);
+  });
+});
+
+describe('tipo de bus', () => {
+  it('por la serie de la etiqueta y, si no, por la ruta', () => {
+    expect(busKind('BO0905')).toBe('dual-articulated');
+    expect(busKind('KE0912')).toBe('dual-articulated');
+    expect(busKind('D0520')).toBe('dual');
+    expect(busKind('T10410')).toBe('biarticulated');
+    expect(busKind('A10050')).toBe('articulated');
+    expect(busKind('X9999')).toBeNull();
+    expect(busKind('X9999', 'B74')).toBe('articulated');
   });
 });

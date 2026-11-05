@@ -1,5 +1,5 @@
 {
- "_nota": "Tipo de bus por la etiqueta de flota (serie y número). Clasificación propia del simulador a partir de las lecturas de posición: ninguna fuente publica la carrocería. Fuera de estos rangos, sin clasificar.",
+ "_nota": "Tipo de bus por la etiqueta de flota (serie y número). Clasificación propia del simulador a partir de las lecturas de posición (ninguna fuente publica la carrocería), afinada el 5 nov. 2026 con la flota en vivo: las series BO900 y KE900 (placas QWW/QWX, nuevas) atienden solo la FZ63 y son los 50 articulados duales eléctricos de 2026; D500, E700 y N500–N600 atienden las duales clásicas y son padrones duales de 12 m. Fuera de estos rangos se usa el tipo de la ruta (`routes`, observado en septiembre) y, si tampoco, el de su sistema.",
  "types": {
   "articulated": {
    "name": "Articulado",
@@ -10,7 +10,11 @@
    "length": 27
   },
   "dual": {
-   "name": "Dual",
+   "name": "Padrón dual",
+   "length": 12
+  },
+  "dual-articulated": {
+   "name": "Articulado dual eléctrico",
    "length": 18
   }
  },
@@ -164,7 +168,7 @@
    ]
   },
   "BO": {
-   "dual": [
+   "dual-articulated": [
     [
      900,
      999
@@ -172,12 +176,112 @@
    ]
   },
   "KE": {
-   "dual": [
+   "dual-articulated": [
     [
      900,
      999
     ]
    ]
   }
+ },
+ "routes": {
+  "1": "articulated",
+  "2": "biarticulated",
+  "3": "articulated",
+  "4": "articulated",
+  "5": "articulated",
+  "6": "articulated",
+  "7": "articulated",
+  "8": "articulated",
+  "A52": "articulated",
+  "A60": "biarticulated",
+  "A61": "articulated",
+  "B10": "biarticulated",
+  "B11": "biarticulated",
+  "B12": "biarticulated",
+  "B13": "articulated",
+  "B16": "biarticulated",
+  "B18": "biarticulated",
+  "B23": "articulated",
+  "B26": "biarticulated",
+  "B27": "biarticulated",
+  "B28": "biarticulated",
+  "B46": "biarticulated",
+  "B50": "articulated",
+  "B55": "articulated",
+  "B72": "articulated",
+  "B74": "articulated",
+  "B75": "biarticulated",
+  "C15": "biarticulated",
+  "C17": "articulated",
+  "C19": "biarticulated",
+  "C25": "biarticulated",
+  "C30": "biarticulated",
+  "C50": "articulated",
+  "C73": "biarticulated",
+  "D10": "biarticulated",
+  "D20": "biarticulated",
+  "D21": "biarticulated",
+  "D22": "biarticulated",
+  "D24": "biarticulated",
+  "D55": "articulated",
+  "E32": "biarticulated",
+  "E42": "biarticulated",
+  "E48": "articulated",
+  "F19": "biarticulated",
+  "F23": "biarticulated",
+  "F26": "biarticulated",
+  "F28": "biarticulated",
+  "F32": "biarticulated",
+  "F51": "biarticulated",
+  "F60": "biarticulated",
+  "G11": "biarticulated",
+  "G12": "biarticulated",
+  "G22": "biarticulated",
+  "G30": "biarticulated",
+  "G45": "articulated",
+  "G47": "biarticulated",
+  "G52": "articulated",
+  "G53": "biarticulated",
+  "H13": "articulated",
+  "H15": "biarticulated",
+  "H17": "articulated",
+  "H20": "biarticulated",
+  "H21": "biarticulated",
+  "H27": "biarticulated",
+  "H54": "biarticulated",
+  "H72": "articulated",
+  "H75": "biarticulated",
+  "H76": "biarticulated",
+  "H83": "articulated",
+  "J23": "biarticulated",
+  "J24": "biarticulated",
+  "J70": "articulated",
+  "J73": "biarticulated",
+  "J74": "articulated",
+  "J76": "biarticulated",
+  "K10": "biarticulated",
+  "K16": "biarticulated",
+  "K23": "articulated",
+  "K43": "biarticulated",
+  "K53": "biarticulated",
+  "K54": "biarticulated",
+  "L10": "biarticulated",
+  "L18": "biarticulated",
+  "L25": "biarticulated",
+  "L41": "biarticulated",
+  "M47": "biarticulated",
+  "M51": "biarticulated",
+  "M83": "articulated",
+  "S41": "biarticulated",
+  "S42": "biarticulated",
+  "S43": "biarticulated",
+  "S45": "articulated",
+  "S46": "biarticulated",
+  "S48": "articulated",
+  "Z61": "articulated",
+  "F63": "dual-articulated",
+  "Z63": "dual-articulated",
+  "FZ63": "dual-articulated"
  }
 }
