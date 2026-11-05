@@ -23,6 +23,11 @@ export default defineConfig({
         background_color: '#07090b',
         theme_color: '#07090b',
         categories: ['travel', 'navigation', 'utilities'],
+        // Accesos directos al mantener presionado el ícono (Android, escritorio; iOS no los muestra).
+        shortcuts: [
+          { name: 'Planear un viaje', short_name: 'Planear', url: './#/planear', icons: [{ src: 'icons/icon-192.png', sizes: '192x192' }] },
+          { name: 'Estaciones y paraderos cerca de mí', short_name: 'Cerca de mí', url: './?cerca=1#/', icons: [{ src: 'icons/icon-192.png', sizes: '192x192' }] },
+        ],
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },

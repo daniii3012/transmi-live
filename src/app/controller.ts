@@ -100,6 +100,13 @@ export class Controller {
     const alerts = async () => { if (!document.hidden) { const a = await fetchAlerts(apiBase()); if (a) app.alerts = a; } };
     void alerts();
     this.alertsTimer = window.setInterval(alerts, 60_000);
+    // Acceso directo «Cerca de mí» del ícono instalado (?cerca=1): se ubica y se quita el parámetro.
+    const q = new URLSearchParams(location.search);
+    if (q.has('cerca')) {
+      q.delete('cerca');
+      history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`);
+      void this.locate();
+    }
     // Con la cámara guardada para esta misma vista, no se reencuadra al abrir.
     const cam = loadPrefs().camera;
     this.apply(app.view, true, this.restored && cam?.hash === (location.hash || ''));

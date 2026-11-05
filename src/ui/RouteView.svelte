@@ -3,7 +3,8 @@
   import { app } from '../app/store.svelte';
   import { go } from '../app/router';
   import { busesByRoute, frequencyNow } from './derive';
-  import { clock, fmtNum, meters, ago } from '../domain/time';
+  import { clock, fmtNum, meters, ago, bogotaSeconds } from '../domain/time';
+  import { bandIndex, bandTimes } from '../domain/eta';
   import RouteBadge from './RouteBadge.svelte';
   import Back from './Back.svelte';
   import Star from './Star.svelte';
@@ -29,6 +30,14 @@
   const freq = $derived.by(() => {
     void app.now;
     return serviceReady ? frequencyNow(net, id, app.now) : null;
+  });
+  /** Buses que el horario espera en servicio ahora: salidas por hora × duración del viaje (franja
+   * actual). Es una estimación: compararla con los buses en vía dice si la ruta va como debería. */
+  const expected = $derived.by(() => {
+    if (!freq?.perHour || !pattern) return null;
+    const t = bandTimes(pattern, bandIndex(bogotaSeconds(app.now)));
+    if (!t?.length) return null;
+    return Math.max(1, Math.round((freq.perHour * t[t.length - 1]) / 3600));
   });
   const others = $derived(route?.pair?.map((p) => net.routes.get(p)!).filter(Boolean) ?? []);
   const alerts = $derived(app.alerts.filter((a) => a.routes.includes(id)));
@@ -96,6 +105,7 @@
       <p class="sched faint">
         {#if freq.first != null}Hoy de <span class="num">{clock(freq.first)}</span> a <span class="num">{clock(freq.last ?? 0)}</span>{:else}Sin servicio programado hoy{/if}
         {#if freq.perHour}· <span class="num">{freq.perHour}</span> salidas esta hora{/if}
+        {#if expected}· el horario espera <span class="num">~{expected}</span> en vía{/if}
       </p>
     {/if}
 
