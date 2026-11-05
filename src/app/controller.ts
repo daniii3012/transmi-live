@@ -374,9 +374,10 @@ export class Controller {
     const tick = (t: number) => {
       if (!app.following) return;
       const b = this.selectedBus();
-      // A 30 cuadros por segundo y solo si el bus se movió: la cámara no fuerza cuadros de más (R1.17).
+      // Solo si el bus se movió: la cámara no fuerza cuadros de más (R1.17).
       const busy = this.flying || this.gesture || this.pointers.size > 0 || this.map.isMoving();
-      if (b && !busy && t - last > 30) {
+      // 20 cuadros por segundo bastan bajo z17,5 (el mapa avanza < 0,5 px por paso); 30 más cerca.
+      if (b && !busy && t - last > (this.map.getZoom() >= 17.5 ? 30 : 48)) {
         this.fleet.update(Date.now());
         if (Math.abs(b.x - lx) + Math.abs(b.y - ly) > 0.05) {
           lx = b.x; ly = b.y; last = t;
