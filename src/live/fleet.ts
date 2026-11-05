@@ -45,12 +45,23 @@ export interface Bus {
   /** Lecturas sobre el recorrido de los últimos 8 min (para el ritmo frente al horario). */
   hist: { at: number; s: number }[];
   bornAt: number;
+  /** Hora de la última lectura nueva (para la onda de actualización) y desfase propio (0–1), para
+   * que las ondas de una instantánea no salgan todas a la vez. */
+  pingAt: number;
+  seed: number;
   /** Posición del último cuadro (metros) y rumbo (vector unitario este/norte). */
   x: number;
   y: number;
   hx: number;
   hy: number;
   s: number;
+}
+
+/** Número estable en [0, 1) a partir del id del bus. */
+function seedOf(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  return (h >>> 0) / 4294967296;
 }
 
 const hexRGB = (hex: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
@@ -88,7 +99,9 @@ export class Fleet {
   /** Estelas para toda la flota (si no, solo la ruta en foco y el seleccionado). */
   trails = false;
   /** Buffer intercalado para la capa WebGL. */
-  static readonly STRIDE = 10;
+  static readonly STRIDE = 11;
+  /** Buses que llegan pronto a la estación abierta: se marcan con una onda suave. */
+  arriving = new Set<string>();
   private buf = new Float32Array(1024 * Fleet.STRIDE);
   private colors = new Map<string, [number, number, number]>();
   private lastFeedAt = 0;
@@ -127,7 +140,7 @@ export class Fleet {
           id, label: d.label[i], plate: d.plate[i], routeId, route, path: this.net.paths.get(routeId), sys: route?.sys, kind: busKind(d.label[i]),
           fixX: x, fixY: y, fixAt, age, stopId: d.stop[i], seq: d.seq[i], start: d.start[i],
           onPath: false, offPath: Infinity, sFix: 0, s0: 0, s1: 0, x0: x, y0: y, x1: x, y1: y, t0: now, t1: now,
-          speed: null, hist: [], bornAt: b ? b.bornAt : now, x, y, hx: 1, hy: 0, s: 0,
+          speed: null, hist: [], bornAt: b ? b.bornAt : now, pingAt: 0, seed: seedOf(id), x, y, hx: 1, hy: 0, s: 0,
         };
         if (b) { fresh.x = b.x; fresh.y = b.y; fresh.hx = b.hx; fresh.hy = b.hy; }
         this.place(fresh, x, y, fixAt, now, true);
@@ -140,6 +153,7 @@ export class Fleet {
       b.stopId = d.stop[i];
       b.seq = d.seq[i];
       b.start = d.start[i];
+      b.pingAt = now;
       this.place(b, x, y, fixAt, now, false);
     }
     for (const id of this.buses.keys()) if (!seen.has(id)) this.buses.delete(id);
@@ -222,7 +236,7 @@ export class Fleet {
    * rumbo del segmento, suavizado en el tiempo (las esquinas giran en ~120 ms, sin saltos).
    * Devuelve si algún bus sigue en movimiento (para pedir otro cuadro).
    */
-  update(now = Date.now()): boolean {
+  update(now = Date.now(), box?: [number, number, number, number]): boolean {
     // Dos capas (atenuados debajo del foco, el resto encima) piden el mismo cuadro: se calcula una vez.
     if (this.lastUpdate && now - this.lastUpdate < 4) return this.lastMoving;
     const dt = this.lastUpdate ? Math.min(200, now - this.lastUpdate) : 1000;
@@ -230,6 +244,8 @@ export class Fleet {
     const k = 1 - Math.exp(-dt / 120);
     let moving = false;
     for (const b of this.buses.values()) {
+      // Fuera de la vista no se calcula (se pone al día cuando entra; su posición solo depende del tiempo).
+      if (box && (b.fixX < box[0] || b.fixX > box[2] || b.fixY < box[1] || b.fixY > box[3]) && b.id !== this.selectedId) continue;
       if (now < b.t1) moving = true;
       if (b.onPath && b.path) {
         const s = this.sAt(b, now);
@@ -273,6 +289,11 @@ export class Fleet {
     return dist / ((b.t1 - b.t0) / 1000) > 2;
   }
 
+  /** ¿Hay ondas de actualización en curso? (lectura nueva hace menos de ~1,8 s) */
+  pinging(now = Date.now()): boolean {
+    return now - this.lastFeedAt < 1800;
+  }
+
   /** ¿Algún bus se está desvaneciendo (aparece o reaparece)? */
   animating(now = Date.now()): boolean {
     for (const b of this.buses.values()) if (now - b.bornAt < 650) return true;
@@ -298,7 +319,7 @@ export class Fleet {
    * atenuados primero y el seleccionado al final (se dibuja encima). Devuelve cuántos hay.
    * Banderas: 1 atenuado, 2 lectura vieja, 4 seleccionado, 8 bajo el cursor, 16 estela, 32 de la ruta en foco.
    */
-  fill(now = Date.now(), only: 'all' | 'dim' | 'main' = 'all'): { data: Float32Array; count: number } {
+  fill(now = Date.now(), only: 'all' | 'dim' | 'main' = 'all', box?: [number, number, number, number]): { data: Float32Array; count: number } {
     const S = Fleet.STRIDE;
     if (this.buf.length < this.buses.size * S) this.buf = new Float32Array(Math.ceil(this.buses.size * 1.5) * S);
     const out = this.buf;
@@ -321,8 +342,12 @@ export class Fleet {
       out[o + 7] = Math.min(1, (now - b.bornAt) / 600);
       out[o + 8] = (b.sys ? SIZE[b.sys] : 0.66) * (b.kind === 'biarticulated' ? 1.5 : 1); // 27 m frente a 18
       out[o + 9] = flags;
+      // Onda de actualización: 0–1 durante ~1 s tras la lectura, con desfase propio; −1 si no.
+      const ping = (now - b.pingAt) / 1000 - b.seed * 0.7;
+      out[o + 10] = b.pingAt && ping >= 0 && ping < 1.1 ? ping / 1.1 : -1;
       n++;
     };
+    const inView = (b: Bus) => !box || (b.x >= box[0] && b.x <= box[2] && b.y >= box[1] && b.y <= box[3]);
     // Pasadas: atenuados abajo; luego zonal y alimentador; encima troncal, dual y cable.
     const major = (b: Bus) => b.sys === 'troncal' || b.sys === 'dual' || b.sys === 'cable';
     for (let pass = only === 'main' ? 1 : 0; pass < (only === 'dim' ? 1 : 3); pass++) {
@@ -330,11 +355,12 @@ export class Fleet {
         if (b.age > DROP_AGE) continue;
         if (b.sys && this.hidden.has(b.sys)) continue;
         if (b.id === this.selectedId) { selected = b; continue; }
+        if (!inView(b)) continue;
         const dim = anyFocus && !inFocus(b);
         if ((pass === 0) !== dim) continue;
         if (pass > 0 && (pass === 2) !== major(b)) continue;
         const trail = !dim && (this.trails || (anyFocus && inFocus(b))) && this.moving(b, now);
-        write(b, (dim ? 1 : 0) | (b.age > STALE_AGE ? 2 : 0) | (b.id === this.hoverId ? 8 : 0) | (trail ? 16 : 0) | (anyFocus && !dim ? 32 : 0));
+        write(b, (dim ? 1 : 0) | (b.age > STALE_AGE ? 2 : 0) | (b.id === this.hoverId ? 8 : 0) | (trail ? 16 : 0) | (anyFocus && !dim ? 32 : 0) | (this.arriving.has(b.id) ? 64 : 0));
       }
     }
     if (selected && only !== 'dim') write(selected, 4 | (selected.age > STALE_AGE ? 2 : 0) | (this.moving(selected, now) ? 16 : 0));

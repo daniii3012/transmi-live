@@ -1,10 +1,20 @@
 import type { CustomLayerInterface, CustomRenderMethodInput, Map as MLMap } from 'maplibre-gl';
 import { Fleet, ORIGIN } from '../live/fleet';
+import { KX, KY } from '../domain/geo';
 
 /**
- * Buses en una capa WebGL propia (decisiones/005): un quad instanciado por bus, forma y estado en el
- * shader con campos de distancia. Tamaño en píxeles con un mínimo legible y, al acercarse, a escala
- * real (18 m un articulado). Coordenadas relativas a un origen en Bogotá para no perder precisión.
+ * Buses en una capa WebGL propia (decisiones/005), revisión R1:
+ *
+ *  - Silueta apoyada en el suelo: las esquinas se calculan en coordenadas mercator, así que en 3D el
+ *    bus se inclina con la calle en vez de quedar plano frente a la cámara.
+ *  - Forma: a escala de ciudad un punto con un «ojo» hacia donde avanza; al acercarse se alarga en
+ *    cápsula hasta su tamaño real (18 m un articulado, 27 m un biarticulado).
+ *  - Ondas: continuas para el seguido, una sutil al llegar cada lectura, suaves para los próximos en
+ *    llegar a la estación abierta.
+ *  - Prueba de profundidad compartida: edificios y viaducto los tapan.
+ *
+ * Rendimiento: cuadros según el zoom (a escala de ciudad un bus avanza menos de un píxel por cuadro) y
+ * solo los buses a la vista.
  */
 
 const VS = `#version 300 es
@@ -15,52 +25,50 @@ layout(location=2) in vec2 a_dir;
 layout(location=3) in vec4 a_color;
 layout(location=4) in float a_size;
 layout(location=5) in float a_flags;
+layout(location=6) in float a_ping;
 uniform mat4 u_matrix;
-uniform vec2 u_viewport;
+uniform float u_mpp;
 uniform float u_ppm;
-uniform float u_dpr;
 uniform float u_zf;
+uniform float u_el;
 out vec2 v_local;
 out vec2 v_half;
 out vec4 v_color;
 out float v_flags;
-out float v_pad;
 out float v_tail;
 out float v_size;
+out float v_ping;
+
+bool bit(float f, float b) { return mod(floor(f / b), 2.0) >= 1.0; }
 
 void main() {
-  v_size = a_size;
   float flags = a_flags;
-  bool dim = mod(flags, 2.0) >= 1.0;
-  bool selected = mod(floor(flags / 4.0), 2.0) >= 1.0;
-  vec4 c0 = u_matrix * vec4(a_pos, 0.0, 1.0);
-  vec4 c1 = u_matrix * vec4(a_pos + a_dir * 2e-6, 0.0, 1.0);
-  vec2 s0 = c0.xy / c0.w * u_viewport * 0.5;
-  vec2 s1 = c1.xy / c1.w * u_viewport * 0.5;
-  vec2 d = s1 - s0;
-  vec2 fwd = length(d) > 1e-6 ? normalize(d) : vec2(1.0, 0.0);
+  bool dim = bit(flags, 1.0);
+  bool selected = bit(flags, 4.0);
+  bool trail = bit(flags, 16.0);
+  bool focused = bit(flags, 32.0);
+  bool arriving = bit(flags, 64.0);
+  float k = dim ? 0.8 : (focused || selected ? 1.25 : 1.0);
+  float d = mix(4.6, 8.0, u_zf) * mix(0.82, 1.0, min(a_size, 1.0)) * k;
+  float realL = 18.0 * a_size * u_ppm, realW = 2.55 * u_ppm;
+  float len = mix(d, max(d * 1.9, realL), u_el);
+  float wid = mix(d, max(d * 0.92, realW), u_el);
+  float halfL = len * 0.5, halfW = wid * 0.5;
+  float pad = selected ? 44.0 : arriving ? 26.0 : a_ping >= 0.0 ? 22.0 : 3.0;
+  float tail = trail ? max(30.0, len * 3.0) : 0.0;
+  float lx = a_corner.x < 0.0 ? -(halfL + max(pad, tail)) : halfL + pad;
+  float ly = a_corner.y * (halfW + pad);
+  vec2 fwd = normalize(a_dir);
   vec2 side = vec2(-fwd.y, fwd.x);
-  float k = dim ? 0.78 : 1.0;
-  // Mínimos legibles que crecen con el zoom (u_zf: 0 en z10, 1 en z15); más cerca, escala real.
-  float minLen = mix(7.0, 18.0, u_zf) * mix(0.72, 1.0, a_size);
-  float minWid = mix(4.5, 10.0, u_zf) * mix(0.86, 1.0, a_size);
-  float len = max(minLen * u_dpr, 18.0 * a_size * u_ppm) * k;
-  float wid = max(minWid * u_dpr, 2.55 * u_ppm) * k;
-  float pad = (selected ? 9.0 : 2.0) * u_dpr;
-  bool trail = mod(floor(flags / 16.0), 2.0) >= 1.0;
-  // Con estela, el quad se alarga hacia atrás: la cola ocupa ~3 largos de bus, mínimo 36 px.
-  float tail = trail ? max(36.0 * u_dpr, len * 3.0) : 0.0;
-  vec2 h = vec2(len * 0.5 + pad, wid * 0.5 + pad);
-  float x0 = -h.x - tail, x1 = h.x;
-  float lx = a_corner.x < 0.0 ? x0 : x1;
-  vec2 off = fwd * lx + side * a_corner.y * h.y;
-  gl_Position = vec4((s0 + off) / (u_viewport * 0.5) * c0.w, c0.z, c0.w);
-  v_local = vec2(lx, a_corner.y * h.y);
-  v_tail = tail;
-  v_half = vec2(len, wid) * 0.5;
+  vec2 world = a_pos + (fwd * lx + side * ly) * u_mpp;
+  gl_Position = u_matrix * vec4(world, 0.0, 1.0);
+  v_local = vec2(lx, ly);
+  v_half = vec2(halfL, halfW);
   v_color = a_color;
   v_flags = flags;
-  v_pad = pad;
+  v_tail = tail;
+  v_size = a_size;
+  v_ping = a_ping;
 }`;
 
 const FS = `#version 300 es
@@ -69,64 +77,88 @@ in vec2 v_local;
 in vec2 v_half;
 in vec4 v_color;
 in float v_flags;
-in float v_pad;
 in float v_tail;
 in float v_size;
-uniform float u_dpr;
+in float v_ping;
 uniform float u_zf;
+uniform float u_time;
+uniform vec3 u_rim;
+uniform vec3 u_light;
+uniform vec3 u_mute;   // hacia dónde se apagan atenuados y zonal lejano (según el tema)
 out vec4 frag;
 
-// Distancia con signo (px) a la silueta: cuerpo recto y trompa que se angosta en el 30 % delantero.
-float body(vec2 p, vec2 h) {
-  float nose = h.x * 0.4;
-  float x0 = h.x - nose;
-  float w = h.y * (p.x > x0 ? mix(1.0, 0.38, (p.x - x0) / nose) : 1.0);
-  return max(abs(p.x) - h.x, abs(p.y) - w);
+bool bit(float f, float b) { return mod(floor(f / b), 2.0) >= 1.0; }
+
+float capsule(vec2 p, vec2 h) {
+  float hx = max(h.x - h.y, 0.0);
+  vec2 q = vec2(max(abs(p.x) - hx, 0.0), p.y);
+  return length(q) - h.y;
 }
 
 void main() {
   float flags = v_flags;
-  bool dim = mod(flags, 2.0) >= 1.0;
-  bool stale = mod(floor(flags / 2.0), 2.0) >= 1.0;
-  bool selected = mod(floor(flags / 4.0), 2.0) >= 1.0;
-  bool hover = mod(floor(flags / 8.0), 2.0) >= 1.0;
-  bool focused = mod(floor(flags / 32.0), 2.0) >= 1.0;
+  bool dim = bit(flags, 1.0);
+  bool stale = bit(flags, 2.0);
+  bool selected = bit(flags, 4.0);
+  bool hover = bit(flags, 8.0);
+  bool focused = bit(flags, 32.0);
+  bool arriving = bit(flags, 64.0);
   vec3 base = v_color.rgb;
-  vec3 streak = base;
-  // Bus de la ruta en foco: cuerpo claro, para leerse sobre su propio trazo resaltado.
-  if (focused || selected) base = mix(base, vec3(0.96), 0.62);
-  if (dim) base = mix(vec3(0.16, 0.18, 0.21), base, 0.28);
-  // Zonal y alimentador (tamaño < 0,8) a escala de ciudad: menos saturados, para que la troncal se lea
-  // encima; a escala de calle recuperan su color.
-  else if (v_size < 0.8 && !focused && !selected) base = mix(vec3(0.13, 0.16, 0.22), base, mix(0.6, 1.0, u_zf));
-  if (hover) base = mix(base, vec3(1.0), 0.28);
-  float d = body(v_local, v_half);
-  float aa = 0.75 * u_dpr;
-  float edge = 1.5 * u_dpr;
-  // Relleno con borde oscuro de 1 px que separa el bus de su propia línea.
-  float inside = clamp(0.5 - d / aa, 0.0, 1.0);
-  float fill = clamp(0.5 - (d + edge) / aa, 0.0, 1.0);
-  // Borde oscuro: separa el bus de su propia línea (que a escala de ciudad va a media intensidad).
-  vec3 col = mix(vec3(0.027, 0.035, 0.043), base, fill);
-  float alpha = inside;
-  if (selected) {
-    // Escuadras en las cuatro esquinas, a 5 px del cuerpo.
-    vec2 q = abs(v_local);
-    vec2 r = v_half + 5.0 * u_dpr;
-    float t = 1.4 * u_dpr, arm = 5.0 * u_dpr;
-    bool hBar = abs(q.y - r.y) < t && q.x > r.x - arm && q.x < r.x + t;
-    bool vBar = abs(q.x - r.x) < t && q.y > r.y - arm && q.y < r.y + t;
-    if ((hBar || vBar) && inside < 0.5) { col = vec3(0.93); alpha = 1.0; }
+  if (dim) base = mix(u_mute, base, 0.3);
+  else if (v_size < 0.8 && !focused && !selected) base = mix(u_mute, base, mix(0.62, 1.0, u_zf));
+  if (hover) base = mix(base, vec3(1.0), 0.25);
+
+  float d = capsule(v_local, v_half);
+  float aa = max(fwidth(d), 0.35);
+  float body = 1.0 - smoothstep(-aa, aa, d);
+  float fill = 1.0 - smoothstep(-aa, aa, d + 1.2);
+  vec3 col = mix(u_rim, base, fill);
+  float alpha = body;
+
+  // «Ojo» hacia donde avanza.
+  float hx = max(v_half.x - v_half.y, 0.0);
+  vec2 eye = vec2(hx + v_half.y * 0.38, 0.0);
+  float de = length(v_local - eye) - v_half.y * 0.34;
+  float eyeA = (1.0 - smoothstep(-aa, aa, de)) * fill;
+  col = mix(col, mix(base, vec3(1.0), 0.65), eyeA * (dim ? 0.3 : 0.85));
+
+  // Foco y selección: anillo claro por fuera del cuerpo.
+  if ((focused || selected) && body < 0.99) {
+    float ring = 1.0 - smoothstep(0.0, aa * 1.5, abs(d - 1.5) - 0.75);
+    col = mix(col, u_light, ring);
+    alpha = max(alpha, ring);
   }
-  if (v_tail > 0.0 && inside < 0.01) {
-    // Estela: franja angosta del color de la ruta que se desvanece hacia atrás.
+
+  float wave = 0.0;
+  vec3 waveCol = mix(v_color.rgb, vec3(1.0), 0.35);
+  if (selected) {
+    for (int i = 0; i < 2; i++) {
+      float k = fract(u_time / 1.9 + float(i) * 0.5);
+      float r = 4.0 + 38.0 * k;
+      wave = max(wave, (1.0 - smoothstep(0.0, aa * 2.0, abs(d - r) - 1.0)) * 0.6 * pow(1.0 - k, 1.4));
+    }
+    waveCol = mix(u_light, v_color.rgb, 0.25);
+  } else if (arriving) {
+    float k = fract(u_time / 2.4);
+    float r = 3.0 + 22.0 * k;
+    wave = (1.0 - smoothstep(0.0, aa * 2.0, abs(d - r) - 0.8)) * 0.42 * pow(1.0 - k, 1.5);
+  } else if (v_ping >= 0.0 && v_ping < 1.0 && !dim) {
+    float r = 2.0 + 17.0 * v_ping;
+    wave = (1.0 - smoothstep(0.0, aa * 2.0, abs(d - r) - 0.7)) * 0.3 * pow(1.0 - v_ping, 2.0) * smoothstep(0.25, 0.5, u_zf);
+  }
+  if (wave > 0.0 && body < 0.5) {
+    col = mix(col, waveCol, wave / max(alpha + wave, 1e-3));
+    alpha = max(alpha, wave);
+  }
+
+  if (v_tail > 0.0 && body < 0.01) {
     float back = -v_local.x - v_half.x;
-    if (back > 0.0 && back < v_tail && abs(v_local.y) < v_half.y * 0.45) {
-      col = streak;
-      alpha = 0.6 * pow(1.0 - back / v_tail, 1.6);
+    if (back > 0.0 && back < v_tail && abs(v_local.y) < v_half.y * 0.5) {
+      float a = 0.55 * pow(1.0 - back / v_tail, 1.6);
+      if (a > alpha) { col = v_color.rgb; alpha = a; }
     }
   }
-  alpha *= v_color.a * (stale ? 0.45 : 1.0) * (dim ? 0.85 : 1.0);
+  alpha *= v_color.a * (stale ? 0.45 : 1.0) * (dim ? 0.8 : 1.0);
   if (alpha < 0.01) discard;
   frag = vec4(col * alpha, alpha);
 }`;
@@ -134,8 +166,6 @@ void main() {
 export class BusLayer implements CustomLayerInterface {
   readonly id: string;
   readonly type = 'custom' as const;
-  // '3d': comparte el búfer de profundidad con edificios y viaducto, que tapan a los buses que pasan
-  // detrás o debajo. En 2D (sin inclinación) no hay nada con altura y el resultado es el mismo.
   readonly renderingMode = '3d' as const;
   private gl!: WebGL2RenderingContext;
   private prog!: WebGLProgram;
@@ -144,10 +174,21 @@ export class BusLayer implements CustomLayerInterface {
   private u: Record<string, WebGLUniformLocation | null> = {};
   private map!: MLMap;
   private frames: number[] = [];
+  private timer = 0;
+  private t0 = performance.now();
+  /** Colores del tema: borde del bus (fondo del mapa) y anillo de foco. */
+  rim: [number, number, number] = [0.043, 0.051, 0.062];
+  light: [number, number, number] = [0.94, 0.95, 0.96];
+  mute: [number, number, number] = [0.16, 0.18, 0.21];
   onFrame?: () => void;
+  setColors(rim: [number, number, number], light: [number, number, number], mute: [number, number, number]) { this.rim = rim; this.light = light; this.mute = mute; }
+  private fleet: Fleet;
+  private only: 'all' | 'dim' | 'main';
 
   /** `main`: todos salvo los atenuados; `dim`: solo los atenuados (van debajo de la ruta en foco). */
-  constructor(private fleet: Fleet, private only: 'all' | 'dim' | 'main' = 'all') {
+  constructor(fleet: Fleet, only: 'all' | 'dim' | 'main' = 'all') {
+    this.fleet = fleet;
+    this.only = only;
     this.id = only === 'dim' ? 'buses-dim' : 'buses';
   }
 
@@ -168,7 +209,7 @@ export class BusLayer implements CustomLayerInterface {
     g.linkProgram(p);
     if (!g.getProgramParameter(p, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(p) ?? 'link');
     this.prog = p;
-    for (const n of ['u_matrix', 'u_viewport', 'u_ppm', 'u_dpr', 'u_zf']) this.u[n] = g.getUniformLocation(p, n);
+    for (const n of ['u_matrix', 'u_mpp', 'u_ppm', 'u_zf', 'u_el', 'u_time', 'u_rim', 'u_light', 'u_mute']) this.u[n] = g.getUniformLocation(p, n);
 
     this.vao = g.createVertexArray()!;
     g.bindVertexArray(this.vao);
@@ -185,43 +226,52 @@ export class BusLayer implements CustomLayerInterface {
       g.vertexAttribPointer(loc, size, g.FLOAT, false, S, offset * 4);
       g.vertexAttribDivisor(loc, 1);
     };
-    attr(1, 2, 0); // posición
-    attr(2, 2, 2); // rumbo
-    attr(3, 4, 4); // color + alfa
-    attr(4, 1, 8); // tamaño
-    attr(5, 1, 9); // banderas
+    attr(1, 2, 0);
+    attr(2, 2, 2);
+    attr(3, 4, 4);
+    attr(4, 1, 8);
+    attr(5, 1, 9);
+    attr(6, 1, 10);
     g.bindVertexArray(null);
+  }
+
+  /** Rectángulo visible (metros locales), con margen, para no calcular lo que no se ve. */
+  private view(): [number, number, number, number] {
+    const b = this.map.getBounds();
+    const mx = (b.getEast() - b.getWest()) * 0.15, my = (b.getNorth() - b.getSouth()) * 0.15;
+    return [(b.getWest() - mx) * KX, (b.getSouth() - my) * KY, (b.getEast() + mx) * KX, (b.getNorth() + my) * KY];
   }
 
   render(gl: WebGLRenderingContext | WebGL2RenderingContext, opts: CustomRenderMethodInput) {
     const g = gl as WebGL2RenderingContext;
     const now = Date.now();
-    const moving = this.fleet.update(now);
-    const { data, count } = this.fleet.fill(now, this.only);
+    const box = this.view();
+    const moving = this.fleet.update(now, box);
+    const { data, count } = this.fleet.fill(now, this.only, box);
+    const zoom = this.map.getZoom();
     if (count) {
       g.useProgram(this.prog);
-      // Matriz × traslación al origen, en float64 antes de pasar a float32.
-      // `mainMatrix` proyecta mercator 0–1 a recorte (proyección mercator; ver tipos de MapLibre 6).
       const m = opts.defaultProjectionData.mainMatrix as unknown as ArrayLike<number>;
       const [ox, oy] = ORIGIN;
       const mm = new Float32Array(16);
       for (let i = 0; i < 16; i++) mm[i] = m[i];
       for (let r = 0; r < 4; r++) mm[12 + r] = m[r] * ox + m[4 + r] * oy + m[12 + r];
       g.uniformMatrix4fv(this.u.u_matrix, false, mm);
-      g.uniform2f(this.u.u_viewport, g.drawingBufferWidth, g.drawingBufferHeight);
-      const dpr = window.devicePixelRatio || 1;
+      const worldPx = 512 * Math.pow(2, zoom);
       const lat = (this.map.getCenter().lat * Math.PI) / 180;
-      const ppm = (dpr * 512 * Math.pow(2, this.map.getZoom())) / (40_075_016.686 * Math.cos(lat));
-      g.uniform1f(this.u.u_ppm, ppm);
-      g.uniform1f(this.u.u_dpr, dpr);
-      g.uniform1f(this.u.u_zf, Math.min(1, Math.max(0, (this.map.getZoom() - 10) / 5)));
+      g.uniform1f(this.u.u_mpp, 1 / worldPx);
+      g.uniform1f(this.u.u_ppm, worldPx / (40_075_016.686 * Math.cos(lat)));
+      g.uniform1f(this.u.u_zf, Math.min(1, Math.max(0, (zoom - 10) / 5)));
+      g.uniform1f(this.u.u_el, Math.min(1, Math.max(0, (zoom - 13.5) / 2.5)));
+      g.uniform1f(this.u.u_time, (performance.now() - this.t0) / 1000);
+      g.uniform3fv(this.u.u_rim, this.rim);
+      g.uniform3fv(this.u.u_light, this.light);
+      g.uniform3fv(this.u.u_mute, this.mute);
       g.bindBuffer(g.ARRAY_BUFFER, this.inst);
       g.bufferData(g.ARRAY_BUFFER, data.subarray(0, count * Fleet.STRIDE), g.DYNAMIC_DRAW);
       g.bindVertexArray(this.vao);
       g.enable(g.BLEND);
       g.blendFunc(g.ONE, g.ONE_MINUS_SRC_ALPHA);
-      // Prueba de profundidad sin escribir: los buses no se tapan entre sí por profundidad (el orden del
-      // buffer ya pone al seleccionado encima), pero sí los tapa lo que tiene altura.
       g.enable(g.DEPTH_TEST);
       g.depthFunc(g.LEQUAL);
       g.depthMask(false);
@@ -231,11 +281,16 @@ export class BusLayer implements CustomLayerInterface {
     this.frames.push(performance.now());
     if (this.frames.length > 120) this.frames.shift();
     this.onFrame?.();
-    // Mientras algo se mueva (o se esté desvaneciendo), se piden más cuadros; quieto, no se gasta GPU.
-    if (moving || this.fleet.animating(now)) this.map.triggerRepaint();
+    if (this.only === 'dim') return; // la capa principal agenda el siguiente cuadro por las dos
+    const waves = this.fleet.selectedId !== null || this.fleet.arriving.size > 0 || this.fleet.pinging(now);
+    if (!moving && !waves && !this.fleet.animating(now)) return;
+    // Al ritmo que hace falta: fluido con ondas; si solo avanzan buses, según cuánto se mueven en
+    // pantalla a este zoom (a escala de ciudad, menos de un píxel por cuadro).
+    const fps = waves ? 45 : zoom < 12 ? 10 : zoom < 14 ? 20 : zoom < 16 ? 30 : 60;
+    clearTimeout(this.timer);
+    this.timer = window.setTimeout(() => this.map.triggerRepaint(), Math.max(0, 1000 / fps - 4));
   }
 
-  /** Cuadros por segundo de los últimos dos segundos (para pruebas). */
   fps(): number {
     const f = this.frames;
     if (f.length < 2) return 0;
@@ -243,6 +298,7 @@ export class BusLayer implements CustomLayerInterface {
   }
 
   onRemove() {
+    clearTimeout(this.timer);
     this.gl.deleteProgram(this.prog);
     this.gl.deleteBuffer(this.inst);
     this.gl.deleteVertexArray(this.vao);
