@@ -57,6 +57,27 @@ class LaneIndex:
                 best = (d, qx, qy, dx / l, dy / l)
         return best
 
+    def samples(self, p, R: float, step: float = 2.0):
+        """Puntos cada `step` m de los ejes de carril a menos de `R` m de `p`."""
+        out = []
+        px, py = p
+        seen = set()
+        r = int(R // G) + 1
+        cx, cy = int(px // G), int(py // G)
+        for gx in range(cx - r, cx + r + 1):
+            for gy in range(cy - r, cy + r + 1):
+                for i in self.grid.get((gx, gy), ()):
+                    if i in seen:
+                        continue
+                    seen.add(i)
+                    ax, ay, bx, by, _ = self.segs[i]
+                    n = max(1, int(math.hypot(bx - ax, by - ay) // step))
+                    for k in range(n + 1):
+                        x, y = ax + (bx - ax) * k / n, ay + (by - ay) * k / n
+                        if (x - px) ** 2 + (y - py) ** 2 <= R * R:
+                            out.append((x, y))
+        return out
+
     def around(self, p, R: float):
         """Segmentos a menos de `R` m de `p`: (distancia, proyección, dirección)."""
         out = []
@@ -180,11 +201,32 @@ def estimate_footprint(center, wagons, idx: LaneIndex):
         s0, s1 = c - 20, c + 20
     s1 = min(s1, s0 + 320)
     hw = width / 2
-    ring = [
-        (cx + ux * s0 + nx * hw, cy + uy * s0 + ny * hw),
-        (cx + ux * s1 + nx * hw, cy + uy * s1 + ny * hw),
-        (cx + ux * s1 - nx * hw, cy + uy * s1 - ny * hw),
-        (cx + ux * s0 - nx * hw, cy + uy * s0 - ny * hw),
-    ]
-    ring.append(ring[0])
-    return ring
+
+    def rect(a, b):
+        r = [
+            (cx + ux * a + nx * hw, cy + uy * a + ny * hw),
+            (cx + ux * b + nx * hw, cy + uy * b + ny * hw),
+            (cx + ux * b - nx * hw, cy + uy * b - ny * hw),
+            (cx + ux * a - nx * hw, cy + uy * a - ny * hw),
+        ]
+        r.append(r[0])
+        return r
+
+    # Ningún eje de carril dentro de la plataforma: donde los carriles se juntan en las puntas, se
+    # acorta desde la punta invadida; si invade el medio, no hay huella.
+    samples = idx.samples((cx, cy), max(abs(s0), abs(s1)) + hw + 10)
+    for _ in range(40):
+        inside = [((px - cx) * ux + (py - cy) * uy) for px, py in samples
+                  if abs((px - cx) * nx + (py - cy) * ny) < hw and s0 < (px - cx) * ux + (py - cy) * uy < s1]
+        if not inside:
+            return rect(s0, s1)
+        mid = (s0 + s1) / 2
+        if any(abs(v - mid) < (s1 - s0) * 0.2 for v in inside):
+            return None
+        if any(v > mid for v in inside):
+            s1 = min(v for v in inside if v > mid) - 2
+        if any(v < mid for v in inside):
+            s0 = max(v for v in inside if v < mid) + 2
+        if s1 - s0 < 30:
+            return None
+    return None
