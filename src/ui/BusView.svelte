@@ -12,9 +12,9 @@
   /** Avisar cuando el bus esté a 2 min de esa parada (o quitar el aviso). */
   function toggleWatch(e: { index: number; name: string; seconds: number }) {
     if (!bus || !route) return;
-    if (watch.is(bus.id, e.index)) { watch.set(null); return; }
+    if (watch.is(bus.id, e.index)) { watch.set(null); watch.show(`Aviso de llegada desactivado · ${route.code} en ${e.name}`, null); return; }
     watch.set({ busId: bus.id, busLabel: bus.label, routeCode: route.code, color: route.color, index: e.index, stopName: e.name, threshold: e.seconds > 180 ? 120 : 30 });
-    watch.show(`Te aviso cuando el ${route.code} esté a ${e.seconds > 180 ? '2 min' : 'punto de llegar'} de ${e.name}.`, null);
+    watch.show(`Aviso de llegada activado · ${route.code} en ${e.name} · ${e.seconds > 180 ? '2 min antes' : 'al llegar'}`, null);
   }
 
   let { id }: { id: string } = $props();
@@ -101,7 +101,7 @@
                 <span class="at num faint">{fmtHM(e.at)}</span>
               </button>
               <button class="bell" class:on onclick={() => toggleWatch(e)} aria-pressed={on}
-                aria-label={on ? `Quitar el aviso de ${e.name}` : `Avisarme cuando llegue a ${e.name}`} title={on ? 'Quitar aviso' : 'Avisarme al llegar'}>
+                aria-label={on ? `Desactivar el aviso de llegada a ${e.name}` : `Activar el aviso de llegada a ${e.name}`} title={on ? 'Aviso de llegada activado' : 'Aviso de llegada'}>
                 <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5c-2.2 0-3.6 1.6-3.6 3.8v2.6L2 10h10l-1.4-2.1V5.3C10.6 3.1 9.2 1.5 7 1.5z" fill={on ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M5.6 11.6a1.5 1.5 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
               </button>
             </li>

@@ -4,7 +4,7 @@ import { etas, bandIndex, bandTimes, pace, etaText } from '../domain/eta';
 import { bogotaSeconds } from '../domain/time';
 
 /**
- * «Avísame»: un bus y una parada de su itinerario; cuando le falten `threshold` segundos (estimado),
+ * Aviso de llegada: un bus y una parada de su itinerario; cuando le falten `threshold` segundos (estimado),
  * aviso en pantalla, vibración y, si la app está en segundo plano y hay permiso, notificación del
  * sistema. Funciona con la app abierta (sin servidor de avisos todavía; ver APP_NATIVA.md).
  */
@@ -45,12 +45,12 @@ class Watch {
     const e = etas(p, band, bus.sFix, (now - bus.fixAt) / 1000, k, 80).find((x) => x.index === w.index);
     if (!e) {
       this.set(null);
-      this.show(`El ${w.routeCode} (bus ${w.busLabel}) ya pasó por ${w.stopName}.`, w.busId);
+      this.show(`Aviso cancelado: el ${w.routeCode} (bus ${w.busLabel}) ya pasó por ${w.stopName}`, w.busId);
       return;
     }
     this.seconds = e.seconds;
     if (e.seconds > w.threshold) return;
-    const text = `El ${w.routeCode} llega a ${w.stopName} ${e.seconds < 60 ? 'ahora' : `en ${etaText(e.seconds)}`}.`;
+    const text = `${w.routeCode} llegando a ${w.stopName} · ${e.seconds < 60 ? 'ahora' : etaText(e.seconds)}`;
     this.set(null);
     this.show(text, w.busId);
     navigator.vibrate?.([120, 80, 120]);

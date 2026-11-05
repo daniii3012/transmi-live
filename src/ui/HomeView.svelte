@@ -123,7 +123,7 @@
   {:else}
     <button class="locate" onclick={() => ctl?.locate()} disabled={app.locating}>
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="8" cy="8" r="4" /><path d="M8 0v3M8 13v3M0 8h3M13 8h3" /></svg>
-      {app.locating ? 'Buscando tu ubicación…' : 'Estaciones y paraderos cerca de mí'}
+      {app.locating ? 'Buscando la ubicación…' : 'Estaciones y paraderos cercanos'}
     </button>
   {/if}
 
@@ -145,7 +145,7 @@
   {/if}
 
   <section class="block">
-    <div class="head"><span class="label">Sistemas</span><span class="label hint">toca para ocultar</span></div>
+    <div class="head"><span class="label">Sistemas</span><span class="label hint">mostrar u ocultar</span></div>
     <ul class="systems">
       {#each systems as s (s.key)}
         {@const n = app.counts[s.key]}

@@ -14,7 +14,7 @@
 
   const results = $derived.by(() => {
     const n = norm(q);
-    const out: { key: string; end: End; title: string; sub: string; stop?: boolean }[] = [{ key: 'u', end: { kind: 'here' }, title: 'Mi ubicación', sub: 'GPS del dispositivo' }];
+    const out: { key: string; end: End; title: string; sub: string; stop?: boolean }[] = [{ key: 'u', end: { kind: 'here' }, title: 'Ubicación actual', sub: 'GPS del dispositivo' }];
     if (!n) {
       // Sin texto: los lugares guardados (estaciones y paraderos con estrella) y los usados hace poco.
       const seen = new Set<string>();
@@ -53,7 +53,7 @@
   <span class="mark {mark}" aria-hidden="true"></span>
   <span class="lab label">{label}</span>
   {#if editing}
-    <input bind:this={input} bind:value={q} onkeydown={key} onblur={() => setTimeout(() => (editing = false), 150)} placeholder="Estación, paradero o mi ubicación" autocomplete="off" spellcheck="false" aria-label={label} />
+    <input bind:this={input} bind:value={q} onkeydown={key} onblur={() => setTimeout(() => (editing = false), 150)} placeholder="Estación, paradero o ubicación actual" autocomplete="off" spellcheck="false" aria-label={label} />
   {:else}
     <button class="val" class:empty={!value} onclick={open} aria-label="{label}: {value ? endName(net, value) : 'sin elegir'}">{value ? endName(net, value) : 'Elegir…'}</button>
     {#if value}<button class="x" onclick={() => onpick(null)} aria-label="Quitar">×</button>{/if}

@@ -101,7 +101,7 @@ export class Controller {
     const alerts = async () => { if (!document.hidden) { const a = await fetchAlerts(apiBase()); if (a) { app.alerts = a; this.layers.setAlerts(a); } } };
     void alerts();
     this.alertsTimer = window.setInterval(alerts, 60_000);
-    // Acceso directo «Cerca de mí» del ícono instalado (?cerca=1): se ubica y se quita el parámetro.
+    // Acceso directo «Cercanos» del ícono instalado (?cerca=1): se ubica y se quita el parámetro.
     const q = new URLSearchParams(location.search);
     if (q.has('cerca')) {
       q.delete('cerca');

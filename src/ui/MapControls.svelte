@@ -20,7 +20,7 @@
     <button onclick={() => ctl?.overview()} aria-label="Toda la ciudad" title="Toda la ciudad">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 4V1h3M10 1h3v3M13 10v3h-3M4 13H1v-3" /></svg>
     </button>
-    <button onclick={() => ctl?.locate()} aria-label="Mi ubicación" title="Mi ubicación" class:busy={app.locating}>
+    <button onclick={() => ctl?.locate()} aria-label="Ubicación actual" title="Ubicación actual" class:busy={app.locating}>
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="4" /><path d="M8 0v3M8 13v3M0 8h3M13 8h3" /></svg>
     </button>
   </div>

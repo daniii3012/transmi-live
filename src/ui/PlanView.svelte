@@ -101,7 +101,7 @@
   </div>
 
   {#if !st.from || !st.to}
-    <p class="hint faint">Elige el origen y el destino. También puedes mantener presionado el mapa (clic derecho en computador) o empezar desde una estación con «Ir desde aquí».</p>
+    <p class="hint faint">Origen y destino: desde el buscador de cada campo, manteniendo presionado el mapa (clic derecho en computador) o con «Ir desde aquí» en la ficha de una estación.</p>
   {:else if busy || (!result && (st.from.kind !== 'here' || app.userPos))}
     <p class="hint faint">Buscando el mejor viaje…</p>
   {:else if result && !journeys.length}
