@@ -22,6 +22,7 @@
   import LayersPanel from './ui/LayersPanel.svelte';
   import MapMenu from './ui/MapMenu.svelte';
   import { hideStationBuildings } from './map/stationBuildings';
+  import { SpeedLayer } from './map/speedLayer';
   import { applyTheme, effective } from './app/theme';
 
   let container: HTMLDivElement;
@@ -48,8 +49,11 @@
         const dimBuses = new BusLayer(fleet, 'dim');
         view.map.addLayer(dimBuses, 'route-focus-glow');
         view.map.addLayer(buses, 'stations-label');
+        const speed = new SpeedLayer(view.map, net, fleet);
+        speed.mount(effective());
         controller = new Controller(view.map, net, fleet, layers, buses);
         controller.dimBuses = dimBuses;
+        controller.speed = speed;
         setController(controller);
         app.net = net;
         app.fleet = fleet;

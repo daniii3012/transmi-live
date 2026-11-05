@@ -184,6 +184,7 @@ export class Controller {
 
   private onData(d: Parameters<Fleet['ingest']>[0]) {
     this.fleet.ingest(d);
+    this.speed?.update();
     // Una vista de bus abierta antes de tener datos (recarga, enlace): se encuadra en cuanto aparece.
     const v = app.view;
     if (v.kind === 'bus' && this.framedBus !== v.id && this.fleet.buses.has(v.id)) {
@@ -479,6 +480,7 @@ export class Controller {
     applyTheme(t);
     applyBaseTheme(this.map, t);
     this.layers.setTheme(t);
+    this.speed?.setTheme(t);
     const rim: [number, number, number] = t === 'light' ? [0.97, 0.975, 0.98] : [0.063, 0.078, 0.094];
     const ring: [number, number, number] = t === 'light' ? [0.2, 0.24, 0.28] : [0.94, 0.95, 0.96];
     const mute: [number, number, number] = t === 'light' ? [0.78, 0.81, 0.84] : [0.16, 0.18, 0.21];
@@ -489,6 +491,7 @@ export class Controller {
   }
 
   dimBuses?: BusLayer;
+  speed?: import('../map/speedLayer').SpeedLayer;
 
   /** Capas opcionales: rutas zonales, paraderos, metro L1, estelas de toda la flota. */
   setLayer(key: keyof typeof app.layersOn, on: boolean) {
@@ -501,6 +504,7 @@ export class Controller {
     const l = app.layersOn, m = this.map;
     m.setLayoutProperty('routes-zonal', 'visibility', l.zonal ? 'visible' : 'none');
     this.layers.setDual(l.dual);
+    this.speed?.setVisible(l.speed);
     m.setLayoutProperty('street-stops', 'visibility', l.stops ? 'visible' : 'none');
     this.fleet.trails = l.trails;
     void setMetro(m, l.metro, app.threeD);

@@ -100,6 +100,8 @@ export class Fleet {
   interval = 20_000;
   hidden = new Set<SystemKey>();
   focusRoute: string | null = null;
+  /** Toda la flota atenuada (capa de velocidad encendida). */
+  allDim = false;
   /** Buses puntuales en foco (llegadas resaltadas de una estación); manda sobre las rutas. */
   focusBuses: Set<string> | null = null;
   /** Varias rutas en foco a la vez (las de un viaje planeado); manda sobre `focusRoute`. */
@@ -342,8 +344,9 @@ export class Fleet {
     const focus = this.focusRoute;
     const set = this.focusRoutes;
     const fb = this.focusBuses;
-    const inFocus = (b: Bus) => (fb ? fb.has(b.id) : set ? set.has(b.routeId) : !focus || b.routeId === focus);
-    const anyFocus = !!fb || !!set || !!focus;
+    // Con la capa de velocidad, la flota entera va atenuada debajo (salvo lo que esté en foco).
+    const inFocus = (b: Bus) => (fb ? fb.has(b.id) : set ? set.has(b.routeId) : focus ? b.routeId === focus : !this.allDim);
+    const anyFocus = !!fb || !!set || !!focus || this.allDim;
     let selected: Bus | null = null;
     const write = (b: Bus, flags: number) => {
       mercator(b.x, b.y, m);

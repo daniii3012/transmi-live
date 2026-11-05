@@ -2,6 +2,7 @@
   import { app } from '../app/store.svelte';
   import { ctl } from '../app/instance';
   const items: { key: keyof typeof app.layersOn; name: string; note: string }[] = [
+    { key: 'speed', name: 'Velocidad en la troncal', note: 'lento en rojo · medida con los buses' },
     { key: 'dual', name: 'Rutas duales', note: 'recorridos de fondo' },
     { key: 'zonal', name: 'Rutas zonales y alimentadoras', note: 'recorridos de fondo' },
     { key: 'stops', name: 'Paraderos', note: 'desde zoom de calle' },
