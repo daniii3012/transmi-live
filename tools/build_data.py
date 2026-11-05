@@ -25,6 +25,7 @@ import hashlib
 import io
 import json
 import math
+import os
 import re
 import sys
 import time
@@ -35,12 +36,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import busway as bw  # noqa: E402
+import diff_network  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 LAT0 = 4.65
 KX = 111_320.0 * math.cos(math.radians(LAT0))
 KY = 110_574.0
 SIMPLIFY_M = 1.5
+# Largo de una ruta troncal lejos de los ejes de corredor curados a partir del cual se avisa.
+OFF_AXES_M = 1500
 E6 = 1_000_000
 
 SYSTEM_BY_AGENCY = {
@@ -215,6 +219,15 @@ def main():
     digest = hashlib.sha256(src.read_bytes()).hexdigest()[:16]
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    # Lo que había en la carpeta (en CI, lo publicado) se guarda para comparar al final.
+    import shutil
+    import tempfile
+    prev = Path(tempfile.mkdtemp(prefix='red-anterior-'))
+    for f in ('network.json', 'patterns.json', 'stops.json', 'changes.json', 'meta.json'):
+        if (out / f).exists():
+            shutil.copy(out / f, prev / f)
+    # Revisión de lo curado: lo que no se actualiza solo con el paquete del día.
+    review: list[str] = []
     palette = json.loads((ROOT / 'data' / 'curated' / 'palette.json').read_text())
     z = zipfile.ZipFile(src)
 
@@ -282,6 +295,8 @@ def main():
             tot_len += cum[-1]
             snapped_len += cum[-1] * frac
         log(f'calzada exclusiva: {len(on_busway)} recorridos, {snapped_len / max(tot_len, 1) * 100:.0f} % de su largo sobre el carril de OSM')
+        if tot_len and snapped_len / tot_len < 0.8:
+            review.append(f'Solo {snapped_len / tot_len * 100:.0f} % del largo troncal y dual va sobre la calzada de OSM (era 88 %): actualizar `busway.json` con `tools/import_busway.py`.')
 
     # ── Horarios: viajes completos en memoria compacta ───────────────────────────────────────
     t_seq: dict[str, array] = {}
@@ -351,6 +366,10 @@ def main():
     for st_id, z_ in curated_letters.items():
         if not letters_of.get(st_id):
             letters_of[st_id] = {z_}
+
+    unknown_letters = {zz for ls in letters_of.values() for zz in ls if zz not in palette['zones']}
+    if unknown_letters:
+        review.append(f"Letras de troncal sin color en la paleta: {', '.join(sorted(unknown_letters))} (`data/curated/palette.json`).")
 
     def letters(si: int) -> set:
         sid = stops[si]['stop_id']
@@ -704,6 +723,73 @@ def main():
     write('patterns.json', {'v': 2, 'hash': digest, 'bands': [k for _, _, k in BANDS], 'patterns': patterns_v2})
     write('service.json', {'v': 1, 'hash': digest, 'service': service_out})
     write('meta.json', meta)
+
+    # ── Cambios frente a lo anterior y revisión de lo curado (decisión 011) ─────────────────────
+    prev_meta = diff_network.read(prev, 'meta.json')
+    if prev_meta and prev_meta.get('counts', {}).get('routes'):
+        # Un paquete roto (la mitad de las rutas, sin estaciones) no reemplaza lo publicado: la
+        # compilación falla y la publicación de ayer sigue en línea.
+        before, after = prev_meta['counts']['routes'], len(route_info)
+        if after < 0.7 * before or len(stations) < 0.9 * prev_meta['counts'].get('stations', 0):
+            for f in prev.iterdir():
+                shutil.copy(f, out / f.name)
+            raise SystemExit(f'paquete sospechoso: {after} rutas (antes {before}), {len(stations)} estaciones; se conserva lo anterior')
+    summary = ROOT / '.cache' / 'cambios.md'
+    summary.parent.mkdir(exist_ok=True)
+    changes = diff_network.run(prev, out, summary=summary)
+    today = [e for e in changes['entries'] if e['date'] == changes['updated']]
+    log(f"cambios en la red: {len(today)} hoy, {len(changes['entries'])} en 60 días, {len(changes['aliases'])} alias de ids")
+    new_st = {e['station'] for e in today if e['kind'] == 'station-new'}
+    for s in stations:
+        if s['id'] not in new_st or s['kind'] == 'cable':
+            continue
+        if not s.get('fp'):
+            review.append(f"Estación nueva sin huella: {s['name']} (revisar en OSM y `tools/import_busway.py`).")
+        if not letters_of.get(s['id']) and s.get('routes'):
+            review.append(f"Estación nueva sin letra de troncal: {s['name']} (`data/curated/station_corridors.json`).")
+    # Rutas troncales fuera de los ejes curados: un corredor nuevo o ejes desactualizados.
+    if cur.exists():
+        G = 50.0
+        grid = set()
+        for seg in segs:
+            pts = [xy(lo, la) for lo, la in seg['c']]
+            for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+                n = max(1, int(math.hypot(bx - ax, by - ay) // 20))
+                for k in range(n + 1):
+                    grid.add((int((ax + (bx - ax) * k / n) // G), int((ay + (by - ay) * k / n) // G)))
+        far = []
+        for r in route_info:
+            if r['sys'] != 'troncal' or r['id'] not in shapes_out:
+                continue
+            shp = shapes.get(shape_of_route.get(r['id']))
+            if not shp:
+                continue
+            m_ = shp[1]
+            off_m = 0.0
+            for (ax, ay), (bx, by) in zip(m_, m_[1:]):
+                l = math.hypot(bx - ax, by - ay)
+                n = max(1, int(l // 20))
+                for k in range(n):
+                    x, y = ax + (bx - ax) * k / n, ay + (by - ay) * k / n
+                    gx, gy = int(x // G), int(y // G)
+                    if not any((gx + i, gy + j) in grid for i in (-1, 0, 1) for j in (-1, 0, 1)):
+                        off_m += l / n
+            if off_m > OFF_AXES_M:
+                far.append((off_m, r['code']))
+        if far:
+            far.sort(reverse=True)
+            review.append(f"{len(far)} rutas troncales recorren más de {OFF_AXES_M / 1000:.1f} km lejos de los ejes curados (¿corredor nuevo?): "
+                          + ', '.join(f'{c} {d / 1000:.1f} km' for d, c in far[:8]) + ' — volver a correr la curaduría de ejes.')
+    text = summary.read_text()
+    text += '\n## Revisión de lo curado\n\n' + ('\n'.join(f'- {x}' for x in review) if review else 'Nada que revisar.') + '\n'
+    summary.write_text(text)
+    (ROOT / '.cache' / 'revision.txt').write_text('\n'.join(review))
+    if os.environ.get('GITHUB_STEP_SUMMARY'):
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as fh:
+            fh.write(text)
+    for x in review:
+        log('revisar: ' + x)
+    shutil.rmtree(prev, ignore_errors=True)
     off = sorted(max_off)
     if off:
         log(f'paradas sobre el recorrido: p50 {off[len(off)//2]:.1f} m · p99 {off[int(len(off)*.99)]:.1f} m · máx {off[-1]:.0f} m')
