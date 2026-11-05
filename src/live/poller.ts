@@ -58,7 +58,13 @@ export class Poller {
   private async tick() {
     if (this.stopped || document.hidden) return;
     this.ctrl = new AbortController();
-    const r = await fetchVehicles(this.base, this.etag, this.ctrl.signal);
+    // Tiempo límite: una petición colgada no puede dejar la página en «Conectando» para siempre.
+    let timedOut = false;
+    const ctrl = this.ctrl;
+    const limit = window.setTimeout(() => { timedOut = true; ctrl.abort(); }, 12_000);
+    let r = await fetchVehicles(this.base, this.etag, this.ctrl.signal);
+    clearTimeout(limit);
+    if (timedOut && r.status === 'error') r = { status: 'error', message: 'sin respuesta' };
     const now = Date.now();
     if (r.status === 'ok') {
       this.failures = 0;
