@@ -55,8 +55,19 @@
       out.push({ id: b.id, label: b.label, age: b.age, y, ly: y });
     }
     out.sort((p, q) => p.y - q.y);
-    for (let i = 1; i < out.length; i++) out[i].ly = Math.max(out[i].y, out[i - 1].ly + 18);
     return out;
+  });
+  /** Etiquetas: los buses a menos de una etiqueta de distancia van juntos («B12 +2»); así, con muchos
+   * buses en cola, las etiquetas ya no se empujan más allá del final del diagrama. */
+  const groups = $derived.by(() => {
+    const gs: { ids: string[]; labels: string[]; age: number; y: number; ly: number }[] = [];
+    for (const m of marks) {
+      const g = gs.at(-1);
+      if (g && m.y - g.y < 18) { g.ids.push(m.id); g.labels.push(m.label); g.age = Math.min(g.age, m.age); }
+      else gs.push({ ids: [m.id], labels: [m.label], age: m.age, y: m.y, ly: m.y });
+    }
+    for (let i = 1; i < gs.length; i++) gs[i].ly = Math.max(gs[i].y, gs[i - 1].ly + 18);
+    return gs;
   });
 </script>
 
@@ -104,7 +115,7 @@
       {#if !pattern}
         <p class="faint loading">Cargando paradas…</p>
       {:else}
-        <div class="lines" style:height="{Math.max(rows.length * ROW, (marks.at(-1)?.ly ?? 0) + 12)}px">
+        <div class="lines" style:height="{Math.max(rows.length * ROW, (groups.at(-1)?.ly ?? 0) + 12)}px">
           <ol>
             {#each rows as r (r.i)}
               <li class:end={r.i === rows.length - 1}>
@@ -119,8 +130,11 @@
             <button class="chev" class:stale={b.age > 180} style:top="{b.y - 7}px" onclick={() => go({ kind: 'bus', id: b.id })} aria-label="Bus {b.label}">
               <svg width="12" height="14" viewBox="0 0 12 14" aria-hidden="true"><path d="M1 1h10v7l-5 5-5-5z" /></svg>
             </button>
-            <button class="pill num" class:stale={b.age > 180} style:top="{b.ly - 8}px" onclick={() => go({ kind: 'bus', id: b.id })}>
-              {b.label}{#if b.age > 120}<span class="faint">&nbsp;· {ago(b.age)}</span>{/if}
+          {/each}
+          {#each groups as g (g.ids[0])}
+            <button class="pill num" class:stale={g.age > 180} style:top="{g.ly - 8}px" onclick={() => go({ kind: 'bus', id: g.ids[0] })}
+              aria-label={g.ids.length > 1 ? `Buses ${g.labels.join(', ')}` : `Bus ${g.labels[0]}`}>
+              {g.labels[0]}{#if g.ids.length > 1}<span class="faint">&nbsp;+{g.ids.length - 1}</span>{:else if g.age > 120}<span class="faint">&nbsp;· {ago(g.age)}</span>{/if}
             </button>
           {/each}
         </div>
