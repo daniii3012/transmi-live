@@ -3,6 +3,7 @@
 # Requiere en el repositorio (Settings → Secrets and variables → Actions):
 #   secreto  GTFS_URL   dirección del paquete GTFS (no se escribe en el código)
 #   variable API_BASE   dirección del Worker (p. ej. https://transmi-live.<cuenta>.workers.dev)
+#   variable SITE_URL   dirección publicada (opcional; por defecto https://<usuario>.github.io/<repo>/)
 # y Pages con «GitHub Actions» como fuente. Se lanza a mano o a diario, después de que el paquete
 # se regenera (≈ 04:20 de Bogotá).
 name: Publicar en Pages
@@ -16,6 +17,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  issues: write
 
 concurrency:
   group: pages
@@ -40,14 +42,37 @@ jobs:
         run: |
           test -n "$GTFS_URL" || { echo "::error::Falta el secreto GTFS_URL"; exit 1; }
           test -n "$API_BASE" || { echo "::error::Falta la variable API_BASE"; exit 1; }
-      - name: Pruebas de la geometría física
-        run: python3 tools/test_busway.py
+      - name: Pruebas de las herramientas de datos
+        run: python3 tools/test_busway.py && python3 tools/test_diff.py
+      - name: Datos publicados (para comparar)
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          # Lo que está en línea es el estado anterior: la compilación compara contra eso y conserva el
+          # historial de cambios y los alias de ids. La primera vez no hay nada y no pasa nada.
+          site="${SITE_URL:-https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/}"
+          mkdir -p public/data
+          for f in network.json patterns.json stops.json changes.json meta.json; do
+            curl -sfL --retry 2 -o "public/data/$f" "${site%/}/data/$f" || rm -f "public/data/$f"
+          done
+          ls -la public/data
       - name: Datos de la red
         env:
           GTFS_URL: ${{ secrets.GTFS_URL }}
         run: |
           curl -sfL --retry 3 -o "$RUNNER_TEMP/gtfs.zip" "$GTFS_URL"
           python3 tools/build_data.py "$RUNNER_TEMP/gtfs.zip"
+      - name: Avisar si hay que revisar lo curado
+        if: hashFiles('.cache/revision.txt') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Lo que no se actualiza solo (letras, ejes, huellas, calzada) queda en un issue con la lista.
+          test -s .cache/revision.txt || exit 0
+          title="Revisar datos curados de la red"
+          body="$(printf 'Revisión automática del %s:\n\n' "$(date +%F)"; sed 's/^/- /' .cache/revision.txt)"
+          n=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$n" ]; then gh issue comment "$n" --body "$body"; else gh issue create --title "$title" --body "$body"; fi
       - run: npm ci
       - run: npm test
       - name: Compilar
