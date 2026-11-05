@@ -83,6 +83,8 @@ export class Fleet {
   focusRoute: string | null = null;
   selectedId: string | null = null;
   hoverId: string | null = null;
+  /** Estelas para toda la flota (si no, solo la ruta en foco y el seleccionado). */
+  trails = false;
   /** Buffer intercalado para la capa WebGL. */
   static readonly STRIDE = 10;
   private buf = new Float32Array(1024 * Fleet.STRIDE);
@@ -211,6 +213,7 @@ export class Fleet {
   }
 
   private lastUpdate = 0;
+  private lastMoving = false;
 
   /**
    * Avanza todos los buses a `now`. Una búsqueda binaria por bus: posición sobre el segmento y
@@ -218,6 +221,8 @@ export class Fleet {
    * Devuelve si algún bus sigue en movimiento (para pedir otro cuadro).
    */
   update(now = Date.now()): boolean {
+    // Dos capas (atenuados debajo del foco, el resto encima) piden el mismo cuadro: se calcula una vez.
+    if (this.lastUpdate && now - this.lastUpdate < 4) return this.lastMoving;
     const dt = this.lastUpdate ? Math.min(200, now - this.lastUpdate) : 1000;
     this.lastUpdate = now;
     const k = 1 - Math.exp(-dt / 120);
@@ -245,7 +250,15 @@ export class Fleet {
         b.x = nx; b.y = ny;
       }
     }
+    this.lastMoving = moving;
     return moving;
+  }
+
+  /** ¿Avanza ahora a más de ~2 m/s? */
+  private moving(b: Bus, now: number): boolean {
+    if (now >= b.t1 || b.t1 <= b.t0) return false;
+    const dist = b.onPath ? b.s1 - b.s0 : Math.hypot(b.x1 - b.x0, b.y1 - b.y0);
+    return dist / ((b.t1 - b.t0) / 1000) > 2;
   }
 
   /** ¿Algún bus se está desvaneciendo (aparece o reaparece)? */
@@ -271,9 +284,9 @@ export class Fleet {
   /**
    * Llena el buffer de la capa: [mx, my, hx, hy, r, g, b, alfa, tamaño, banderas] por bus, con los
    * atenuados primero y el seleccionado al final (se dibuja encima). Devuelve cuántos hay.
-   * Banderas: 1 atenuado, 2 lectura vieja, 4 seleccionado, 8 bajo el cursor.
+   * Banderas: 1 atenuado, 2 lectura vieja, 4 seleccionado, 8 bajo el cursor, 16 estela, 32 de la ruta en foco.
    */
-  fill(now = Date.now()): { data: Float32Array; count: number } {
+  fill(now = Date.now(), only: 'all' | 'dim' | 'main' = 'all'): { data: Float32Array; count: number } {
     const S = Fleet.STRIDE;
     if (this.buf.length < this.buses.size * S) this.buf = new Float32Array(Math.ceil(this.buses.size * 1.5) * S);
     const out = this.buf;
@@ -296,17 +309,18 @@ export class Fleet {
       n++;
     };
     // Dos pasadas: atenuados abajo, el resto encima.
-    for (let pass = 0; pass < 2; pass++) {
+    for (let pass = only === 'main' ? 1 : 0; pass < (only === 'dim' ? 1 : 2); pass++) {
       for (const b of this.buses.values()) {
         if (b.age > DROP_AGE) continue;
         if (b.sys && this.hidden.has(b.sys)) continue;
         if (b.id === this.selectedId) { selected = b; continue; }
         const dim = !!focus && b.routeId !== focus;
         if ((pass === 0) !== dim) continue;
-        write(b, (dim ? 1 : 0) | (b.age > STALE_AGE ? 2 : 0) | (b.id === this.hoverId ? 8 : 0));
+        const trail = !dim && (this.trails || b.routeId === focus) && this.moving(b, now);
+        write(b, (dim ? 1 : 0) | (b.age > STALE_AGE ? 2 : 0) | (b.id === this.hoverId ? 8 : 0) | (trail ? 16 : 0) | (focus && !dim ? 32 : 0));
       }
     }
-    if (selected) write(selected, 4 | (selected.age > STALE_AGE ? 2 : 0));
+    if (selected && only !== 'dim') write(selected, 4 | (selected.age > STALE_AGE ? 2 : 0) | (this.moving(selected, now) ? 16 : 0));
     return { data: out, count: n };
   }
 

@@ -10,6 +10,7 @@
   import { etaText } from '../domain/eta';
   import { meters } from '../domain/time';
   import RouteBadge from './RouteBadge.svelte';
+  import Pulse from './Pulse.svelte';
 
   const net = $derived(app.net);
   const total = $derived(SYSTEM_ORDER.reduce((a, k) => a + app.counts[k], 0));
@@ -86,6 +87,8 @@
       {#if app.hidden.length}de {fmtNum(total)} · filtro activo{:else if net}{fmtNum(net.routes.size)} rutas · {fmtNum(net.stations.size)} estaciones{/if}
     </div>
   </section>
+
+  <Pulse />
 
   <button class="search" onclick={() => (app.searchOpen = true)}>
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M11 11 L15 15" stroke="currentColor" stroke-width="1.5" /></svg>

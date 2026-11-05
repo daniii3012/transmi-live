@@ -30,6 +30,8 @@ class AppState {
   /** Ubicación propia (lon, lat), si la persona la pidió. */
   userPos = $state<[number, number] | null>(null);
   alerts = $state.raw<Alert[]>([]);
+  /** Pulso: buses en vía por instantánea desde que se abrió la página (hasta 2 h). */
+  pulse = $state.raw<{ t: number; n: number }[]>([]);
 }
 
 export const app = new AppState();

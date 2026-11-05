@@ -67,6 +67,10 @@ export class Controller {
     this.fleet.ingest(d);
     app.counts = this.fleet.counts();
     app.version++;
+    const n = Object.values(app.counts).reduce((a, b) => a + b, 0);
+    if (!app.pulse.length || app.pulse[app.pulse.length - 1].t !== d.t) {
+      app.pulse = [...app.pulse.filter((p) => d.t - p.t <= 7200), { t: d.t, n }];
+    }
     this.map.triggerRepaint();
     // Un bus seleccionado que desaparece del alimentador: se informa en su ficha, no se cierra.
   }

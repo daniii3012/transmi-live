@@ -36,7 +36,9 @@
         const layers = new NetworkLayers(view.map, net);
         layers.mount();
         const fleet = new Fleet(net);
-        const buses = new BusLayer(fleet);
+        // Orden de capas (DISENO.md): buses atenuados bajo la ruta en foco; el resto sobre las estaciones.
+        const buses = new BusLayer(fleet, 'main');
+        view.map.addLayer(new BusLayer(fleet, 'dim'), 'route-focus-glow');
         view.map.addLayer(buses, 'stations-label');
         controller = new Controller(view.map, net, fleet, layers, buses);
         setController(controller);
@@ -64,6 +66,10 @@
     if (typing || app.searchOpen) return;
     if (e.key === 'Escape' && app.view.kind !== 'home') go({ kind: 'home' });
     else if ((e.key === 'f' || e.key === 'F') && app.view.kind === 'bus') ctl?.toggleFollow();
+    else if ((e.key === 'r' || e.key === 'R') && app.view.kind === 'bus') {
+      const b = app.fleet?.buses.get(app.view.id);
+      if (b) go({ kind: 'route', id: b.routeId });
+    }
     else if (e.key === '0') ctl?.overview();
   }
 </script>

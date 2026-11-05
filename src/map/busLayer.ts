@@ -25,6 +25,7 @@ out vec2 v_half;
 out vec4 v_color;
 out float v_flags;
 out float v_pad;
+out float v_tail;
 
 void main() {
   float flags = a_flags;
@@ -44,10 +45,16 @@ void main() {
   float len = max(minLen * u_dpr, 18.0 * a_size * u_ppm) * k;
   float wid = max(minWid * u_dpr, 2.55 * u_ppm) * k;
   float pad = (selected ? 9.0 : 2.0) * u_dpr;
+  bool trail = mod(floor(flags / 16.0), 2.0) >= 1.0;
+  // Con estela, el quad se alarga hacia atrás: la cola ocupa ~3 largos de bus, mínimo 36 px.
+  float tail = trail ? max(36.0 * u_dpr, len * 3.0) : 0.0;
   vec2 h = vec2(len * 0.5 + pad, wid * 0.5 + pad);
-  vec2 off = fwd * a_corner.x * h.x + side * a_corner.y * h.y;
+  float x0 = -h.x - tail, x1 = h.x;
+  float lx = a_corner.x < 0.0 ? x0 : x1;
+  vec2 off = fwd * lx + side * a_corner.y * h.y;
   gl_Position = vec4((s0 + off) / (u_viewport * 0.5) * c0.w, c0.z, c0.w);
-  v_local = a_corner * h;
+  v_local = vec2(lx, a_corner.y * h.y);
+  v_tail = tail;
   v_half = vec2(len, wid) * 0.5;
   v_color = a_color;
   v_flags = flags;
@@ -61,6 +68,7 @@ in vec2 v_half;
 in vec4 v_color;
 in float v_flags;
 in float v_pad;
+in float v_tail;
 uniform float u_dpr;
 out vec4 frag;
 
@@ -78,7 +86,11 @@ void main() {
   bool stale = mod(floor(flags / 2.0), 2.0) >= 1.0;
   bool selected = mod(floor(flags / 4.0), 2.0) >= 1.0;
   bool hover = mod(floor(flags / 8.0), 2.0) >= 1.0;
+  bool focused = mod(floor(flags / 32.0), 2.0) >= 1.0;
   vec3 base = v_color.rgb;
+  vec3 streak = base;
+  // Bus de la ruta en foco: cuerpo claro, para leerse sobre su propio trazo resaltado.
+  if (focused || selected) base = mix(base, vec3(0.96), 0.62);
   if (dim) base = mix(vec3(0.16, 0.18, 0.21), base, 0.28);
   if (hover) base = mix(base, vec3(1.0), 0.28);
   float d = body(v_local, v_half);
@@ -99,13 +111,21 @@ void main() {
     bool vBar = abs(q.x - r.x) < t && q.y > r.y - arm && q.y < r.y + t;
     if ((hBar || vBar) && inside < 0.5) { col = vec3(0.93); alpha = 1.0; }
   }
+  if (v_tail > 0.0 && inside < 0.01) {
+    // Estela: franja angosta del color de la ruta que se desvanece hacia atrás.
+    float back = -v_local.x - v_half.x;
+    if (back > 0.0 && back < v_tail && abs(v_local.y) < v_half.y * 0.45) {
+      col = streak;
+      alpha = 0.6 * pow(1.0 - back / v_tail, 1.6);
+    }
+  }
   alpha *= v_color.a * (stale ? 0.45 : 1.0) * (dim ? 0.85 : 1.0);
   if (alpha < 0.01) discard;
   frag = vec4(col * alpha, alpha);
 }`;
 
 export class BusLayer implements CustomLayerInterface {
-  readonly id = 'buses';
+  readonly id: string;
   readonly type = 'custom' as const;
   readonly renderingMode = '2d' as const;
   private gl!: WebGL2RenderingContext;
@@ -117,7 +137,10 @@ export class BusLayer implements CustomLayerInterface {
   private frames: number[] = [];
   onFrame?: () => void;
 
-  constructor(private fleet: Fleet) {}
+  /** `main`: todos salvo los atenuados; `dim`: solo los atenuados (van debajo de la ruta en foco). */
+  constructor(private fleet: Fleet, private only: 'all' | 'dim' | 'main' = 'all') {
+    this.id = only === 'dim' ? 'buses-dim' : 'buses';
+  }
 
   onAdd(map: MLMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
     this.map = map;
@@ -165,7 +188,7 @@ export class BusLayer implements CustomLayerInterface {
     const g = gl as WebGL2RenderingContext;
     const now = Date.now();
     const moving = this.fleet.update(now);
-    const { data, count } = this.fleet.fill(now);
+    const { data, count } = this.fleet.fill(now, this.only);
     if (count) {
       g.useProgram(this.prog);
       // Matriz × traslación al origen, en float64 antes de pasar a float32.
