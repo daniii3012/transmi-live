@@ -9,6 +9,7 @@
     <span class="dot" aria-hidden="true"></span>
     <span class="text">{t.text}</span>
     {#if t.busId}<button class="act" onclick={() => { go({ kind: 'bus', id: t.busId! }); watch.toast = null; }}>Ver bus</button>{/if}
+    {#if t.action}<button class="act" onclick={() => { t.action!.run(); watch.toast = null; }}>{t.action.label}</button>{/if}
     <button class="x" onclick={() => (watch.toast = null)} aria-label="Cerrar aviso">×</button>
   </div>
 {/if}

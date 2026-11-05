@@ -65,6 +65,15 @@
     return { together, gap: worst > 2 * every ? Math.round(worst / 60) : null, where };
   });
 
+  /** Cambios recientes de esta ruta (30 días): paradas, destino, recorrido nuevo. */
+  let changesReady = $state(false);
+  $effect(() => { void net.loadChanges().then(() => (changesReady = true)); });
+  const routeChanges = $derived.by(() => {
+    if (!changesReady) return [];
+    const cut = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+    return net.changes.entries.filter((e) => e.route === id && e.date >= cut);
+  });
+
   /** Salidas por hora del tipo de día de hoy (gráfico plegable «Horario de hoy»). */
   const hours = $derived.by(() => {
     if (!serviceReady) return null;
@@ -141,6 +150,14 @@
         {#if expected}· el horario espera <span class="num">~{expected}</span> en vía{/if}
       </p>
     {/if}
+    {#if routeChanges.length}
+      <div class="changed">
+        {#each routeChanges as c, k (k)}
+          <p><span class="label">Cambio · {new Date(`${c.date}T12:00:00-05:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}</span>
+            {c.kind === 'route-stops' ? [c.add?.length ? `ahora para en ${c.add.join(', ')}` : '', c.remove?.length ? `ya no para en ${c.remove.join(', ')}` : ''].filter(Boolean).join(' · ') : c.text}</p>
+        {/each}
+      </div>
+    {/if}
     {#if regularity && (regularity.together || regularity.gap)}
       <p class="regular faint">
         {#if regularity.together}<span class="num">{regularity.together}</span> {regularity.together === 1 ? 'par de buses van juntos' : 'pares de buses van juntos'}{/if}
@@ -214,6 +231,9 @@
   dd { margin: 0; font-size: var(--fs-row); }
   .sched { margin: -8px 0 0; font-size: var(--fs-small); }
   .regular { margin: -8px 0 0; font-size: var(--fs-small); }
+  .changed { border-left: 2px solid var(--warn); padding: var(--sp-2) var(--sp-3); background: var(--bg-2); display: grid; gap: var(--sp-1); }
+  .changed p { margin: 0; font-size: var(--fs-small); color: var(--fg-1); line-height: 1.4; }
+  .changed .label { display: block; color: var(--fg-2); margin-bottom: 2px; }
   .hours summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--sp-2); color: var(--fg-2); }
   .hours summary::-webkit-details-marker { display: none; }
   .hours summary::before { content: '+'; font-family: var(--font-mono); width: 10px; }

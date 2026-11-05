@@ -9,7 +9,7 @@ import { bogotaSeconds } from '../domain/time';
  * sistema. Funciona con la app abierta (sin servidor de avisos todavía; ver APP_NATIVA.md).
  */
 export interface Watched { busId: string; busLabel: string; routeCode: string; color: string; index: number; stopName: string; threshold: number }
-export interface Toast { text: string; busId: string | null; at: number }
+export interface Toast { text: string; busId: string | null; at: number; action?: { label: string; run: () => void } }
 
 class Watch {
   item = $state<Watched | null>(null);
@@ -26,10 +26,10 @@ class Watch {
     if (w && typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission().catch(() => {});
   }
 
-  show(text: string, busId: string | null) {
+  show(text: string, busId: string | null, action?: Toast['action'], ms = 12_000) {
     clearTimeout(this.toastTimer);
-    this.toast = { text, busId, at: Date.now() };
-    this.toastTimer = window.setTimeout(() => (this.toast = null), 12_000);
+    this.toast = { text, busId, at: Date.now(), action };
+    if (ms > 0) this.toastTimer = window.setTimeout(() => (this.toast = null), ms);
   }
 
   /** Cada segundo (reloj de la app). */

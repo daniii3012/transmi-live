@@ -89,7 +89,7 @@ export class Controller {
     addEventListener('resize', () => (app.narrow = innerWidth < 760));
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this.wake = null;
-      else if (app.following) void this.keepAwake(true);
+      else { if (app.following) void this.keepAwake(true); void this.checkData(); }
     });
     this.clock = window.setInterval(() => { app.now = Date.now(); watch.check(this.net, this.fleet, app.now); }, 1000);
     this.poller.start();
@@ -111,6 +111,31 @@ export class Controller {
     // Con la cámara guardada para esta misma vista, no se reencuadra al abrir.
     const cam = loadPrefs().camera;
     this.apply(app.view, true, this.restored && cam?.hash === (location.hash || ''));
+  }
+
+  /**
+   * Datos de la red nuevos con la app abierta (se publican a diario): al volver a la app, si pasaron
+   * 3 h desde la última revisión, se compara la huella de meta.json; si cambió, aviso con «Recargar»
+   * (cámara, filtros y vista se conservan al recargar).
+   */
+  private dataCheckedAt = Date.now();
+  private async checkData() {
+    if (Date.now() - this.dataCheckedAt < 3 * 3600_000) return;
+    this.dataCheckedAt = Date.now();
+    try {
+      const r = await fetch(`${import.meta.env.BASE_URL}data/meta.json?v=${Date.now()}`, { cache: 'no-store' });
+      const m = (await r.json()) as { hash?: string; built?: string };
+      if (m.hash && m.hash !== this.net.hash) {
+        const when = m.built ? new Date(m.built).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }) : '';
+        watch.show(`Datos de la red actualizados${when ? ` · ${when}` : ''}`, null, { label: 'Recargar', run: () => location.reload() }, 0);
+      }
+    } catch { /* sin red: se reintenta en la próxima vuelta */ }
+  }
+
+  /** Cerrar: fuera toda la selección y al inicio de una vez (sin recorrer lo navegado). */
+  close() {
+    this.stack = ['#/'];
+    go({ kind: 'home' });
   }
 
   /** Volver: a la vista anterior de la sesión; si no hay, al inicio. */
@@ -205,6 +230,10 @@ export class Controller {
 
   // ── Vistas ─────────────────────────────────────────────────────────────────────────────────
   apply(v: View, initial = false, keepCamera = false) {
+    // Enlace a una ruta con un id que TRANSMILENIO re-emitió: se lleva al vigente (alias).
+    if (v.kind === 'route' && !this.net.routes.has(v.id)) {
+      void this.net.loadChanges().then(() => { const r = this.net.resolveRoute(v.id); if (r && r !== v.id) go({ kind: 'route', id: r }, true); });
+    }
     app.view = v;
     if (!keepCamera) this.restored = false;
     const f = this.fleet;

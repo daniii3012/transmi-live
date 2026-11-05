@@ -13,6 +13,24 @@
   import Pulse from './Pulse.svelte';
 
   const net = $derived(app.net);
+  /** Cambios recientes en la red (troncal, dual, cable y estaciones) para el resumen del inicio. */
+  let changesReady = $state(false);
+  $effect(() => { void net?.loadChanges().then(() => (changesReady = true)); });
+  const recent = $derived.by(() => {
+    if (!changesReady || !net?.changes.updated) return null;
+    const cut = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
+    const list = net.changes.entries.filter((e) => e.date >= cut && (!e.sys || e.sys === 'troncal' || e.sys === 'dual' || e.sys === 'cable'));
+    if (!list.length) return null;
+    const n = (k: string) => list.filter((e) => e.kind === k).length;
+    const parts = [
+      n('route-new') && `${n('route-new')} ${n('route-new') === 1 ? 'ruta nueva' : 'rutas nuevas'}`,
+      n('route-stops') && `${n('route-stops')} con paradas distintas`,
+      n('route-gone') && `${n('route-gone')} ${n('route-gone') === 1 ? 'retirada' : 'retiradas'}`,
+      ...list.filter((e) => e.kind.startsWith('station')).slice(0, 2).map((e) => e.text),
+    ].filter(Boolean) as string[];
+    const last = list.map((e) => e.date).sort().at(-1)!;
+    return { when: new Date(`${last}T12:00:00-05:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }), parts };
+  });
   const total = $derived(SYSTEM_ORDER.reduce((a, k) => a + app.counts[k], 0));
   const visible = $derived(SYSTEM_ORDER.reduce((a, k) => a + (app.hidden.includes(k) ? 0 : app.counts[k]), 0));
   const max = $derived(Math.max(1, ...SYSTEM_ORDER.map((k) => app.counts[k])));
@@ -103,7 +121,7 @@
 
   {#if near}
     <section class="block">
-      <div class="head"><span class="label">Cerca de ti</span><span class="label hint">próxima llegada</span></div>
+      <div class="head"><span class="label">Cercanos</span><span class="label hint">próxima llegada</span></div>
       {#if near.length === 0}
         <p class="empty faint">Ninguna estación ni paradero cerca.</p>
       {:else}
@@ -141,6 +159,15 @@
           </li>
         {/each}
       </ul>
+    </section>
+  {/if}
+
+  {#if recent}
+    <section class="block">
+      <div class="head"><span class="label">Cambios en la red</span><span class="label hint">{recent.when}</span></div>
+      <button class="changes" onclick={() => go({ kind: 'changes', id: '' })}>
+        <span>{recent.parts.join(' · ')}</span><span class="go" aria-hidden="true">›</span>
+      </button>
     </section>
   {/if}
 
@@ -245,4 +272,7 @@
   .place.stop::before { border-radius: 50%; background: var(--bg-1); border: 1.5px solid var(--stop); }
   .nx { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); }
   .empty { margin: 0; font-size: var(--fs-small); }
+  .changes { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: var(--sp-3); align-items: center; padding: var(--sp-3); border: 1px solid var(--line-1); text-align: left; font-size: var(--fs-small); color: var(--fg-1); line-height: 1.4; }
+  .changes:hover { color: var(--fg-0); border-color: var(--line-2); }
+  .changes .go { font-size: 18px; color: var(--fg-2); }
 </style>

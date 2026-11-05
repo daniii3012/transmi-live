@@ -10,6 +10,16 @@ async function getJSON<T>(name: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface ChangeEntry {
+  date: string;
+  kind: 'route-new' | 'route-gone' | 'route-stops' | 'route-renamed' | 'route-variant' | 'route-variant-gone'
+    | 'station-new' | 'station-gone' | 'station-closed' | 'station-open' | 'station-renamed';
+  text: string;
+  sys?: string; route?: string; code?: string; dest?: string; color?: string; station?: string;
+  add?: string[]; remove?: string[]; before?: string;
+}
+export interface ChangesFile { v: number; updated: string; entries: ChangeEntry[]; aliases: Record<string, [string, string]> }
+
 interface NetworkFile { v: number; hash: string; systems: SystemInfo[]; routes: Route[]; stations: Station[] }
 interface ShapesFile { v: number; hash: string; scale: number; shapes: Record<string, number[]> }
 interface StopsFile { cols: string[]; stops: [string, string, string, number, number, string[]][] }
@@ -35,6 +45,8 @@ export class Network {
   /** Tramos de corredor troncal con su letra (o null si no se pudo deducir). */
   corridors: { z: string | null; street?: boolean; c: [number, number][] }[] = [];
   private patterns?: Record<string, Pattern>;
+  /** Cambios en la red (60 días) y alias de ids re-emitidos (decisión 011). */
+  changes: ChangesFile = { v: 1, updated: '', entries: [], aliases: {} };
   private service?: Record<string, RouteService>;
   private pending = new Map<string, Promise<unknown>>();
 
@@ -89,6 +101,20 @@ export class Network {
       this.patterns = f.patterns;
       return f.patterns;
     });
+  }
+
+  loadChanges(): Promise<ChangesFile> {
+    return this.once('changes', async () => {
+      try { this.changes = await getJSON<ChangesFile>('changes.json'); } catch { /* primera publicación: sin historial */ }
+      return this.changes;
+    });
+  }
+
+  /** Id vigente de una ruta: el mismo, o al que apunta su alias si TRANSMILENIO lo re-emitió. */
+  resolveRoute(id: string): string | null {
+    if (this.routes.has(id)) return id;
+    const a = this.changes.aliases[id]?.[0];
+    return a && this.routes.has(a) ? a : null;
   }
 
   loadService(): Promise<Record<string, RouteService>> {

@@ -22,6 +22,8 @@
   import LayersPanel from './ui/LayersPanel.svelte';
   import MapMenu from './ui/MapMenu.svelte';
   import Toast from './ui/Toast.svelte';
+  import ChangesView from './ui/ChangesView.svelte';
+  import { favorites } from './app/favorites.svelte';
   import { watch } from './app/watch.svelte';
   import { hideStationBuildings } from './map/stationBuildings';
   import { SpeedLayer } from './map/speedLayer';
@@ -60,6 +62,8 @@
         app.net = net;
         app.fleet = fleet;
         controller.start();
+        // Cambios y alias de ids: los favoritos de rutas re-emitidas pasan al id vigente.
+        void net.loadChanges().then(() => favorites.migrate((rid) => net.resolveRoute(rid)));
         Object.assign(w, { __net: net, __fleet: fleet, __layers: layers, __ctl: controller, __fps: () => buses.fps(), __app: app, __watch: watch });
         await layers.loadZonal();
         fleet.relocate();
@@ -113,6 +117,8 @@
           <StationView id={app.view.id} kind="stop" />
         {:else if app.view.kind === 'plan'}
           <PlanView id={app.view.id} />
+        {:else if app.view.kind === 'changes'}
+          <ChangesView />
         {/if}
       </div>
     {/key}
