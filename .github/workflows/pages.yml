@@ -1,0 +1,73 @@
+# Publicación en GitHub Pages con los datos del día.
+#
+# Requiere en el repositorio (Settings → Secrets and variables → Actions):
+#   secreto  GTFS_URL   dirección del paquete GTFS (no se escribe en el código)
+#   variable API_BASE   dirección del Worker (p. ej. https://transmi-live.<cuenta>.workers.dev)
+# y Pages con «GitHub Actions» como fuente. Se lanza a mano o a diario, después de que el paquete
+# se regenera (≈ 04:20 de Bogotá).
+name: Publicar en Pages
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 10 * * *' # 05:00 de Bogotá
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Comprobar configuración
+        env:
+          GTFS_URL: ${{ secrets.GTFS_URL }}
+          API_BASE: ${{ vars.API_BASE }}
+        run: |
+          test -n "$GTFS_URL" || { echo "::error::Falta el secreto GTFS_URL"; exit 1; }
+          test -n "$API_BASE" || { echo "::error::Falta la variable API_BASE"; exit 1; }
+      - name: Datos de la red
+        env:
+          GTFS_URL: ${{ secrets.GTFS_URL }}
+        run: |
+          curl -sfL --retry 3 -o "$RUNNER_TEMP/gtfs.zip" "$GTFS_URL"
+          python3 tools/build_data.py "$RUNNER_TEMP/gtfs.zip"
+      - run: npm ci
+      - run: npm test
+      - name: Compilar
+        env:
+          VITE_API_BASE: ${{ vars.API_BASE }}
+        run: npm run build
+      - name: Ninguna dirección de fuente en lo publicado
+        env:
+          GTFS_URL: ${{ secrets.GTFS_URL }}
+        run: |
+          host=$(echo "$GTFS_URL" | sed -E 's#^[a-z]+://([^/]+).*#\1#')
+          ! grep -rIlF "$host" dist/ || { echo "::error::La dirección de una fuente quedó en la compilación"; exit 1; }
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
