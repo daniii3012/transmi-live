@@ -9,12 +9,34 @@ export interface Alert {
   stops: string[];
 }
 
-/** Alertas activas del Worker, cada 60 s con la pestaña visible. */
+let decoder: Worker | null = null;
+/** Protobuf (Worker en modo `passthrough`) → alertas, en un Web Worker. */
+function decodePb(buf: ArrayBuffer): Promise<Alert[]> {
+  decoder ??= new Worker(new URL('./pb/alerts.worker.ts', import.meta.url), { type: 'module' });
+  const w = decoder;
+  return new Promise((resolve, reject) => {
+    w.onmessage = (e: MessageEvent<{ ok: boolean; data?: Alert[]; message?: string }>) => (e.data.ok ? resolve(e.data.data!) : reject(new Error(e.data.message)));
+    w.postMessage(buf, [buf]);
+  });
+}
+
+let last: { base: string; etag: string; list: Alert[] } | null = null;
+
+/** Alertas activas del Worker, cada 60 s con la pestaña visible. Con ETag: si no cambiaron, 304 sin cuerpo. */
 export async function fetchAlerts(base: string): Promise<Alert[] | null> {
   try {
-    const r = await fetch(`${base}/v1/alerts`, { cache: 'no-store' });
-    if (!r.ok) return null;
-    const list = (await r.json()) as Alert[];
+    const prev = last?.base === base ? last : null;
+    const r = await fetch(`${base}/v1/alerts`, { cache: 'no-store', headers: prev ? { 'if-none-match': prev.etag } : {} });
+    let list: Alert[];
+    if (r.status === 304 && prev) list = prev.list;
+    else if (!r.ok) return null;
+    else {
+      // El Worker decide el formato: JSON o, en modo `passthrough`, el protobuf tal cual.
+      const pb = (r.headers.get('content-type') ?? '').includes('protobuf');
+      list = pb ? await decodePb(await r.arrayBuffer()) : ((await r.json()) as Alert[]);
+      const etag = r.headers.get('etag');
+      last = etag ? { base, etag, list } : null;
+    }
     const now = Date.now() / 1000;
     return list.filter((a) => (!a.start || a.start <= now) && (!a.end || a.end >= now));
   } catch {
