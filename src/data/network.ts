@@ -32,7 +32,7 @@ export class Network {
   hash = '';
   bands: string[] = [];
   /** Tramos de corredor troncal con su letra (o null si no se pudo deducir). */
-  corridors: { z: string | null; c: [number, number][] }[] = [];
+  corridors: { z: string | null; street?: boolean; c: [number, number][] }[] = [];
   private patterns?: Record<string, Pattern>;
   private service?: Record<string, RouteService>;
   private pending = new Map<string, Promise<unknown>>();
@@ -43,7 +43,7 @@ export class Network {
       getJSON<Meta>('meta.json'),
       getJSON<NetworkFile>('network.json'),
       getJSON<ShapesFile>('shapes-core.json'),
-      getJSON<{ segments: { z: string | null; c: [number, number][] }[] }>('corridors.json'),
+      getJSON<{ segments: { z: string | null; street?: boolean; c: [number, number][] }[] }>('corridors.json'),
     ]);
     n.corridors = corr.segments;
     n.meta = meta;

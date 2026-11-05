@@ -7,6 +7,8 @@
 - **OpenStreetMap, calzada de la troncal** — ejes de la calzada exclusiva por sentido, edificios y
   plataformas de las estaciones, puentes y deprimidos (`data/curated/busway.json`, derivado de OSM y
   bajo ODbL; importado de los datos curados del simulador con `tools/import_busway.py`).
+- **Ejes de los corredores troncales** — una línea por corredor sobre el separador, curados y
+  verificados contra el servicio vigente (`data/curated/corridors.json`).
 - **Letra de troncal por estación** — donde los códigos de vagón no la traen (casi toda la Caracas
   central): lista curada a partir del mapa del sistema y del simulador (`data/curated/station_corridors.json`).
 - **OpenMapTiles** — esquema de las teselas vectoriales. <https://openmaptiles.org>

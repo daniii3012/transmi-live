@@ -102,10 +102,17 @@ export class NetworkLayers {
     // Corredores troncales (R2): una guía fina y tenue del color de su troncal, sin borde. Marca dónde
     // está la troncal sin competir con los buses; el recorrido de una ruta aparece solo en foco (bus,
     // ruta o viaje). Color premezclado con el fondo: los tramos que se cruzan no se suman.
+    // Un eje por corredor, sobre el separador; los tramos en que la troncal va por calle (tráfico
+    // mixto), punteados.
     m.addLayer({
-      id: 'corridors', type: 'line', source: 'corridors',
+      id: 'corridors', type: 'line', source: 'corridors', filter: ['!', ['get', 'street']],
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': ['get', 'soft'], 'line-width': W([[10, 1], [13, 1.5], [16, 2], [19, 2.6]]) },
+      paint: { 'line-color': ['get', 'soft'], 'line-width': W([[10, 1.1], [13, 1.6], [16, 2.2], [19, 2.6]]) },
+    });
+    m.addLayer({
+      id: 'corridors-street', type: 'line', source: 'corridors', filter: ['get', 'street'],
+      layout: { 'line-join': 'round', 'line-cap': 'butt' },
+      paint: { 'line-color': ['get', 'soft'], 'line-width': W([[10, 1.1], [13, 1.6], [16, 2.2], [19, 2.6]]), 'line-dasharray': [2, 2] },
     });
     m.addLayer({
       id: 'routes-core-casing', type: 'line', source: 'routes-core',
@@ -386,12 +393,12 @@ export class NetworkLayers {
     const coreVisible: ExpressionSpecification = ['all', visible, this.dual ? ['!=', ['get', 'sys'], 'troncal'] : ['==', ['get', 'sys'], 'cable']];
     m.setFilter('routes-core', coreVisible);
     m.setFilter('routes-core-casing', coreVisible);
-    m.setLayoutProperty('corridors', 'visibility', hidden.includes('troncal') ? 'none' : 'visible');
+    for (const id of ['corridors', 'corridors-street']) m.setLayoutProperty(id, 'visibility', hidden.includes('troncal') ? 'none' : 'visible');
     m.setFilter('routes-zonal', visible);
     const f = this.focusId || this.planOn;
     const dim = THEMES[this.theme].dim;
     m.setPaintProperty('routes-core', 'line-color', f ? dim : CORE_COLOR);
-    m.setPaintProperty('corridors', 'line-color', f ? dim : ['get', 'soft']);
+    for (const id of ['corridors', 'corridors-street']) m.setPaintProperty(id, 'line-color', f ? dim : ['get', 'soft']);
     m.setPaintProperty('routes-zonal', 'line-color', zonalColor(f ? 0.12 : 0.3));
   }
 
@@ -417,7 +424,7 @@ export class NetworkLayers {
       type: 'FeatureCollection',
       features: this.net.corridors.map((s) => ({
         type: 'Feature',
-        properties: { z: s.z, soft: mix(s.z && zones[s.z] ? zones[s.z].color : '#8b939e', this.theme === 'light' ? 0.5 : 0.55) },
+        properties: { z: s.z, street: !!s.street, soft: mix(s.z && zones[s.z] ? zones[s.z].color : '#8b939e', this.theme === 'light' ? 0.5 : 0.55) },
         geometry: { type: 'LineString', coordinates: s.c },
       })),
     };

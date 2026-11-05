@@ -685,7 +685,15 @@ def main():
     core = {r['id'] for r in route_info if r['sys'] in ('troncal', 'dual', 'cable')}
     write('shapes-core.json', {'v': 1, 'hash': digest, 'scale': E6, 'shapes': {k: v for k, v in shapes_out.items() if k in core}})
     write('shapes-zonal.json', {'v': 1, 'hash': digest, 'scale': E6, 'shapes': {k: v for k, v in shapes_out.items() if k not in core}})
-    write('corridors.json', {'v': 1, 'hash': digest, 'segments': list(corridor_segments.values())})
+    # Guía de troncal: los ejes curados (una línea por corredor, sobre el separador) si están; si no,
+    # los tramos derivados de los recorridos (uno por sentido).
+    cur = ROOT / 'data' / 'curated' / 'corridors.json'
+    if cur.exists():
+        segs = json.loads(cur.read_text())['segments']
+        log(f'guía de troncal: {len(segs)} ejes curados')
+    else:
+        segs = list(corridor_segments.values())
+    write('corridors.json', {'v': 1, 'hash': digest, 'segments': segs})
     write('stops.json', {'v': 1, 'hash': digest, 'cols': ['id', 'code', 'name', 'lon', 'lat', 'routes'], 'stops': street})
     write('patterns.json', {'v': 1, 'hash': digest, 'bands': [k for _, _, k in BANDS], 'patterns': patterns_out})
     write('service.json', {'v': 1, 'hash': digest, 'service': service_out})
