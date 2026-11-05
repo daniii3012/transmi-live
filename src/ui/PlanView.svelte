@@ -3,7 +3,7 @@
   import { go } from '../app/router';
   import { ctl } from '../app/instance';
   import { planTrip } from '../planner/client';
-  import { decodePlan, encodePlan, endName, toPlace, type End } from '../planner/places';
+  import { decodePlan, encodePlan, endName, toPlace, type End, type Day } from '../planner/places';
   import type { Answer } from '../planner/planner.worker';
   import { bogotaSeconds, clock, dayType, meters } from '../domain/time';
   import { etaText } from '../domain/eta';
@@ -19,14 +19,15 @@
   let busy = $state(false);
   let selected = $state(0);
 
-  function update(from: End | null, to: End | null, time: string | null) {
-    go({ kind: 'plan', id: encodePlan(from, to, time) }, true);
+  function update(from: End | null, to: End | null, time: string | null, day: Day | null = st.day) {
+    go({ kind: 'plan', id: encodePlan(from, to, time, day) }, true);
   }
   function swap() { update(st.to, st.from, st.time); }
+  const DAYS: [Day | null, string][] = [[null, 'Hoy'], ['habil', 'Hábil'], ['sabado', 'Sábado'], ['festivo', 'Festivo']];
 
   // Consulta: cada vez que cambian los extremos o la hora. «Mi ubicación» pide permiso primero.
   $effect(() => {
-    const { from, to, time } = st;
+    const { from, to, time, day } = st;
     result = null;
     selected = 0;
     if (!from || !to) return;
@@ -38,7 +39,7 @@
       busy = true;
       const now = Date.now();
       const depart = time ? Number(time.slice(0, 2)) * 3600 + Number(time.slice(3)) * 60 : bogotaSeconds(now);
-      const r = await planTrip(a, b, depart, dayType(now));
+      const r = await planTrip(a, b, depart, day ?? dayType(now));
       busy = false;
       if (decodePlan(id).from === null) return;
       result = r;
@@ -55,7 +56,7 @@
   /** Próximo bus en vivo para el primer tramo, si el viaje es para ya. */
   const firstLive = $derived.by(() => {
     void app.now; void app.version;
-    if (!sel || st.time || !app.fleet || !app.patternsReady) return null;
+    if (!sel || st.time || st.day || !app.fleet || !app.patternsReady) return null;
     const ride = sel.legs.find((l) => l.kind === 'ride');
     if (!ride || ride.kind !== 'ride') return null;
     const rid = sel.routeIds[ride.route], sid = sel.stopIds[ride.from];
@@ -93,8 +94,14 @@
     </div>
   </div>
 
+  <div class="days" role="radiogroup" aria-label="Día">
+    {#each DAYS as [k, name] (name)}
+      <button role="radio" aria-checked={st.day === k} class:on={st.day === k} onclick={() => update(st.from, st.to, st.time, k)}>{name}</button>
+    {/each}
+  </div>
+
   {#if !st.from || !st.to}
-    <p class="hint faint">Elige el origen y el destino. También puedes empezar desde una estación con «Ir desde aquí».</p>
+    <p class="hint faint">Elige el origen y el destino. También puedes mantener presionado el mapa (clic derecho en computador) o empezar desde una estación con «Ir desde aquí».</p>
   {:else if busy || (!result && (st.from.kind !== 'here' || app.userPos))}
     <p class="hint faint">Buscando el mejor viaje…</p>
   {:else if result && !journeys.length}
@@ -174,6 +181,10 @@
   .seg select { appearance: none; -webkit-appearance: none; background: none; border: 0; color: inherit; font: inherit; font-family: var(--font-mono); padding: 0 2px; cursor: pointer; }
   .seg select option { color: var(--fg-0); background: var(--bg-1); }
   .colon { margin: 0 -4px; }
+  .days { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line-2); margin-top: calc(-1 * var(--sp-2)); }
+  .days button { height: 30px; font-size: var(--fs-small); color: var(--fg-1); }
+  .days button + button { border-left: 1px solid var(--line-2); }
+  .days button.on { background: var(--bg-3); color: var(--fg-0); }
   .hint { margin: 0; font-size: var(--fs-small); line-height: 1.5; }
   .cards { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
   .card { width: 100%; display: grid; gap: 6px; padding: var(--sp-3); border: 1px solid var(--line-1); text-align: left; }

@@ -20,6 +20,7 @@
   import Search from './ui/Search.svelte';
   import MapControls from './ui/MapControls.svelte';
   import LayersPanel from './ui/LayersPanel.svelte';
+  import MapMenu from './ui/MapMenu.svelte';
   import { applyTheme, effective } from './app/theme';
 
   let container: HTMLDivElement;
@@ -107,6 +108,7 @@
   </Panel>
   <MapControls {bearing} />
   <LayersPanel />
+  <MapMenu />
   {#if app.searchOpen}<Search />{/if}
 {:else}
   <div class="boot" class:failed>

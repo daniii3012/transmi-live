@@ -30,7 +30,9 @@ export class Controller {
   private stack: string[] = [location.hash || '#/'];
   /** Desfase en píxeles del bus seguido respecto al centro (al arrastrar el mapa mientras se sigue). */
   private followOffset: [number, number] = [0, 0];
-  private dragging = false;
+  /** Punteros sobre el mapa y gesto en curso: mientras tanto, seguir no mueve la cámara. */
+  private pointers = new Set<number>();
+  private gesture = false;
   private framedBus: string | null = null;
   restored = false;
   private alertsTimer = 0;
@@ -43,17 +45,30 @@ export class Controller {
     const m = this.map;
     m.on('click', (e) => this.onClick(e));
     m.on('mousemove', (e) => this.onHover(e));
+    // Mantener presionado (táctil) o clic derecho: «Ir desde aquí / hasta aquí».
+    m.on('contextmenu', (e) => { e.preventDefault(); app.ctxMenu = { x: e.point.x, y: e.point.y, lon: e.lngLat.lng, lat: e.lngLat.lat }; });
+    let press = 0;
+    m.on('touchstart', (e) => {
+      if ((e.originalEvent as TouchEvent).touches.length !== 1) return;
+      clearTimeout(press);
+      press = window.setTimeout(() => { app.ctxMenu = { x: e.point.x, y: e.point.y, lon: e.lngLat.lng, lat: e.lngLat.lat }; navigator.vibrate?.(10); }, 550);
+    });
+    for (const ev of ['touchend', 'touchcancel', 'dragstart', 'zoomstart', 'rotatestart'] as const) m.on(ev, () => clearTimeout(press));
+    m.on('movestart', () => (app.ctxMenu = null));
     m.on('mouseout', () => { this.fleet.hoverId = null; m.getCanvas().style.cursor = ''; m.triggerRepaint(); });
-    // Seguir no se corta al mover el mapa: arrastrar fija un desfase, acercar y girar no lo cambian (R1.5).
-    m.on('dragstart', () => (this.dragging = true));
-    m.on('dragend', () => {
-      this.dragging = false;
-      const b = this.selectedBus();
-      if (app.following && b) {
-        const p = m.project([b.x / KX, b.y / KY]);
-        const c = m.project(m.getCenter());
-        this.followOffset = [p.x - c.x, p.y - c.y];
-      }
+    // Seguir no se corta al mover el mapa (R1.5). Mientras haya un dedo o el ratón sobre el mapa, o
+    // el mapa siga moviéndose por un gesto (inercia, rueda, pellizco), la cámara no se toca: un
+    // `jumpTo` en medio de un gesto lo cancela. Al terminar, el bus queda donde lo dejó la persona.
+    const el = m.getCanvasContainer();
+    el.addEventListener('pointerdown', (e) => this.pointers.add(e.pointerId), { passive: true });
+    const up = (e: PointerEvent) => { this.pointers.delete(e.pointerId); };
+    addEventListener('pointerup', up, { passive: true });
+    addEventListener('pointercancel', up, { passive: true });
+    m.on('movestart', (e) => { if ((e as { originalEvent?: Event }).originalEvent) this.gesture = true; });
+    m.on('moveend', () => {
+      if (!this.gesture) return;
+      this.gesture = false;
+      if (app.following) this.keepOffset();
     });
     // Cámara guardada para volver al mismo lugar.
     let saveTimer = 0;
@@ -288,7 +303,8 @@ export class Controller {
       if (!app.following) return;
       const b = this.selectedBus();
       // A 30 cuadros por segundo y solo si el bus se movió: la cámara no fuerza cuadros de más (R1.17).
-      if (b && !this.flying && !this.dragging && t - last > 30) {
+      const busy = this.flying || this.gesture || this.pointers.size > 0 || this.map.isMoving();
+      if (b && !busy && t - last > 30) {
         this.fleet.update(Date.now());
         if (Math.abs(b.x - lx) + Math.abs(b.y - ly) > 0.05) {
           lx = b.x; ly = b.y; last = t;
@@ -300,6 +316,26 @@ export class Controller {
       this.followRaf = requestAnimationFrame(tick);
     };
     this.followRaf = requestAnimationFrame(tick);
+  }
+
+  /** Tras un gesto, el desfase es donde quedó el bus en pantalla; si quedó fuera, vuelve al borde. */
+  private keepOffset() {
+    const b = this.selectedBus();
+    if (!b) return;
+    const m = this.map;
+    const p = m.project([b.x / KX, b.y / KY]);
+    const c = m.project(m.getCenter());
+    const { top = 0, bottom = 0, left = 0, right = 0 } = this.padding(), cv = m.getContainer();
+    const M = 40;
+    const x = Math.min(Math.max(p.x, left + M), cv.clientWidth - right - M);
+    const y = Math.min(Math.max(p.y, top + M), cv.clientHeight - bottom - M);
+    this.followOffset = [x - c.x, y - c.y];
+    if (x !== p.x || y !== p.y) {
+      const to = m.unproject(p.sub(new Point(this.followOffset[0], this.followOffset[1])));
+      this.flying = true;
+      m.easeTo({ center: to, duration: 350 });
+      m.once('moveend', () => (this.flying = false));
+    }
   }
 
   stopFollow() {

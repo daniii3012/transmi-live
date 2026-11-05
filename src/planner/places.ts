@@ -26,13 +26,19 @@ export function decodeEnd(s: string): End | null {
   return m ? { kind: 'point', lon: +m[1], lat: +m[2] } : null;
 }
 
-/** Plan en la URL: `de~a~HHMM` (hora vacía = ahora). */
-export function encodePlan(from: End | null, to: End | null, time: string | null): string {
-  return [encodeEnd(from), encodeEnd(to), time?.replace(':', '') ?? ''].join('~');
+export type Day = 'habil' | 'sabado' | 'festivo';
+
+/** Plan en la URL: `de~a~HHMM~día` (hora vacía = ahora; día vacío = hoy). */
+export function encodePlan(from: End | null, to: End | null, time: string | null, day: Day | null = null): string {
+  return [encodeEnd(from), encodeEnd(to), time?.replace(':', '') ?? '', day ?? ''].join('~').replace(/~+$/, '');
 }
-export function decodePlan(id: string): { from: End | null; to: End | null; time: string | null } {
-  const [a = '', b = '', t = ''] = id.split('~');
-  return { from: decodeEnd(a), to: decodeEnd(b), time: /^\d{4}$/.test(t) ? `${t.slice(0, 2)}:${t.slice(2)}` : null };
+export function decodePlan(id: string): { from: End | null; to: End | null; time: string | null; day: Day | null } {
+  const [a = '', b = '', t = '', d = ''] = id.split('~');
+  return {
+    from: decodeEnd(a), to: decodeEnd(b),
+    time: /^\d{4}$/.test(t) ? `${t.slice(0, 2)}:${t.slice(2)}` : null,
+    day: d === 'habil' || d === 'sabado' || d === 'festivo' ? d : null,
+  };
 }
 
 export function endName(net: Network, e: End | null): string {

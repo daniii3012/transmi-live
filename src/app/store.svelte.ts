@@ -45,6 +45,8 @@ class AppState {
   sheetHeight = $state(0);
   locating = $state(false);
   threeD = $state(false);
+  /** Menú del mapa (mantener presionado o clic derecho): punto y posición en pantalla. */
+  ctxMenu = $state<{ x: number; y: number; lon: number; lat: number } | null>(null);
   themePref = $state<'system' | 'dark' | 'light'>('system');
   /** Capas opcionales del mapa (se guardan en el dispositivo). */
   layersOn = $state<{ zonal: boolean; stops: boolean; metro: boolean; trails: boolean }>(loadLayers());
