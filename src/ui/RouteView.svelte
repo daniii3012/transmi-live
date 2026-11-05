@@ -3,12 +3,13 @@
   import { app } from '../app/store.svelte';
   import { go } from '../app/router';
   import { busesByRoute, frequencyNow } from './derive';
-  import { clock, fmtNum, meters, ago, bogotaSeconds } from '../domain/time';
+  import { clock, fmtNum, meters, ago, bogotaSeconds, dayType } from '../domain/time';
   import { bandIndex, bandTimes } from '../domain/eta';
   import RouteBadge from './RouteBadge.svelte';
   import Back from './Back.svelte';
   import Star from './Star.svelte';
   import AlertList from './AlertList.svelte';
+  import HourBars from './HourBars.svelte';
 
   let { id }: { id: string } = $props();
   const net = $derived(app.net!);
@@ -39,6 +40,13 @@
     if (!t?.length) return null;
     return Math.max(1, Math.round((freq.perHour * t[t.length - 1]) / 3600));
   });
+  /** Salidas por hora del tipo de día de hoy (gráfico plegable «Horario de hoy»). */
+  const hours = $derived.by(() => {
+    if (!serviceReady) return null;
+    const d = net.serviceOf(id)?.[dayType(app.now)];
+    return d?.h?.some((n: number) => n > 0) ? d.h : null;
+  });
+  const hourNow = $derived.by(() => { const h = Math.floor(bogotaSeconds(app.now) / 3600); return h < 4 ? h + 24 : h; });
   const others = $derived(route?.pair?.map((p) => net.routes.get(p)!).filter(Boolean) ?? []);
   const alerts = $derived(app.alerts.filter((a) => a.routes.includes(id)));
 
@@ -108,6 +116,12 @@
         {#if expected}· el horario espera <span class="num">~{expected}</span> en vía{/if}
       </p>
     {/if}
+    {#if hours}
+      <details class="hours">
+        <summary class="label">Horario de hoy</summary>
+        <HourBars counts={hours} color={route.color} now={hourNow} />
+      </details>
+    {/if}
 
     {#if others.length}
       <div class="pair">
@@ -167,6 +181,11 @@
   .stats div + div { border-left: 1px solid var(--line-1); }
   dd { margin: 0; font-size: var(--fs-row); }
   .sched { margin: -8px 0 0; font-size: var(--fs-small); }
+  .hours summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--sp-2); color: var(--fg-2); }
+  .hours summary::-webkit-details-marker { display: none; }
+  .hours summary::before { content: '+'; font-family: var(--font-mono); width: 10px; }
+  .hours[open] summary::before { content: '−'; }
+  .hours[open] summary { margin-bottom: var(--sp-3); }
   .pair { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
   .btn { height: 32px; padding: 0 var(--sp-3); border: 1px solid var(--line-2); display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); color: var(--fg-1); }
   .btn:hover { color: var(--fg-0); border-color: var(--fg-3); }
