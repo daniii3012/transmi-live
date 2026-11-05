@@ -4,7 +4,7 @@
   import { go } from '../app/router';
   import { busesByRoute, frequencyNow } from './derive';
   import { clock, fmtNum, meters, ago, bogotaSeconds, dayType } from '../domain/time';
-  import { bandIndex, bandTimes } from '../domain/eta';
+  import { bandIndex, bandTimes, timeAt, nextStopIndex } from '../domain/eta';
   import RouteBadge from './RouteBadge.svelte';
   import Back from './Back.svelte';
   import Star from './Star.svelte';
@@ -40,6 +40,31 @@
     if (!t?.length) return null;
     return Math.max(1, Math.round((freq.perHour * t[t.length - 1]) / 3600));
   });
+  /**
+   * Regularidad: separación en tiempo del horario entre buses seguidos de la ruta. «Juntos» si van a
+   * menos de un tercio del intervalo programado (o a menos de 1 min); hueco, si pasa del doble. Dice
+   * dónde está el hueco mayor (antes de qué parada).
+   */
+  const regularity = $derived.by(() => {
+    void app.version;
+    if (!pattern || !freq?.every || buses.length < 3) return null;
+    const t = bandTimes(pattern, bandIndex(bogotaSeconds(app.now)));
+    if (!t) return null;
+    const on = buses.filter((b) => b.onPath && b.age < 300).map((b) => ({ b, t: timeAt(pattern, t, b.sFix) })).sort((a, c) => c.t - a.t);
+    const every = freq.every * 60;
+    let together = 0, worst = 0, where = '';
+    for (let i = 1; i < on.length; i++) {
+      const h = on[i - 1].t - on[i].t;
+      if (h < Math.max(60, every / 3)) together++;
+      if (h > worst) {
+        worst = h;
+        const k = nextStopIndex(pattern, on[i].b.sFix);
+        where = k >= 0 && k < pattern.stops.length ? net.placeName(pattern.stops[k]) : '';
+      }
+    }
+    return { together, gap: worst > 2 * every ? Math.round(worst / 60) : null, where };
+  });
+
   /** Salidas por hora del tipo de día de hoy (gráfico plegable «Horario de hoy»). */
   const hours = $derived.by(() => {
     if (!serviceReady) return null;
@@ -116,6 +141,13 @@
         {#if expected}· el horario espera <span class="num">~{expected}</span> en vía{/if}
       </p>
     {/if}
+    {#if regularity && (regularity.together || regularity.gap)}
+      <p class="regular faint">
+        {#if regularity.together}<span class="num">{regularity.together}</span> {regularity.together === 1 ? 'par de buses van juntos' : 'pares de buses van juntos'}{/if}
+        {#if regularity.together && regularity.gap} · {/if}
+        {#if regularity.gap}hueco de <span class="num">{regularity.gap} min</span>{regularity.where ? ` antes de ${regularity.where}` : ''}{/if}
+      </p>
+    {/if}
     {#if hours}
       <details class="hours">
         <summary class="label">Horario de hoy</summary>
@@ -181,6 +213,7 @@
   .stats div + div { border-left: 1px solid var(--line-1); }
   dd { margin: 0; font-size: var(--fs-row); }
   .sched { margin: -8px 0 0; font-size: var(--fs-small); }
+  .regular { margin: -8px 0 0; font-size: var(--fs-small); }
   .hours summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--sp-2); color: var(--fg-2); }
   .hours summary::-webkit-details-marker { display: none; }
   .hours summary::before { content: '+'; font-family: var(--font-mono); width: 10px; }
