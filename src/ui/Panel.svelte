@@ -9,6 +9,14 @@
 
   let { children }: { children: Snippet } = $props();
 
+  // Cada vista nueva empieza arriba (si no, heredaba el desplazamiento de la anterior y la cabecera
+  // con «Volver» y «Cerrar» quedaba fuera de la vista).
+  let scrollers: HTMLElement[] = [];
+  $effect(() => {
+    void app.view.kind; void (app.view as { id?: string }).id;
+    for (const el of scrollers) if (el) el.scrollTop = 0;
+  });
+
   // ── Hoja inferior (móvil) ──────────────────────────────────────────────────────────────────
   // Tres alturas: asomada (lo esencial de la vista), media y completa. Arrastre con inercia.
   type Snap = 'peek' | 'half' | 'full';
@@ -84,7 +92,7 @@
       onkeydown={(e) => { if (e.key === 'ArrowUp') snap = snap === 'peek' ? 'half' : 'full'; if (e.key === 'ArrowDown') snap = snap === 'full' ? 'half' : 'peek'; }}>
       <span></span>
     </div>
-    <div class="content scroll" class:locked={snap === 'peek'}>
+    <div class="content scroll" class:locked={snap === 'peek'} bind:this={scrollers[0]}>
       {@render children()}
     </div>
   </section>
@@ -99,7 +107,7 @@
       </div>
       <StatusLine />
     </header>
-    <div class="content scroll">
+    <div class="content scroll" bind:this={scrollers[1]}>
       {@render children()}
     </div>
     <footer class="foot">
