@@ -20,6 +20,7 @@
   import Search from './ui/Search.svelte';
   import MapControls from './ui/MapControls.svelte';
   import LayersPanel from './ui/LayersPanel.svelte';
+  import { applyTheme, effective } from './app/theme';
 
   let container: HTMLDivElement;
   let bearing = $state(0);
@@ -27,7 +28,8 @@
   const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   onMount(() => {
-    const view = new MapView(container);
+    applyTheme(effective());
+    const view = new MapView(container, effective());
     const w = window as any;
     w.__map = view.map;
     view.map.on('rotate', () => (bearing = view.map.getBearing()));
@@ -35,14 +37,16 @@
     (async () => {
       try {
         const [net] = await Promise.all([Network.load(), view.ready()]);
-        const layers = new NetworkLayers(view.map, net);
+        const layers = new NetworkLayers(view.map, net, effective());
         layers.mount();
         const fleet = new Fleet(net);
         // Orden de capas (DISENO.md): buses atenuados bajo la ruta en foco; el resto sobre las estaciones.
         const buses = new BusLayer(fleet, 'main');
-        view.map.addLayer(new BusLayer(fleet, 'dim'), 'route-focus-glow');
+        const dimBuses = new BusLayer(fleet, 'dim');
+        view.map.addLayer(dimBuses, 'route-focus-glow');
         view.map.addLayer(buses, 'stations-label');
         controller = new Controller(view.map, net, fleet, layers, buses);
+        controller.dimBuses = dimBuses;
         setController(controller);
         app.net = net;
         app.fleet = fleet;

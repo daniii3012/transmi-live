@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import { app } from '../app/store.svelte';
   import { go } from '../app/router';
+  import { ctl } from '../app/instance';
   import Brand from './Brand.svelte';
   import StatusLine from './StatusLine.svelte';
 
@@ -18,7 +19,12 @@
   const heights = $derived({ peek: PEEK, half: Math.round(vh * 0.5), full: vh - 64 });
   const height = $derived(dragY !== null ? dragY : heights[snap]);
 
-  $effect(() => { app.sheetHeight = app.narrow ? heights[snap] : 0; });
+  $effect(() => {
+    app.sheetHeight = app.narrow ? heights[snap] : 0;
+    // Tras la transición de altura, el relleno del mapa sigue a la hoja.
+    const t = setTimeout(() => ctl?.syncPadding(), 280);
+    return () => clearTimeout(t);
+  });
   // Al cambiar de vista, la hoja muestra al menos la media altura (la ficha se lee entera).
   $effect(() => {
     const k = app.view.kind;
@@ -105,16 +111,18 @@
 
 <style>
   /* Escritorio: columna fija a la izquierda. */
+  /* Panel flotante, separado del borde: el mapa sigue hasta la orilla (revisión R1.16). */
   .panel {
     position: absolute;
-    top: 0;
-    left: 0;
-    bottom: 0;
+    top: var(--sp-3);
+    left: var(--sp-3);
+    bottom: var(--sp-3);
     width: var(--panel-w);
     display: flex;
     flex-direction: column;
     background: var(--bg-1);
-    border-right: 1px solid var(--line-1);
+    border: 1px solid var(--line-2);
+    box-shadow: var(--shadow);
     z-index: 10;
   }
   .head { padding: var(--sp-3) var(--sp-4) var(--sp-3); border-bottom: 1px solid var(--line-1); display: grid; gap: 6px; }
@@ -156,7 +164,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3);
-    background: rgba(7, 9, 11, 0.9);
+    background: var(--glass);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--line-1);

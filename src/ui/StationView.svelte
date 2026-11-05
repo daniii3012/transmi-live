@@ -10,6 +10,7 @@
   import Star from './Star.svelte';
   import AlertList from './AlertList.svelte';
   import { encodePlan } from '../planner/places';
+  import { ctl } from '../app/instance';
 
   let { id, kind }: { id: string; kind: 'station' | 'stop' } = $props();
   const net = $derived(app.net!);
@@ -32,6 +33,12 @@
     const all = arrivals(net, app.fleet, app.version, stopIds, routeIds, app.now);
     const per = new Map<string, number>();
     return all.filter((a) => { const n = per.get(a.route.id) ?? 0; per.set(a.route.id, n + 1); return n < 2; }).slice(0, 12);
+  });
+
+  $effect(() => {
+    const ids = (next ?? []).slice(0, 6).map((a) => a.bus.id);
+    ctl?.setArriving(ids);
+    return () => ctl?.setArriving([]);
   });
 
   /** Vagones con las rutas que paran en cada uno. */

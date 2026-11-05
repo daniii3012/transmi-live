@@ -1,4 +1,4 @@
-import type { Map as MLMap, MapMouseEvent, PaddingOptions } from 'maplibre-gl';
+import { Point, type Map as MLMap, type MapMouseEvent, type PaddingOptions } from 'maplibre-gl';
 import type { Network } from '../data/network';
 import type { Fleet, Bus } from '../live/fleet';
 import { mercator } from '../live/fleet';
@@ -9,8 +9,10 @@ import { apiBase } from '../live/api';
 import { fetchAlerts } from '../live/alerts';
 import { KX, KY } from '../domain/geo';
 import type { SystemKey } from '../domain/types';
-import { app, saveLayers } from './store.svelte';
+import { app, saveLayers, savePrefs, loadPrefs } from './store.svelte';
 import { setMetro } from '../map/metroLayers';
+import { applyBaseTheme } from '../map/style';
+import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
 import { go, parse, type View } from './router';
 
 export const PANEL_W = 380;
@@ -24,6 +26,13 @@ export class Controller {
   private followRaf = 0;
   private clock = 0;
   private flying = false;
+  /** Pila de vistas de la sesión, para que «Volver» regrese a la anterior (R1.3). */
+  private stack: string[] = [location.hash || '#/'];
+  /** Desfase en píxeles del bus seguido respecto al centro (al arrastrar el mapa mientras se sigue). */
+  private followOffset: [number, number] = [0, 0];
+  private dragging = false;
+  private framedBus: string | null = null;
+  restored = false;
   private alertsTimer = 0;
 
   constructor(private map: MLMap, private net: Network, private fleet: Fleet, private layers: NetworkLayers, private buses: BusLayer) {
@@ -35,17 +44,52 @@ export class Controller {
     m.on('click', (e) => this.onClick(e));
     m.on('mousemove', (e) => this.onHover(e));
     m.on('mouseout', () => { this.fleet.hoverId = null; m.getCanvas().style.cursor = ''; m.triggerRepaint(); });
-    m.on('dragstart', () => this.stopFollow());
-    m.on('rotatestart', (e) => { if ((e as { originalEvent?: Event }).originalEvent) this.stopFollow(); });
-    addEventListener('hashchange', () => this.apply(parse()));
+    // Seguir no se corta al mover el mapa: arrastrar fija un desfase, acercar y girar no lo cambian (R1.5).
+    m.on('dragstart', () => (this.dragging = true));
+    m.on('dragend', () => {
+      this.dragging = false;
+      const b = this.selectedBus();
+      if (app.following && b) {
+        const p = m.project([b.x / KX, b.y / KY]);
+        const c = m.project(m.getCenter());
+        this.followOffset = [p.x - c.x, p.y - c.y];
+      }
+    });
+    // Cámara guardada para volver al mismo lugar.
+    let saveTimer = 0;
+    m.on('moveend', () => {
+      clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(() => {
+        const c = m.getCenter();
+        savePrefs({ camera: { center: [c.lng, c.lat], zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch(), hash: location.hash, at: Date.now() } });
+      }, 500);
+    });
+    addEventListener('hashchange', () => {
+      const h = location.hash || '#/';
+      if (this.stack.length > 1 && this.stack[this.stack.length - 2] === h) this.stack.pop();
+      else if (this.stack[this.stack.length - 1] !== h) this.stack.push(h);
+      this.apply(parse());
+    });
     addEventListener('resize', () => (app.narrow = innerWidth < 760));
     this.clock = window.setInterval(() => (app.now = Date.now()), 1000);
     this.poller.start();
+    this.setTheme(themePref());
+    onSystemChange(() => { if (app.themePref === 'system') this.setTheme('system'); });
     this.applyLayers();
+    this.setHidden(app.hidden);
+    if (loadPrefs().threeD) this.set3d(true, true);
     const alerts = async () => { if (!document.hidden) { const a = await fetchAlerts(apiBase()); if (a) app.alerts = a; } };
     void alerts();
     this.alertsTimer = window.setInterval(alerts, 60_000);
-    this.apply(app.view, true);
+    // Con la cámara guardada para esta misma vista, no se reencuadra al abrir.
+    const cam = loadPrefs().camera;
+    this.apply(app.view, true, this.restored && cam?.hash === (location.hash || ''));
+  }
+
+  /** Volver: a la vista anterior de la sesión; si no hay, al inicio. */
+  back() {
+    if (this.stack.length > 1) history.back();
+    else go({ kind: 'home' });
   }
 
   stop() {
@@ -55,8 +99,17 @@ export class Controller {
     cancelAnimationFrame(this.followRaf);
   }
 
+  /** Buses que llegan pronto a la estación abierta (onda suave en el mapa). */
+  setArriving(ids: string[]) {
+    const s = new Set(ids);
+    if (s.size === this.fleet.arriving.size && ids.every((i) => this.fleet.arriving.has(i))) return;
+    this.fleet.arriving = s;
+    this.map.triggerRepaint();
+  }
+
   /** Filtro por sistema: buses y trazados. */
   setHidden(list: SystemKey[]) {
+    savePrefs({ hidden: list });
     this.fleet.hidden = new Set(list);
     this.layers.setHidden(this.fleet.hidden);
     this.map.triggerRepaint();
@@ -67,6 +120,13 @@ export class Controller {
 
   private onData(d: Parameters<Fleet['ingest']>[0]) {
     this.fleet.ingest(d);
+    // Una vista de bus abierta antes de tener datos (recarga, enlace): se encuadra en cuanto aparece.
+    const v = app.view;
+    if (v.kind === 'bus' && this.framedBus !== v.id && this.fleet.buses.has(v.id)) {
+      this.framedBus = v.id;
+      if (!this.restored) this.frame(v);
+      if (app.following) this.startFollow();
+    }
     app.counts = this.fleet.counts();
     app.version++;
     const n = Object.values(app.counts).reduce((a, b) => a + b, 0);
@@ -78,8 +138,9 @@ export class Controller {
   }
 
   // ── Vistas ─────────────────────────────────────────────────────────────────────────────────
-  apply(v: View, initial = false) {
+  apply(v: View, initial = false, keepCamera = false) {
     app.view = v;
+    if (!keepCamera) this.restored = false;
     const f = this.fleet;
     f.selectedId = null;
     let focus: string | null = null;
@@ -105,8 +166,11 @@ export class Controller {
     if (v.kind === 'route' || v.kind === 'bus' || v.kind === 'station') void this.net.loadPatterns().then(() => (app.patternsReady = true));
     if (v.kind === 'stop') void this.net.loadStreetStops().then(() => this.frame(v, initial));
     // En móvil la hoja cambia de altura con la vista: se encuadra cuando ya tiene la nueva.
-    if (app.narrow) setTimeout(() => this.frame(v, initial), initial ? 120 : 40);
-    else this.frame(v, initial);
+    if (!keepCamera) {
+      if (app.narrow) setTimeout(() => this.frame(v, initial), initial ? 120 : 40);
+      else this.frame(v, initial);
+    }
+    if (v.kind === 'bus' && this.fleet.buses.has(v.id)) this.framedBus = v.id;
     if (v.kind === 'bus') this.startFollow();
   }
 
@@ -118,6 +182,8 @@ export class Controller {
     if (v.kind === 'route') {
       const p = this.net.paths.get(v.id);
       if (!p) return;
+      // El trazo se dibuja cuando la cámara llega (R1.13).
+      this.afterMove(() => this.layers.drawFocus(1600), opts.duration);
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (let i = 0; i < p.lonlat.length; i += 2) {
         x0 = Math.min(x0, p.lonlat[i]); x1 = Math.max(x1, p.lonlat[i]);
@@ -130,6 +196,8 @@ export class Controller {
     } else if (v.kind === 'stop') {
       const s = this.net.streetStops.get(v.id);
       if (s) this.flyTo([s.lon, s.lat], Math.max(m.getZoom(), 16.5), opts);
+    } else if (v.kind === 'plan' && this.planBounds) {
+      this.map.fitBounds(this.planBounds, { padding: this.padding(48), duration: 900, maxZoom: 16 });
     } else if (v.kind === 'bus') {
       const b = this.fleet.buses.get(v.id);
       if (b) this.flyTo([b.x / KX, b.y / KY], Math.max(m.getZoom(), 15.5), opts);
@@ -142,13 +210,19 @@ export class Controller {
     this.map.once('moveend', () => (this.flying = false));
   }
 
+  /** El centro del mapa queda en la parte visible (sobre la hoja inferior), y el paneo llega hasta ahí (R1.4). */
+  syncPadding() {
+    this.map.setPadding(this.padding());
+  }
+
   padding(extra = 0): PaddingOptions {
     if (app.narrow) return { top: 56 + extra, bottom: Math.max(120, app.sheetHeight) + extra, left: extra / 2, right: extra / 2 };
-    return { top: extra, bottom: extra, left: PANEL_W + extra, right: 56 + extra };
+    return { top: extra, bottom: extra, left: PANEL_W + 12 + extra, right: 56 + extra };
   }
 
   // ── Viaje planeado ─────────────────────────────────────────────────────────────────────────
   private planKey = '';
+  private planBounds: [[number, number], [number, number]] | null = null;
   showJourney(j: import('../planner/planner.worker').Answer['journeys'][number] | null, from: import('../planner/places').End | null, to: import('../planner/places').End | null) {
     if (!j || app.view.kind !== 'plan') {
       if (this.planKey) { this.layers.setPlan(null); this.planKey = ''; this.fleet.focusRoutes = null; this.map.triggerRepaint(); }
@@ -198,20 +272,30 @@ export class Controller {
     if (all.length) {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const [x, y] of all) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+      this.planBounds = [[x0, y0], [x1, y1]];
       this.map.fitBounds([[x0, y0], [x1, y1]], { padding: this.padding(48), duration: 900, maxZoom: 16 });
+      this.afterMove(() => this.layers.drawPlan(), 900);
     }
   }
 
   // ── Seguimiento ────────────────────────────────────────────────────────────────────────────
   startFollow() {
     app.following = true;
+    this.followOffset = [0, 0];
     cancelAnimationFrame(this.followRaf);
-    const tick = () => {
+    let last = 0, lx = 0, ly = 0;
+    const tick = (t: number) => {
       if (!app.following) return;
       const b = this.selectedBus();
-      if (b && !this.flying) {
+      // A 30 cuadros por segundo y solo si el bus se movió: la cámara no fuerza cuadros de más (R1.17).
+      if (b && !this.flying && !this.dragging && t - last > 30) {
         this.fleet.update(Date.now());
-        this.map.jumpTo({ center: [b.x / KX, b.y / KY], padding: this.padding() });
+        if (Math.abs(b.x - lx) + Math.abs(b.y - ly) > 0.05) {
+          lx = b.x; ly = b.y; last = t;
+          const m = this.map;
+          const c = m.unproject(m.project([b.x / KX, b.y / KY]).sub(new Point(this.followOffset[0], this.followOffset[1])));
+          m.jumpTo({ center: c });
+        }
       }
       this.followRaf = requestAnimationFrame(tick);
     };
@@ -270,6 +354,24 @@ export class Controller {
   }
 
   // ── Cámara general ─────────────────────────────────────────────────────────────────────────
+  /** Tema: según el sistema, oscuro o claro. Mapa base, red, buses e interfaz cambian juntos. */
+  setTheme(pref: ThemePref) {
+    saveThemePref(pref);
+    app.themePref = pref;
+    const t = effective(pref);
+    applyTheme(t);
+    applyBaseTheme(this.map, t);
+    this.layers.setTheme(t);
+    const rim: [number, number, number] = t === 'light' ? [0.97, 0.975, 0.98] : [0.063, 0.078, 0.094];
+    const ring: [number, number, number] = t === 'light' ? [0.2, 0.24, 0.28] : [0.94, 0.95, 0.96];
+    const mute: [number, number, number] = t === 'light' ? [0.78, 0.81, 0.84] : [0.16, 0.18, 0.21];
+    this.buses.setColors(rim, ring, mute);
+    this.dimBuses?.setColors(rim, ring, mute);
+    this.map.triggerRepaint();
+  }
+
+  dimBuses?: BusLayer;
+
   /** Capas opcionales: rutas zonales, paraderos, metro L1, estelas de toda la flota. */
   setLayer(key: keyof typeof app.layersOn, on: boolean) {
     app.layersOn = { ...app.layersOn, [key]: on };
@@ -286,14 +388,31 @@ export class Controller {
     m.triggerRepaint();
   }
 
-  /** Vista 3D: cámara inclinada y edificios extruidos (hito 7). */
-  set3d(on: boolean) {
+  /** Ejecuta `fn` cuando termine el movimiento de cámara en curso (o enseguida si no hay). */
+  private afterMove(fn: () => void, duration: number) {
+    if (duration <= 0) { setTimeout(fn, 60); return; }
+    let done = false;
+    const go = () => { if (!done) { done = true; fn(); } };
+    this.map.once('moveend', go);
+    setTimeout(go, duration + 400);
+  }
+
+  /** Vista 3D: solo inclina la cámara (sin acercar), reencuadra lo que esté en foco y repite su trazo (R1.6). */
+  set3d(on: boolean, instant = false) {
     app.threeD = on;
+    savePrefs({ threeD: on });
     void setMetro(this.map, app.layersOn.metro, on);
     // Los edificios van debajo de la red: la tapan donde corresponde, pero nunca a los buses.
     this.map.setLayoutProperty('building-3d', 'visibility', on ? 'visible' : 'none');
     this.map.setLayoutProperty('building', 'visibility', on ? 'none' : 'visible');
-    this.map.easeTo({ pitch: on ? 58 : 0, bearing: on ? (this.map.getBearing() || -18) : this.map.getBearing(), zoom: on ? Math.max(this.map.getZoom(), 15.2) : this.map.getZoom(), duration: 900, padding: this.padding() });
+    if (instant) { this.map.jumpTo({ pitch: on ? 55 : 0 }); return; }
+    const v = app.view;
+    this.map.easeTo({ pitch: on ? 55 : 0, bearing: on ? (this.map.getBearing() || -18) : this.map.getBearing(), duration: 700 });
+    this.afterMove(() => {
+      if (v.kind === 'route' || v.kind === 'plan' || v.kind === 'station' || v.kind === 'stop') this.frame(v);
+      if (v.kind === 'route') this.afterMove(() => this.layers.drawFocus(1600), 900);
+      if (v.kind === 'plan') this.afterMove(() => this.layers.drawPlan(), 900);
+    }, 700);
   }
 
   zoom(d: number) { this.map.easeTo({ zoom: this.map.getZoom() + d, duration: 220 }); }

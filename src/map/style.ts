@@ -8,26 +8,25 @@ import type { StyleSpecification, ExpressionSpecification } from 'maplibre-gl';
  * aparecen desde z14 y nunca compiten con las etiquetas de estaciones.
  */
 
-const C = {
-  bg: '#07090b',
-  land: '#090c0f',
-  water: '#0a141d',
-  waterLine: '#0e1b27',
-  park: '#0a110e',
-  wood: '#0a100d',
-  building: '#0f1317',
-  buildingLine: '#151a20',
-  aeroway: '#12171c',
-  road0: '#13181d', // servicio, sendero
-  road1: '#181e24', // local
-  road2: '#1f262d', // terciaria
-  road3: '#262e37', // secundaria, primaria
-  road4: '#2d3640', // troncal urbana, autopista
-  rail: '#1d242b',
-  label: '#5a636d',
-  labelMajor: '#6f7882',
-  labelHalo: '#07090b',
+import type { Theme } from '../app/theme';
+
+/** Paletas del mapa base: grafito (oscuro) y gris claro. La red pone el color encima. */
+export const PALETTES = {
+  dark: {
+    bg: '#101418', water: '#0f1c27', waterLine: '#132433', park: '#121a16', wood: '#111915',
+    building: '#171c21', buildingLine: '#1e242b', b3dLow: '#191f25', b3dHigh: '#26303a', aeroway: '#1a2026',
+    road0: '#1a2026', road1: '#20272e', road2: '#272f37', road3: '#2f3842', road4: '#37414c', rail: '#262e36',
+    label: '#68717b', labelMajor: '#7e8791', place: '#525b65', labelHalo: '#101418',
+  },
+  light: {
+    bg: '#e9ecef', water: '#c7d4e0', waterLine: '#b9c9d8', park: '#dde5dc', wood: '#d8e0d6',
+    building: '#dfe2e6', buildingLine: '#d3d8dd', b3dLow: '#e2e5e9', b3dHigh: '#d0d6dc', aeroway: '#e0e4e8',
+    road0: '#f3f4f6', road1: '#f7f8f9', road2: '#fbfbfc', road3: '#ffffff', road4: '#ffffff', rail: '#c3c9cf',
+    label: '#7d8690', labelMajor: '#5f6872', place: '#8a939c', labelHalo: '#e9ecef',
+  },
 } as const;
+type Pal = (typeof PALETTES)['dark'] | (typeof PALETTES)['light'];
+let C: Pal = PALETTES.dark;
 
 const line = (stops: [number, number][]): ExpressionSpecification =>
   ['interpolate', ['exponential', 1.6], ['zoom'], ...stops.flat()] as ExpressionSpecification;
@@ -39,7 +38,8 @@ const cls = (...c: string[]): ExpressionSpecification => ['match', ['get', 'clas
 export const SOURCE_URL = 'https://tiles.openfreemap.org/planet';
 export const GLYPHS_URL = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
 
-export function darkStyle(): StyleSpecification {
+export function darkStyle(theme: Theme = 'dark'): StyleSpecification {
+  C = PALETTES[theme];
   return {
     version: 8,
     name: 'transmi-dark',
@@ -95,7 +95,7 @@ export function darkStyle(): StyleSpecification {
         id: 'building-3d', type: 'fill-extrusion', source: 'omt', 'source-layer': 'building', minzoom: 14.5,
         layout: { visibility: 'none' },
         paint: {
-          'fill-extrusion-color': ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 6], 0, '#11161b', 60, '#1a2129'],
+          'fill-extrusion-color': ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 6], 0, C.b3dLow, 60, C.b3dHigh],
           'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14.5, 0, 15.5, ['coalesce', ['get', 'render_height'], 6]],
           'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
           'fill-extrusion-opacity': 0.92,
@@ -171,7 +171,7 @@ export function darkStyle(): StyleSpecification {
           'text-letter-spacing': 0.12,
           'text-max-width': 8,
         },
-        paint: { 'text-color': '#454d56', 'text-halo-color': C.labelHalo, 'text-halo-width': 1.2 },
+        paint: { 'text-color': C.place, 'text-halo-color': C.labelHalo, 'text-halo-width': 1.2 },
       },
       {
         id: 'place-town', type: 'symbol', source: 'omt', 'source-layer': 'place', minzoom: 9, maxzoom: 14,
@@ -187,4 +187,31 @@ export function darkStyle(): StyleSpecification {
       },
     ],
   };
+}
+
+/** Cambia los colores del mapa base en el lugar, sin recargar el estilo (las capas propias siguen). */
+export function applyBaseTheme(map: import('maplibre-gl').Map, theme: Theme) {
+  const P = PALETTES[theme];
+  const set = (id: string, prop: string, v: unknown) => { if (map.getLayer(id)) map.setPaintProperty(id, prop as never, v as never); };
+  set('bg', 'background-color', P.bg);
+  set('landcover-wood', 'fill-color', P.wood);
+  set('landuse-park', 'fill-color', P.park);
+  set('landcover-grass', 'fill-color', P.park);
+  set('water', 'fill-color', P.water);
+  set('waterway', 'line-color', P.waterLine);
+  set('aeroway', 'fill-color', P.aeroway);
+  set('building', 'fill-color', P.building);
+  set('building', 'fill-outline-color', P.buildingLine);
+  set('building-3d', 'fill-extrusion-color', ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 6], 0, P.b3dLow, 60, P.b3dHigh]);
+  set('road-path', 'line-color', P.road0);
+  set('road-service', 'line-color', P.road0);
+  set('road-minor', 'line-color', P.road1);
+  set('road-tertiary', 'line-color', P.road2);
+  set('road-secondary', 'line-color', P.road3);
+  set('road-trunk', 'line-color', P.road4);
+  set('rail', 'line-color', P.rail);
+  for (const id of ['road-name', 'place-neighbourhood', 'place-town']) set(id, 'text-halo-color', P.labelHalo);
+  set('road-name', 'text-color', P.label);
+  set('place-neighbourhood', 'text-color', P.place);
+  set('place-town', 'text-color', P.labelMajor);
 }

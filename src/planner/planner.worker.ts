@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { buildModel, type Sources } from './model';
-import { plan, accessFrom, type Access, type Journey, type Model } from './raptor';
+import { alternatives, accessFrom, type Access, type Journey, type Model } from './raptor';
 
 /** Planificador en su propio hilo: carga los datos, arma el modelo por tipo de día y responde. */
 let sources: Promise<Sources> | null = null;
@@ -34,7 +34,7 @@ self.onmessage = async (e: MessageEvent<Query>) => {
     const src = await sources;
     let m = models.get(q.day);
     if (!m) { m = buildModel(src, q.day); models.set(q.day, m); }
-    const js = plan(m, access(m, q.from), access(m, q.to), q.depart, 4);
+    const js = alternatives(m, access(m, q.from), access(m, q.to), q.depart, 4);
     const journeys = js.map((j) => {
       const stopIds: Record<number, string> = {}, routeIds: Record<number, string> = {};
       for (const l of j.legs) {

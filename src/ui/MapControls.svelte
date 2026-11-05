@@ -29,7 +29,7 @@
 <style>
   .controls { position: absolute; right: var(--sp-4); bottom: calc(var(--sp-6) + 20px); display: grid; gap: var(--sp-2); z-index: 5; }
   .controls.narrow { right: var(--sp-3); bottom: calc(var(--sheet) + var(--sp-3)); transition: bottom 260ms var(--ease-out); }
-  .group { display: grid; background: rgba(12, 15, 18, 0.92); border: 1px solid var(--line-2); }
+  .group { display: grid; background: var(--glass); box-shadow: var(--shadow); border: 1px solid var(--line-2); }
   .group button + button { border-top: 1px solid var(--line-1); }
   button { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; color: var(--fg-1); transition: color var(--t-out), background var(--t-out); }
   button:hover { color: var(--fg-0); background: var(--bg-2); }

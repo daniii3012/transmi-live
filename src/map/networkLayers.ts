@@ -1,21 +1,29 @@
 import type { Map as MLMap, GeoJSONSource, ExpressionSpecification } from 'maplibre-gl';
 import type { Network } from '../data/network';
 import type { SystemKey } from '../domain/types';
+import palette from '../../data/curated/palette.json';
 
 type FC = GeoJSON.FeatureCollection;
 const W = (stops: [number, number][]): ExpressionSpecification =>
   ['interpolate', ['exponential', 1.5], ['zoom'], ...stops.flat()] as ExpressionSpecification;
 
-const BG = '#07090b';
+import type { Theme } from '../app/theme';
+
+/** Colores de la red que dependen del tema (fondo de las mezclas, atenuado, nombres, estaciones). */
+const THEMES = {
+  dark: { bg: '#101418', dim: '#2a3139', label: '#a7b0b9', labelDim: '#3d4650', closed: '#56606b', station: '#e3e7eb', stopFill: '#161b20', stopStroke: '#7b93b8', light: '#e9ecef' },
+  light: { bg: '#e9ecef', dim: '#cfd5db', label: '#4a5560', labelDim: '#b4bbc2', closed: '#a3abb4', station: '#ffffff', stopFill: '#fbfbfc', stopStroke: '#5f7aa3', light: '#12171c' },
+} as const;
+let BG: string = THEMES.dark.bg;
 
 /** Mezcla opaca de `color` sobre el fondo. Las líneas translúcidas superpuestas se suman (veinte
  * rutas zonales por calle acaban brillando como una sola opaca); un color ya mezclado no. */
-export function mix(color: string, k: number, bg = BG): string {
+export function mix(color: string, k: number, bg: string = BG): string {
   const h = (s: string) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16));
   const a = h(color), b = h(bg);
   return '#' + a.map((v, i) => Math.round(b[i] + (v - b[i]) * k).toString(16).padStart(2, '0')).join('');
 }
-const ZONAL = { alimentador: '#3fbf6f', zonal: '#3d8bfd' };
+const ZONAL = { alimentador: '#5d9c7b', zonal: '#6f86ab' };
 /** Troncal: a escala de ciudad la línea baja a la mitad para que los buses (del mismo color) se lean
  * encima; desde z14, el color pleno. */
 const CORE_COLOR: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 11, ['get', 'dcolor'], 14, ['get', 'color']];
@@ -35,13 +43,41 @@ export class NetworkLayers {
   private hidden = new Set<SystemKey>();
   private drawAnim = 0;
 
-  constructor(private map: MLMap, private net: Network) {}
+  private theme: Theme = 'dark';
+
+  constructor(private map: MLMap, private net: Network, theme: Theme = 'dark') {
+    this.theme = theme;
+    BG = THEMES[theme].bg;
+  }
+
+  /** Cambia los colores de la red al tema dado. */
+  setTheme(theme: Theme) {
+    this.theme = theme;
+    const T = THEMES[theme];
+    BG = T.bg;
+    const m = this.map;
+    for (const id of ['routes-core-casing', 'corridors-casing', 'plan-casing']) m.setPaintProperty(id, 'line-color', T.bg);
+    m.setPaintProperty('stations-label', 'text-halo-color', T.bg);
+    m.setPaintProperty('stations-label', 'text-color', ['case', ['get', 'closed'], T.closed, ['boolean', ['feature-state', 'dim'], false], T.labelDim, T.label]);
+    m.setPaintProperty('street-stops', 'circle-color', T.stopFill);
+    m.setPaintProperty('street-stops', 'circle-stroke-color', T.stopStroke);
+    m.setPaintProperty('user', 'circle-stroke-color', T.bg);
+    m.setPaintProperty('plan-walk', 'line-color', T.light);
+    m.setPaintProperty('plan-ends', 'circle-color', ['case', ['get', 'dest'], T.light, T.bg]);
+    m.setPaintProperty('plan-ends', 'circle-stroke-color', T.light);
+    this.addImages(true);
+    // El trazado de dual y cable a escala de ciudad va premezclado con el fondo: se rehace.
+    (m.getSource('routes-core') as GeoJSONSource)?.setData(this.routesFC(['troncal', 'dual', 'cable']));
+    if (this.net.paths.size > 200) (m.getSource('routes-zonal') as GeoJSONSource)?.setData(this.routesFC(['alimentador', 'zonal']));
+    this.applyFilters();
+  }
 
   mount() {
     const m = this.map;
     this.addImages();
     m.addSource('routes-zonal', { type: 'geojson', data: empty(), tolerance: 0.6 });
     m.addSource('routes-core', { type: 'geojson', data: this.routesFC(['troncal', 'dual', 'cable']), tolerance: 0.3 });
+    m.addSource('corridors', { type: 'geojson', data: this.corridorsFC(), tolerance: 0.3 });
     m.addSource('route-focus', { type: 'geojson', data: empty(), lineMetrics: true });
     m.addSource('stations', { type: 'geojson', data: this.stationsFC(), promoteId: 'id' });
     m.addSource('selected-place', { type: 'geojson', data: empty() });
@@ -53,6 +89,18 @@ export class NetworkLayers {
       id: 'routes-zonal', type: 'line', source: 'routes-zonal',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: { 'line-color': zonalColor(0.3), 'line-width': W([[10, 0.4], [13, 0.9], [16, 2], [19, 4]]) },
+    });
+    // Corredores troncales con el color de su troncal (no de cada ruta: un sentido y el otro se
+    // pintaban distinto). El color de la ruta aparece cuando está en foco.
+    m.addLayer({
+      id: 'corridors-casing', type: 'line', source: 'corridors',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': BG, 'line-width': W([[10, 2.8], [13, 4.6], [16, 8], [19, 14]]) },
+    });
+    m.addLayer({
+      id: 'corridors', type: 'line', source: 'corridors',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': ['get', 'color'], 'line-width': W([[10, 1.4], [13, 2.4], [16, 4.2], [19, 8]]), 'line-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0.85, 16, 0.6] },
     });
     m.addLayer({
       id: 'routes-core-casing', type: 'line', source: 'routes-core',
@@ -190,11 +238,54 @@ export class NetworkLayers {
   }
 
   private planOn = false;
+  private planFull: FC | null = null;
+  private planAnim = 0;
   /** Dibuja un viaje (o lo quita con `null`); con viaje, la red se atenúa como con una ruta en foco. */
   setPlan(fc: FC | null) {
+    cancelAnimationFrame(this.planAnim);
+    this.planFull = fc;
     (this.map.getSource('plan') as GeoJSONSource).setData(fc ?? empty());
     this.planOn = !!fc;
     this.applyFilters();
+  }
+
+  /** Recorrido del viaje tramo a tramo, en orden, como si se viajara (R1.15). Las líneas se van
+   * revelando cortando su geometría: cada tramo tiene su color y el gradiente de MapLibre no admite
+   * colores por elemento. */
+  drawPlan(duration = 2200) {
+    const full = this.planFull;
+    if (!full) return;
+    cancelAnimationFrame(this.planAnim);
+    const lines = full.features.filter((f) => f.geometry.type === 'LineString') as GeoJSON.Feature<GeoJSON.LineString>[];
+    const others = full.features.filter((f) => f.geometry.type !== 'LineString');
+    const len = (c: number[][]) => { let s = 0; for (let i = 1; i < c.length; i++) s += Math.hypot(c[i][0] - c[i - 1][0], c[i][1] - c[i - 1][1]); return s; };
+    const lens = lines.map((f) => len(f.geometry.coordinates));
+    const total = lens.reduce((a, b) => a + b, 0) || 1;
+    const t0 = performance.now();
+    const dur = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : duration;
+    const step = () => {
+      const k = Math.min(1, (performance.now() - t0) / dur);
+      let budget = (1 - Math.pow(1 - k, 2)) * total;
+      const shown: GeoJSON.Feature[] = [];
+      lines.forEach((f, i) => {
+        if (budget <= 0) return;
+        const c = f.geometry.coordinates;
+        if (budget >= lens[i]) { shown.push(f); budget -= lens[i]; return; }
+        const out = [c[0]];
+        let acc = 0;
+        for (let j = 1; j < c.length && acc < budget; j++) {
+          const d = Math.hypot(c[j][0] - c[j - 1][0], c[j][1] - c[j - 1][1]);
+          if (acc + d <= budget) out.push(c[j]);
+          else { const r = (budget - acc) / d; out.push([c[j - 1][0] + (c[j][0] - c[j - 1][0]) * r, c[j - 1][1] + (c[j][1] - c[j - 1][1]) * r]); }
+          acc += d;
+        }
+        shown.push({ ...f, geometry: { type: 'LineString', coordinates: out } });
+        budget = 0;
+      });
+      (this.map.getSource('plan') as GeoJSONSource).setData({ type: 'FeatureCollection', features: [...shown, ...others] });
+      if (k < 1) this.planAnim = requestAnimationFrame(step);
+    };
+    step();
   }
 
   /** Sistemas ocultos por el filtro. */
@@ -203,33 +294,44 @@ export class NetworkLayers {
     this.applyFilters();
   }
 
-  /** Resalta una ruta (o ninguna) y atenúa el resto. El trazo se dibuja de origen a destino. */
+  private focusColor = '#ffffff';
+
+  /** Resalta una ruta (o ninguna) y atenúa el resto. El trazo animado lo pide el controlador
+   * (`drawFocus`) cuando la cámara llega a la ruta. */
   setFocus(routeId: string | null) {
     if (routeId === this.focusId) return;
     this.focusId = routeId;
     const src = this.map.getSource('route-focus') as GeoJSONSource;
     cancelAnimationFrame(this.drawAnim);
-    if (!routeId) {
+    const r = routeId ? this.net.routes.get(routeId) : undefined;
+    const path = routeId ? this.net.paths.get(routeId) : undefined;
+    if (!r || !path) {
       src.setData(empty());
       this.applyFilters();
       this.dimStations(null);
       return;
     }
-    const r = this.net.routes.get(routeId);
-    const path = this.net.paths.get(routeId);
-    if (!r || !path) { src.setData(empty()); this.applyFilters(); return; }
+    this.focusColor = r.color;
     src.setData({
       type: 'FeatureCollection',
       features: [{ type: 'Feature', properties: { color: r.color }, geometry: { type: 'LineString', coordinates: coords(path.lonlat) } }],
     });
+    this.map.setPaintProperty('route-focus', 'line-gradient', gradient(r.color, 1));
     this.applyFilters();
     this.dimStations(r.id);
+  }
+
+  /** Trazo de la ruta en foco de origen a destino, con la punta blanca (R1.13). */
+  drawFocus(duration = 1600) {
+    if (!this.focusId) return;
+    cancelAnimationFrame(this.drawAnim);
+    const color = this.focusColor;
     const t0 = performance.now();
-    const dur = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 900;
+    const dur = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : duration;
     const step = () => {
       const k = Math.min(1, (performance.now() - t0) / dur);
-      const e = 1 - Math.pow(1 - k, 3);
-      this.map.setPaintProperty('route-focus', 'line-gradient', gradient(r.color, e));
+      const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      this.map.setPaintProperty('route-focus', 'line-gradient', gradient(color, e));
       if (k < 1) this.drawAnim = requestAnimationFrame(step);
     };
     step();
@@ -246,11 +348,17 @@ export class NetworkLayers {
     const m = this.map;
     const hidden = [...this.hidden];
     const visible: ExpressionSpecification = ['!', ['in', ['get', 'sys'], ['literal', hidden]]];
-    m.setFilter('routes-core', visible);
-    m.setFilter('routes-core-casing', visible);
+    // La troncal se dibuja como corredores; aquí quedan dual y cable.
+    const coreVisible: ExpressionSpecification = ['all', visible, ['!=', ['get', 'sys'], 'troncal']];
+    m.setFilter('routes-core', coreVisible);
+    m.setFilter('routes-core-casing', coreVisible);
+    m.setLayoutProperty('corridors', 'visibility', hidden.includes('troncal') ? 'none' : 'visible');
+    m.setLayoutProperty('corridors-casing', 'visibility', hidden.includes('troncal') ? 'none' : 'visible');
     m.setFilter('routes-zonal', visible);
     const f = this.focusId || this.planOn;
-    m.setPaintProperty('routes-core', 'line-color', f ? '#252c34' : CORE_COLOR);
+    const dim = THEMES[this.theme].dim;
+    m.setPaintProperty('routes-core', 'line-color', f ? dim : CORE_COLOR);
+    m.setPaintProperty('corridors', 'line-color', f ? dim : ['get', 'color']);
     m.setPaintProperty('routes-zonal', 'line-color', zonalColor(f ? 0.12 : 0.3));
   }
 
@@ -270,6 +378,18 @@ export class NetworkLayers {
     return { type: 'FeatureCollection', features };
   }
 
+  private corridorsFC(): FC {
+    const zones = palette.zones as Record<string, { color: string }>;
+    return {
+      type: 'FeatureCollection',
+      features: this.net.corridors.map((s) => ({
+        type: 'Feature',
+        properties: { z: s.z, color: s.z && zones[s.z] ? zones[s.z].color : '#8b939e' },
+        geometry: { type: 'LineString', coordinates: s.c },
+      })),
+    };
+  }
+
   private stationsFC(): FC {
     return {
       type: 'FeatureCollection',
@@ -283,7 +403,8 @@ export class NetworkLayers {
 
   /** Marcas de estación dibujadas en lienzo: cuadrado claro con borde oscuro; portal más grande;
    * estación sin servicio, hueca. A 2× para pantallas densas. */
-  private addImages() {
+  private addImages(replace = false) {
+    const T = THEMES[this.theme];
     const make = (size: number, fill: string, stroke: string, hollow = false) => {
       const px = size * 2;
       const c = new OffscreenCanvas(px, px);
@@ -299,18 +420,24 @@ export class NetworkLayers {
       }
       return g.getImageData(0, 0, px, px);
     };
-    this.map.addImage('st', make(9, '#dfe3e8', BG), { pixelRatio: 2 });
-    this.map.addImage('st-portal', make(13, '#ffffff', BG), { pixelRatio: 2 });
-    this.map.addImage('st-closed', make(9, '#4d5560', BG, true), { pixelRatio: 2 });
+    const put = (name: string, img: ImageData) => {
+      if (replace && this.map.hasImage(name)) this.map.updateImage(name, img);
+      else this.map.addImage(name, img, { pixelRatio: 2 });
+    };
+    // Estación: cuadro claro con borde del color del fondo (en claro, borde gris para que se vea).
+    const edge = this.theme === 'light' ? '#59636e' : BG;
+    put('st', make(9, T.station, edge));
+    put('st-portal', make(13, T.station, edge));
+    put('st-closed', make(9, T.closed, BG, true));
     // Escuadras de selección: cuatro ángulos, el mismo gesto que el bus seleccionado.
     const px = 64, c = new OffscreenCanvas(px, px), g = c.getContext('2d')!;
-    g.fillStyle = '#eceff2';
+    g.fillStyle = T.light;
     const arm = 14, th = 3;
     for (const [x, y, sx, sy] of [[0, 0, 1, 1], [px, 0, -1, 1], [0, px, 1, -1], [px, px, -1, -1]]) {
       g.fillRect(sx > 0 ? x : x - arm, sy > 0 ? y : y - th, arm, th);
       g.fillRect(sx > 0 ? x : x - th, sy > 0 ? y : y - arm, th, arm);
     }
-    this.map.addImage('sel', g.getImageData(0, 0, px, px), { pixelRatio: 2 });
+    put('sel', g.getImageData(0, 0, px, px));
   }
 }
 

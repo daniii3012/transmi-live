@@ -33,7 +33,7 @@
   const others = $derived(route?.pair?.map((p) => net.routes.get(p)!).filter(Boolean) ?? []);
   const alerts = $derived(app.alerts.filter((a) => a.routes.includes(id)));
 
-  const ROW = 40;
+  const ROW = 52;
   /** Paradas del patrón. */
   const rows = $derived.by(() => {
     if (!pattern) return [];
@@ -149,11 +149,11 @@
   .dhead { display: flex; justify-content: space-between; margin-bottom: var(--sp-2); }
   .loading { font-size: var(--fs-small); }
   ol { list-style: none; margin: 0; padding: 0; }
-  li { position: relative; height: 40px; }
+  li { position: relative; height: 52px; }
   /* Línea de la ruta: une el centro de las marcas. */
-  li::before { content: ''; position: absolute; left: 7px; top: 20px; bottom: -20px; width: 2px; background: var(--c); opacity: 0.85; }
+  li::before { content: ''; position: absolute; left: 7px; top: 26px; bottom: -26px; width: 2px; background: var(--c); opacity: 0.85; }
   li.end::before { display: none; }
-  .stop { position: absolute; inset: 0 0 auto 0; height: 40px; display: grid; grid-template-columns: 16px 1fr; align-items: center; gap: var(--sp-3); text-align: left; padding-right: 96px; }
+  .stop { position: absolute; inset: 0 0 auto 0; height: 52px; display: grid; grid-template-columns: 16px 1fr; align-items: center; gap: var(--sp-3); text-align: left; padding-right: 96px; }
   .stop:hover .sname { color: var(--fg-0); }
   .tick { width: 10px; height: 10px; margin-left: 3px; background: var(--bg-1); border: 2px solid var(--c); position: relative; z-index: 1; }
   .tick.terminal { background: var(--fg-0); border-color: var(--fg-0); }

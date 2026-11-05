@@ -1,9 +1,9 @@
 <script lang="ts">
+  import { ctl } from '../app/instance';
   import { go } from '../app/router';
-  // Atrás del navegador si la vista anterior es de esta aplicación; si no, al inicio.
+  // A la vista anterior de esta sesión (pila del controlador); si no hay, al inicio.
   function back() {
-    if (history.length > 1 && document.referrer === '' ) history.back();
-    else go({ kind: 'home' });
+    if (ctl) ctl.back(); else go({ kind: 'home' });
   }
 </script>
 

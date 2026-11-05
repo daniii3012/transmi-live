@@ -1,18 +1,24 @@
 /* Fichas de diseño. Ver docs/DISENO.md en el repositorio del Worker.
  * Retícula de 4 px, esquinas rectas, líneas de 1 px, color reservado a las rutas. */
 :root {
-  --bg-0: #07090b;
-  --bg-1: #0c0f12;
-  --bg-2: #12161a;
-  --bg-3: #192026;
-  --line-1: #1c2228;
-  --line-2: #28303a;
-  --fg-0: #eceff2;
-  --fg-1: #a3abb5;
-  --fg-2: #69727d;
-  --fg-3: #424a54;
+  /* Oscuro: grafito, no negro (revisión R1.16). */
+  --bg-0: #101418;
+  --bg-1: #161b20;
+  --bg-2: #1d2329;
+  --bg-3: #252c33;
+  --line-1: #252c34;
+  --line-2: #323b45;
+  --fg-0: #e9ecef;
+  --fg-1: #a7b0b9;
+  --fg-2: #77818c;
+  --fg-3: #4d5661;
   --warn: #e0a43a;
   --error: #e5534b;
+  --glass: rgba(22, 27, 32, 0.92);
+  --scrim: rgba(10, 13, 16, 0.55);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --station: #dfe3e8;
+  --stop: #7b93b8;
 
   --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
@@ -45,6 +51,27 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+}
+
+:root[data-theme='light'] {
+  --bg-0: #e9ecef;
+  --bg-1: #fbfbfc;
+  --bg-2: #f1f3f5;
+  --bg-3: #e5e9ec;
+  --line-1: #e3e6ea;
+  --line-2: #cdd3d9;
+  --fg-0: #12171c;
+  --fg-1: #4a5560;
+  --fg-2: #737d88;
+  --fg-3: #aab1b9;
+  --warn: #b7791f;
+  --error: #c53a33;
+  --glass: rgba(251, 251, 252, 0.94);
+  --scrim: rgba(233, 236, 239, 0.6);
+  --shadow: 0 10px 30px rgba(20, 28, 36, 0.14);
+  --station: #ffffff;
+  --stop: #5f7aa3;
+  color-scheme: light;
 }
 
 @media (pointer: coarse) {

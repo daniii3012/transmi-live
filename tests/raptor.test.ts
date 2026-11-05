@@ -33,3 +33,12 @@ describe('planificador', () => {
     expect(plan(model, [{ stop: 0, seconds: 0 }], [{ stop: 3, seconds: 0 }], 2 * 3600).length).toBe(0);
   });
 });
+
+describe('alternativas', () => {
+  it('ofrece la directa y la del transbordo, sin repetidos y por hora de llegada', async () => {
+    const { alternatives } = await import('../src/planner/raptor');
+    const js = alternatives(model, [{ stop: 0, seconds: 0 }], [{ stop: 3, seconds: 0 }], 8 * 3600);
+    expect(js.length).toBe(2);
+    expect(js[0].arrive).toBeLessThanOrEqual(js[1].arrive);
+  });
+});

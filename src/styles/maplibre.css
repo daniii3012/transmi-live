@@ -1,7 +1,7 @@
 /* Controles de MapLibre con el lenguaje del proyecto: rectos, oscuros, líneas de 1 px. */
 .maplibregl-ctrl-attrib,
 .maplibregl-ctrl-attrib.maplibregl-compact {
-  background: rgba(7, 9, 11, 0.72) !important;
+  background: var(--glass) !important;
   color: var(--fg-2);
   border: 1px solid var(--line-1);
   border-radius: 0 !important;

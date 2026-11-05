@@ -241,8 +241,8 @@
   .locate:hover { color: var(--fg-0); border-color: var(--line-2); }
   .locate:disabled { color: var(--fg-2); }
   .place { width: 38px; height: 22px; display: inline-flex; align-items: center; justify-content: center; }
-  .place::before { content: ''; width: 9px; height: 9px; background: #dfe3e8; }
-  .place.stop::before { border-radius: 50%; background: var(--bg-1); border: 1.5px solid #6b8fc7; }
+  .place::before { content: ''; width: 9px; height: 9px; background: var(--station); }
+  .place.stop::before { border-radius: 50%; background: var(--bg-1); border: 1.5px solid var(--stop); }
   .nx { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); }
   .empty { margin: 0; font-size: var(--fs-small); }
 </style>

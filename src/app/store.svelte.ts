@@ -11,16 +11,26 @@ import { parse, type View } from './router';
  */
 const LAYERS_KEY = 'transmi-live:capas:v1';
 function loadLayers() {
-  const base = { zonal: true, stops: true, metro: false, trails: false };
+  // El trazado zonal de fondo, apagado por defecto: llenaba la ciudad de azul (revisión R1.7).
+  const base = { zonal: false, stops: true, metro: false, trails: false };
   try { return { ...base, ...JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '{}') }; } catch { return base; }
 }
+const PREFS_KEY = 'transmi-live:preferencias:v1';
+export interface Prefs { hidden: SystemKey[]; threeD: boolean; camera?: { center: [number, number]; zoom: number; bearing: number; pitch: number; hash: string; at: number } }
+export function loadPrefs(): Prefs {
+  try { return { hidden: [], threeD: false, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') }; } catch { return { hidden: [], threeD: false }; }
+}
+export function savePrefs(p: Partial<Prefs>) {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ ...loadPrefs(), ...p })); } catch { /* modo privado */ }
+}
+
 export function saveLayers(v: object) { try { localStorage.setItem(LAYERS_KEY, JSON.stringify(v)); } catch { /* modo privado */ } }
 
 class AppState {
   net = $state.raw<Network | null>(null);
   fleet = $state.raw<Fleet | null>(null);
   view = $state<View>(parse());
-  hidden = $state<SystemKey[]>([]);
+  hidden = $state<SystemKey[]>(typeof localStorage !== 'undefined' ? loadPrefs().hidden : []);
   poll = $state<PollState>({ status: 'connecting', feedTime: null, receivedAt: null, error: null, vehicles: 0 });
   counts = $state<Record<SystemKey, number>>({ troncal: 0, dual: 0, alimentador: 0, zonal: 0, cable: 0 });
   /** Cambia con cada instantánea nueva: las vistas que dependen de la flota se recalculan. */
@@ -35,6 +45,7 @@ class AppState {
   sheetHeight = $state(0);
   locating = $state(false);
   threeD = $state(false);
+  themePref = $state<'system' | 'dark' | 'light'>('system');
   /** Capas opcionales del mapa (se guardan en el dispositivo). */
   layersOn = $state<{ zonal: boolean; stops: boolean; metro: boolean; trails: boolean }>(loadLayers());
   layersOpen = $state(false);

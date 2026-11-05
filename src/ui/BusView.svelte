@@ -53,7 +53,7 @@
       <RouteBadge {route} size="lg" />
       <div class="names">
         <h1>{route?.dest ?? 'Ruta sin datos'}</h1>
-        <p class="dim">Bus <span class="num">{bus.label}</span> · <span class="num">{bus.plate}</span>{#if bus.kind} · {KIND_NAME[bus.kind]}{/if}</p>
+        <p class="dim">Bus <span class="num">{bus.label}</span>&nbsp;· <span class="num">{bus.plate}</span>{#if bus.kind}&nbsp;· {KIND_NAME[bus.kind]}{/if}</p>
       </div>
     </header>
 

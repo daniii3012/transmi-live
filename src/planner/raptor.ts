@@ -73,7 +73,7 @@ interface Label { time: number; parent: { kind: 'origin' } | { kind: 'walk'; fro
  * `depart` (s desde medianoche). Devuelve hasta `maxRides` alternativas (una por número de buses,
  * solo si mejoran la llegada), de la más rápida a la de menos buses.
  */
-export function plan(m: Model, origins: Access[], targets: Access[], depart: number, maxRides = 4): Journey[] {
+export function plan(m: Model, origins: Access[], targets: Access[], depart: number, maxRides = 4, exclude?: Set<number>): Journey[] {
   const N = m.stops.length;
   const best = new Float64Array(N).fill(Infinity);
   const rounds: Map<number, Label>[] = [new Map()];
@@ -99,6 +99,7 @@ export function plan(m: Model, origins: Access[], targets: Access[], depart: num
     // Rutas que pasan por paradas marcadas, desde la primera posición marcada.
     const queue = new Map<number, number>();
     for (const s of marked) for (const [r, pos] of m.routesAt[s]) {
+      if (exclude?.has(r)) continue;
       const q = queue.get(r);
       if (q === undefined || pos < q) queue.set(r, pos);
     }
@@ -193,6 +194,38 @@ function build(m: Model, rounds: Map<number, Label>[], k: number, stop: number, 
   legs.reverse();
   const walkSeconds = legs.reduce((a, l) => a + (l.kind === 'walk' ? l.seconds : 0), 0);
   return { legs, depart, arrive, rides: legs.filter((l) => l.kind === 'ride').length, walkSeconds };
+}
+
+/**
+ * Alternativas: el mejor viaje por número de buses y, además, los que salen al prohibir una a una
+ * las rutas del mejor (otra forma de hacer el mismo viaje). Sin repetidos, por hora de llegada.
+ */
+export function alternatives(m: Model, origins: Access[], targets: Access[], depart: number, want = 4): Journey[] {
+  const base = plan(m, origins, targets, depart, 4);
+  if (!base.length) return [];
+  const key = (j: Journey) => j.legs.filter((l) => l.kind === 'ride').map((l) => (l as { route: number }).route).join('>');
+  const seen = new Map(base.map((j) => [key(j), j]));
+  const best = base.reduce((a, b) => (b.arrive < a.arrive ? b : a));
+  const rides = best.legs.filter((l) => l.kind === 'ride') as { route: number }[];
+  const tried = new Set<string>();
+  const queue: Set<number>[] = rides.map((r) => new Set([r.route]));
+  while (queue.length && seen.size < want + 2) {
+    const ex = queue.shift()!;
+    const k = [...ex].sort().join(',');
+    if (tried.has(k)) continue;
+    tried.add(k);
+    for (const j of plan(m, origins, targets, depart, 4, ex)) {
+      if (!seen.has(key(j))) seen.set(key(j), j);
+      // Segunda vuelta: prohibir también la primera ruta de esta alternativa.
+      const first = j.legs.find((l) => l.kind === 'ride') as { route: number } | undefined;
+      if (first && ex.size < 2) queue.push(new Set([...ex, first.route]));
+    }
+  }
+  return [...seen.values()]
+    // Nada que llegue más de 25 min después que la mejor: no es una alternativa razonable.
+    .filter((j) => j.arrive - best.arrive <= 25 * 60)
+    .sort((a, b) => a.arrive - b.arrive || a.rides - b.rides)
+    .slice(0, want);
 }
 
 /** Paradas a pie de un punto (lon, lat), con los segundos de caminata. */

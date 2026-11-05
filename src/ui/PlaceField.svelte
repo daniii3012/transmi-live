@@ -71,7 +71,7 @@
   .drop button.active { background: var(--bg-3); }
   .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .s { font-size: var(--fs-label); }
-  .ic { width: 8px; height: 8px; background: #dfe3e8; justify-self: center; }
-  .ic.stop { border-radius: 50%; background: none; border: 1.5px solid #6b8fc7; }
+  .ic { width: 8px; height: 8px; background: var(--station); justify-self: center; }
+  .ic.stop { border-radius: 50%; background: none; border: 1.5px solid var(--stop); }
   .ic.here { border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3px var(--fg-2); }
 </style>
