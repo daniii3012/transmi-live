@@ -19,6 +19,7 @@
   import PlanView from './ui/PlanView.svelte';
   import Search from './ui/Search.svelte';
   import MapControls from './ui/MapControls.svelte';
+  import LayersPanel from './ui/LayersPanel.svelte';
 
   let container: HTMLDivElement;
   let bearing = $state(0);
@@ -100,6 +101,7 @@
     {/key}
   </Panel>
   <MapControls {bearing} />
+  <LayersPanel />
   {#if app.searchOpen}<Search />{/if}
 {:else}
   <div class="boot" class:failed>

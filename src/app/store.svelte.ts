@@ -9,6 +9,13 @@ import { parse, type View } from './router';
  * Estado de la interfaz (runas de Svelte 5). El mapa y el motor no viven aquí: el controlador los
  * conecta y escribe en este estado lo que la interfaz necesita leer.
  */
+const LAYERS_KEY = 'transmi-live:capas:v1';
+function loadLayers() {
+  const base = { zonal: true, stops: true, metro: false, trails: false };
+  try { return { ...base, ...JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '{}') }; } catch { return base; }
+}
+export function saveLayers(v: object) { try { localStorage.setItem(LAYERS_KEY, JSON.stringify(v)); } catch { /* modo privado */ } }
+
 class AppState {
   net = $state.raw<Network | null>(null);
   fleet = $state.raw<Fleet | null>(null);
@@ -28,6 +35,9 @@ class AppState {
   sheetHeight = $state(0);
   locating = $state(false);
   threeD = $state(false);
+  /** Capas opcionales del mapa (se guardan en el dispositivo). */
+  layersOn = $state<{ zonal: boolean; stops: boolean; metro: boolean; trails: boolean }>(loadLayers());
+  layersOpen = $state(false);
   /** Ubicación propia (lon, lat), si la persona la pidió. */
   userPos = $state<[number, number] | null>(null);
   alerts = $state.raw<Alert[]>([]);

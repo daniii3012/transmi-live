@@ -9,7 +9,8 @@ import { apiBase } from '../live/api';
 import { fetchAlerts } from '../live/alerts';
 import { KX, KY } from '../domain/geo';
 import type { SystemKey } from '../domain/types';
-import { app } from './store.svelte';
+import { app, saveLayers } from './store.svelte';
+import { setMetro } from '../map/metroLayers';
 import { go, parse, type View } from './router';
 
 export const PANEL_W = 380;
@@ -40,6 +41,7 @@ export class Controller {
     addEventListener('resize', () => (app.narrow = innerWidth < 760));
     this.clock = window.setInterval(() => (app.now = Date.now()), 1000);
     this.poller.start();
+    this.applyLayers();
     const alerts = async () => { if (!document.hidden) { const a = await fetchAlerts(apiBase()); if (a) app.alerts = a; } };
     void alerts();
     this.alertsTimer = window.setInterval(alerts, 60_000);
@@ -268,9 +270,26 @@ export class Controller {
   }
 
   // ── Cámara general ─────────────────────────────────────────────────────────────────────────
+  /** Capas opcionales: rutas zonales, paraderos, metro L1, estelas de toda la flota. */
+  setLayer(key: keyof typeof app.layersOn, on: boolean) {
+    app.layersOn = { ...app.layersOn, [key]: on };
+    saveLayers(app.layersOn);
+    this.applyLayers();
+  }
+
+  applyLayers() {
+    const l = app.layersOn, m = this.map;
+    m.setLayoutProperty('routes-zonal', 'visibility', l.zonal ? 'visible' : 'none');
+    m.setLayoutProperty('street-stops', 'visibility', l.stops ? 'visible' : 'none');
+    this.fleet.trails = l.trails;
+    void setMetro(m, l.metro, app.threeD);
+    m.triggerRepaint();
+  }
+
   /** Vista 3D: cámara inclinada y edificios extruidos (hito 7). */
   set3d(on: boolean) {
     app.threeD = on;
+    void setMetro(this.map, app.layersOn.metro, on);
     // Los edificios van debajo de la red: la tapan donde corresponde, pero nunca a los buses.
     this.map.setLayoutProperty('building-3d', 'visibility', on ? 'visible' : 'none');
     this.map.setLayoutProperty('building', 'visibility', on ? 'none' : 'visible');
