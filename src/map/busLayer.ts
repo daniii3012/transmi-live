@@ -127,7 +127,9 @@ void main() {
 export class BusLayer implements CustomLayerInterface {
   readonly id: string;
   readonly type = 'custom' as const;
-  readonly renderingMode = '2d' as const;
+  // '3d': comparte el búfer de profundidad con edificios y viaducto, que tapan a los buses que pasan
+  // detrás o debajo. En 2D (sin inclinación) no hay nada con altura y el resultado es el mismo.
+  readonly renderingMode = '3d' as const;
   private gl!: WebGL2RenderingContext;
   private prog!: WebGLProgram;
   private vao!: WebGLVertexArrayObject;
@@ -211,7 +213,11 @@ export class BusLayer implements CustomLayerInterface {
       g.bindVertexArray(this.vao);
       g.enable(g.BLEND);
       g.blendFunc(g.ONE, g.ONE_MINUS_SRC_ALPHA);
-      g.disable(g.DEPTH_TEST);
+      // Prueba de profundidad sin escribir: los buses no se tapan entre sí por profundidad (el orden del
+      // buffer ya pone al seleccionado encima), pero sí los tapa lo que tiene altura.
+      g.enable(g.DEPTH_TEST);
+      g.depthFunc(g.LEQUAL);
+      g.depthMask(false);
       g.drawArraysInstanced(g.TRIANGLE_STRIP, 0, 4, count);
       g.bindVertexArray(null);
     }
