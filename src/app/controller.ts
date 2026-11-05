@@ -401,8 +401,9 @@ export class Controller {
     const rim: [number, number, number] = t === 'light' ? [0.97, 0.975, 0.98] : [0.063, 0.078, 0.094];
     const ring: [number, number, number] = t === 'light' ? [0.2, 0.24, 0.28] : [0.94, 0.95, 0.96];
     const mute: [number, number, number] = t === 'light' ? [0.78, 0.81, 0.84] : [0.16, 0.18, 0.21];
-    this.buses.setColors(rim, ring, mute);
-    this.dimBuses?.setColors(rim, ring, mute);
+    const shadow = t === 'light' ? 0.22 : 0.55;
+    this.buses.setColors(rim, ring, mute, shadow);
+    this.dimBuses?.setColors(rim, ring, mute, shadow);
     this.map.triggerRepaint();
   }
 
@@ -418,6 +419,7 @@ export class Controller {
   applyLayers() {
     const l = app.layersOn, m = this.map;
     m.setLayoutProperty('routes-zonal', 'visibility', l.zonal ? 'visible' : 'none');
+    this.layers.setDual(l.dual);
     m.setLayoutProperty('street-stops', 'visibility', l.stops ? 'visible' : 'none');
     this.fleet.trails = l.trails;
     void setMetro(m, l.metro, app.threeD);

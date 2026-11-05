@@ -12,7 +12,8 @@ import { parse, type View } from './router';
 const LAYERS_KEY = 'transmi-live:capas:v1';
 function loadLayers() {
   // El trazado zonal de fondo, apagado por defecto: llenaba la ciudad de azul (revisión R1.7).
-  const base = { zonal: false, stops: true, metro: false, trails: false };
+  // Recorridos duales también apagados (R2): sin foco, el mapa muestra solo la guía de cada troncal.
+  const base = { zonal: false, dual: false, stops: true, metro: false, trails: false };
   try { return { ...base, ...JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '{}') }; } catch { return base; }
 }
 const PREFS_KEY = 'transmi-live:preferencias:v1';
@@ -49,7 +50,7 @@ class AppState {
   ctxMenu = $state<{ x: number; y: number; lon: number; lat: number } | null>(null);
   themePref = $state<'system' | 'dark' | 'light'>('system');
   /** Capas opcionales del mapa (se guardan en el dispositivo). */
-  layersOn = $state<{ zonal: boolean; stops: boolean; metro: boolean; trails: boolean }>(loadLayers());
+  layersOn = $state<{ zonal: boolean; dual: boolean; stops: boolean; metro: boolean; trails: boolean }>(loadLayers());
   layersOpen = $state(false);
   /** Ubicación propia (lon, lat), si la persona la pidió. */
   userPos = $state<[number, number] | null>(null);

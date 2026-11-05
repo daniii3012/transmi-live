@@ -2,7 +2,8 @@
   import { app } from '../app/store.svelte';
   import { ctl } from '../app/instance';
   const items: { key: keyof typeof app.layersOn; name: string; note: string }[] = [
-    { key: 'zonal', name: 'Rutas zonales y alimentadoras', note: 'trazados de fondo' },
+    { key: 'dual', name: 'Rutas duales', note: 'recorridos de fondo' },
+    { key: 'zonal', name: 'Rutas zonales y alimentadoras', note: 'recorridos de fondo' },
     { key: 'stops', name: 'Paraderos', note: 'desde zoom de calle' },
     { key: 'metro', name: 'Metro · Línea 1', note: 'en obra · vista previa' },
     { key: 'trails', name: 'Estelas de toda la flota', note: 'rastro de los buses en marcha' },

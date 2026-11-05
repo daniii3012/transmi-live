@@ -289,9 +289,9 @@ export class Fleet {
     return dist / ((b.t1 - b.t0) / 1000) > 2;
   }
 
-  /** ¿Hay ondas de actualización en curso? (lectura nueva hace menos de ~1,8 s) */
+  /** ¿Hay ondas de lectura en curso? (lectura nueva hace menos de 2,4 s y algo en foco) */
   pinging(now = Date.now()): boolean {
-    return now - this.lastFeedAt < 1800;
+    return now - this.lastFeedAt < 2400 && (this.selectedId !== null || !!this.focusRoute || !!this.focusRoutes || this.arriving.size > 0);
   }
 
   /** ¿Algún bus se está desvaneciendo (aparece o reaparece)? */
@@ -342,9 +342,10 @@ export class Fleet {
       out[o + 7] = Math.min(1, (now - b.bornAt) / 600);
       out[o + 8] = (b.sys ? SIZE[b.sys] : 0.66) * (b.kind === 'biarticulated' ? 1.5 : 1); // 27 m frente a 18
       out[o + 9] = flags;
-      // Onda de actualización: 0–1 durante ~1 s tras la lectura, con desfase propio; −1 si no.
+      // Onda de lectura nueva (1,6 s, con desfase propio) solo donde la persona está mirando: el bus
+      // seleccionado, la ruta en foco y los próximos en llegar. En toda la flota sería ruido cada 15 s.
       const ping = (now - b.pingAt) / 1000 - b.seed * 0.7;
-      out[o + 10] = b.pingAt && ping >= 0 && ping < 1.1 ? ping / 1.1 : -1;
+      out[o + 10] = b.pingAt && flags & (4 | 32 | 64) && ping >= 0 && ping < 1.6 ? ping / 1.6 : -1;
       n++;
     };
     const inView = (b: Bus) => !box || (b.x >= box[0] && b.x <= box[2] && b.y >= box[1] && b.y <= box[3]);

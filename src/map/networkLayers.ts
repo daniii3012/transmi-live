@@ -44,6 +44,9 @@ export class NetworkLayers {
   private drawAnim = 0;
 
   private theme: Theme = 'dark';
+  /** Recorridos duales de fondo (capa opcional, apagada por defecto). */
+  private dual = false;
+  setDual(on: boolean) { this.dual = on; this.applyFilters(); }
 
   constructor(private map: MLMap, private net: Network, theme: Theme = 'dark') {
     this.theme = theme;
@@ -56,7 +59,8 @@ export class NetworkLayers {
     const T = THEMES[theme];
     BG = T.bg;
     const m = this.map;
-    for (const id of ['routes-core-casing', 'corridors-casing', 'plan-casing']) m.setPaintProperty(id, 'line-color', T.bg);
+    for (const id of ['routes-core-casing', 'plan-casing']) m.setPaintProperty(id, 'line-color', T.bg);
+    (m.getSource('corridors') as GeoJSONSource)?.setData(this.corridorsFC());
     m.setPaintProperty('stations-label', 'text-halo-color', T.bg);
     m.setPaintProperty('stations-label', 'text-color', ['case', ['get', 'closed'], T.closed, ['boolean', ['feature-state', 'dim'], false], T.labelDim, T.label]);
     m.setPaintProperty('street-stops', 'circle-color', T.stopFill);
@@ -90,48 +94,44 @@ export class NetworkLayers {
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: { 'line-color': zonalColor(0.3), 'line-width': W([[10, 0.4], [13, 0.9], [16, 2], [19, 4]]) },
     });
-    // Corredores troncales con el color de su troncal (no de cada ruta: un sentido y el otro se
-    // pintaban distinto). El color de la ruta aparece cuando está en foco.
-    m.addLayer({
-      id: 'corridors-casing', type: 'line', source: 'corridors',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': BG, 'line-width': W([[10, 2.8], [13, 4.6], [16, 8], [19, 14]]) },
-    });
+    // Corredores troncales (R2): una guía fina y tenue del color de su troncal, sin borde. Marca dónde
+    // está la troncal sin competir con los buses; el recorrido de una ruta aparece solo en foco (bus,
+    // ruta o viaje). Color premezclado con el fondo: los tramos que se cruzan no se suman.
     m.addLayer({
       id: 'corridors', type: 'line', source: 'corridors',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': ['get', 'color'], 'line-width': W([[10, 1.4], [13, 2.4], [16, 4.2], [19, 8]]), 'line-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0.85, 16, 0.6] },
+      paint: { 'line-color': ['get', 'soft'], 'line-width': W([[10, 1], [13, 1.5], [16, 2], [19, 2.6]]) },
     });
     m.addLayer({
       id: 'routes-core-casing', type: 'line', source: 'routes-core',
       layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['get', 'z'] },
-      paint: { 'line-color': BG, 'line-width': W([[10, 2.4], [13, 4], [16, 7], [19, 12]]) },
+      paint: { 'line-color': BG, 'line-width': W([[10, 2.2], [13, 3.4], [16, 4.6], [19, 5.4]]) },
     });
     m.addLayer({
       id: 'routes-core', type: 'line', source: 'routes-core',
       layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['get', 'z'] },
-      paint: { 'line-color': CORE_COLOR, 'line-width': W([[10, 1.1], [13, 2], [16, 3.6], [19, 7]]) },
+      paint: { 'line-color': CORE_COLOR, 'line-width': W([[10, 1], [13, 1.6], [16, 2.4], [19, 3]]) },
     });
     m.addLayer({
       id: 'route-focus-glow', type: 'line', source: 'route-focus',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': ['get', 'color'], 'line-width': W([[10, 8], [14, 14], [18, 24]]), 'line-blur': W([[10, 6], [18, 14]]), 'line-opacity': 0.28 },
+      paint: { 'line-color': ['get', 'color'], 'line-width': W([[10, 8], [14, 12], [18, 14]]), 'line-blur': W([[10, 6], [18, 10]]), 'line-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.26, 16, 0.12] },
     });
     m.addLayer({
       id: 'route-focus', type: 'line', source: 'route-focus',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-width': W([[10, 2.6], [13, 3.6], [16, 6], [19, 10]]), 'line-gradient': gradient('#ffffff', 1) },
+      paint: { 'line-width': W([[10, 2.6], [13, 3.4], [16, 4], [19, 4.6]]), 'line-gradient': gradient('#ffffff', 1) },
     });
     // Viaje planeado: tramos en bus del color de su ruta, caminatas punteadas, extremos.
     m.addLayer({
       id: 'plan-casing', type: 'line', source: 'plan', filter: ['==', ['get', 'kind'], 'ride'],
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': BG, 'line-width': W([[10, 6], [14, 9], [18, 15]]) },
+      paint: { 'line-color': BG, 'line-width': W([[10, 6], [14, 8], [18, 9]]) },
     });
     m.addLayer({
       id: 'plan-ride', type: 'line', source: 'plan', filter: ['==', ['get', 'kind'], 'ride'],
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': ['get', 'color'], 'line-width': W([[10, 3.4], [14, 5], [18, 9]]) },
+      paint: { 'line-color': ['get', 'color'], 'line-width': W([[10, 3.4], [14, 4.4], [18, 5]]) },
     });
     m.addLayer({
       id: 'plan-walk', type: 'line', source: 'plan', filter: ['==', ['get', 'kind'], 'walk'],
@@ -348,17 +348,17 @@ export class NetworkLayers {
     const m = this.map;
     const hidden = [...this.hidden];
     const visible: ExpressionSpecification = ['!', ['in', ['get', 'sys'], ['literal', hidden]]];
-    // La troncal se dibuja como corredores; aquí quedan dual y cable.
-    const coreVisible: ExpressionSpecification = ['all', visible, ['!=', ['get', 'sys'], 'troncal']];
+    // La troncal se dibuja como corredores; aquí quedan el cable (siempre, es su propio corredor) y
+    // los recorridos duales solo si la persona los pidió en Capas.
+    const coreVisible: ExpressionSpecification = ['all', visible, this.dual ? ['!=', ['get', 'sys'], 'troncal'] : ['==', ['get', 'sys'], 'cable']];
     m.setFilter('routes-core', coreVisible);
     m.setFilter('routes-core-casing', coreVisible);
     m.setLayoutProperty('corridors', 'visibility', hidden.includes('troncal') ? 'none' : 'visible');
-    m.setLayoutProperty('corridors-casing', 'visibility', hidden.includes('troncal') ? 'none' : 'visible');
     m.setFilter('routes-zonal', visible);
     const f = this.focusId || this.planOn;
     const dim = THEMES[this.theme].dim;
     m.setPaintProperty('routes-core', 'line-color', f ? dim : CORE_COLOR);
-    m.setPaintProperty('corridors', 'line-color', f ? dim : ['get', 'color']);
+    m.setPaintProperty('corridors', 'line-color', f ? dim : ['get', 'soft']);
     m.setPaintProperty('routes-zonal', 'line-color', zonalColor(f ? 0.12 : 0.3));
   }
 
@@ -384,7 +384,7 @@ export class NetworkLayers {
       type: 'FeatureCollection',
       features: this.net.corridors.map((s) => ({
         type: 'Feature',
-        properties: { z: s.z, color: s.z && zones[s.z] ? zones[s.z].color : '#8b939e' },
+        properties: { z: s.z, soft: mix(s.z && zones[s.z] ? zones[s.z].color : '#8b939e', this.theme === 'light' ? 0.5 : 0.55) },
         geometry: { type: 'LineString', coordinates: s.c },
       })),
     };

@@ -3,14 +3,19 @@ import { Fleet, ORIGIN } from '../live/fleet';
 import { KX, KY } from '../domain/geo';
 
 /**
- * Buses en una capa WebGL propia (decisiones/005), revisión R1:
+ * Buses en una capa WebGL propia (decisiones/005), revisión R2:
  *
- *  - Silueta apoyada en el suelo: las esquinas se calculan en coordenadas mercator, así que en 3D el
- *    bus se inclina con la calle en vez de quedar plano frente a la cámara.
- *  - Forma: a escala de ciudad un punto con un «ojo» hacia donde avanza; al acercarse se alarga en
- *    cápsula hasta su tamaño real (18 m un articulado, 27 m un biarticulado).
- *  - Ondas: continuas para el seguido, una sutil al llegar cada lectura, suaves para los próximos en
- *    llegar a la estación abierta.
+ *  - Apoyados en el suelo: las esquinas se calculan en coordenadas mercator, así que en 3D el bus se
+ *    inclina con la calle en vez de quedar plano frente a la cámara.
+ *  - Tres escalas, sin píldoras: a escala de ciudad un punto; a escala de barrio, punto con una
+ *    flecha hacia donde avanza; de cerca, la huella del bus vista desde arriba (rectángulo de
+ *    esquinas cortas, parabrisas al frente y las articulaciones del articulado y del biarticulado).
+ *    El paso entre punto y huella es un morfismo de distancias con signo, no un fundido.
+ *  - Separación del trazado: halo del color del fondo y una sombra corta; la línea de la ruta no
+ *    tapa al bus aunque sea del mismo color.
+ *  - Ondas breves y lentas (HIG: «movimiento breve y preciso», nada en lo que pasa cada rato): solo
+ *    el bus seguido, los próximos en llegar a la estación abierta y, al llegar una lectura, los de la
+ *    ruta en foco. Nada con `prefers-reduced-motion`.
  *  - Prueba de profundidad compartida: edificios y viaducto los tapan.
  *
  * Rendimiento: cuadros según el zoom (a escala de ciudad un bus avanza menos de un píxel por cuadro) y
@@ -30,9 +35,9 @@ uniform mat4 u_matrix;
 uniform float u_mpp;
 uniform float u_ppm;
 uniform float u_zf;
-uniform float u_el;
 out vec2 v_local;
-out vec2 v_half;
+out vec2 v_foot;
+out float v_r;
 out vec4 v_color;
 out float v_flags;
 out float v_tail;
@@ -48,22 +53,29 @@ void main() {
   bool trail = bit(flags, 16.0);
   bool focused = bit(flags, 32.0);
   bool arriving = bit(flags, 64.0);
-  float k = dim ? 0.8 : (focused || selected ? 1.25 : 1.0);
-  float d = mix(4.6, 8.0, u_zf) * mix(0.82, 1.0, min(a_size, 1.0)) * k;
-  float realL = 18.0 * a_size * u_ppm, realW = 2.55 * u_ppm;
-  float len = mix(d, max(d * 1.9, realL), u_el);
-  float wid = mix(d, max(d * 0.92, realW), u_el);
-  float halfL = len * 0.5, halfW = wid * 0.5;
-  float pad = selected ? 44.0 : arriving ? 26.0 : a_ping >= 0.0 ? 22.0 : 3.0;
+  float k = dim ? 0.8 : (focused || selected ? 1.2 : 1.0);
+  float sz = min(a_size, 1.0);
+  // Punto: radio en px según el zoom.
+  float r = 0.5 * mix(4.4, 9.0, u_zf) * mix(0.8, 1.0, sz) * k;
+  // Huella: tamaño real (18 m un articulado, 27 m un biarticulado, 2,55 m de ancho) con un mínimo
+  // legible y proporción de bus, no de píldora.
+  float wid = max(2.55 * u_ppm, 6.5 * mix(0.85, 1.0, sz) * k);
+  float len = max(18.0 * a_size * u_ppm, wid * (1.5 + 1.1 * a_size));
+  vec2 foot = vec2(len, wid) * 0.5;
+  float pad = selected ? 24.0 : (arriving || a_ping >= 0.0) ? 17.0 : 6.0;
   float tail = trail ? max(30.0, len * 3.0) : 0.0;
-  float lx = a_corner.x < 0.0 ? -(halfL + max(pad, tail)) : halfL + pad;
-  float ly = a_corner.y * (halfW + pad);
+  float front = max(r * 1.75 + 1.0, foot.x) + pad;
+  float back = max(r, foot.x) + max(pad, tail);
+  float side = max(r, foot.y) + pad;
+  float lx = a_corner.x < 0.0 ? -back : front;
+  float ly = a_corner.y * side;
   vec2 fwd = normalize(a_dir);
-  vec2 side = vec2(-fwd.y, fwd.x);
-  vec2 world = a_pos + (fwd * lx + side * ly) * u_mpp;
+  vec2 sd = vec2(-fwd.y, fwd.x);
+  vec2 world = a_pos + (fwd * lx + sd * ly) * u_mpp;
   gl_Position = u_matrix * vec4(world, 0.0, 1.0);
   v_local = vec2(lx, ly);
-  v_half = vec2(halfL, halfW);
+  v_foot = foot;
+  v_r = r;
   v_color = a_color;
   v_flags = flags;
   v_tail = tail;
@@ -74,25 +86,37 @@ void main() {
 const FS = `#version 300 es
 precision highp float;
 in vec2 v_local;
-in vec2 v_half;
+in vec2 v_foot;
+in float v_r;
 in vec4 v_color;
 in float v_flags;
 in float v_tail;
 in float v_size;
 in float v_ping;
 uniform float u_zf;
+uniform float u_el;      // 0 punto … 1 huella
+uniform float u_ar;      // flecha de rumbo (aparece a escala de barrio)
 uniform float u_time;
-uniform vec3 u_rim;
-uniform vec3 u_light;
-uniform vec3 u_mute;   // hacia dónde se apagan atenuados y zonal lejano (según el tema)
+uniform float u_motion;  // 0 con prefers-reduced-motion
+uniform float u_shadow;  // intensidad de la sombra según el tema
+uniform vec3 u_rim;      // halo: color del fondo del mapa
+uniform vec3 u_light;    // anillo de selección
+uniform vec3 u_mute;     // hacia dónde se apagan atenuados y zonal lejano
 out vec4 frag;
 
 bool bit(float f, float b) { return mod(floor(f / b), 2.0) >= 1.0; }
 
-float capsule(vec2 p, vec2 h) {
-  float hx = max(h.x - h.y, 0.0);
-  vec2 q = vec2(max(abs(p.x) - hx, 0.0), p.y);
-  return length(q) - h.y;
+float rbox(vec2 p, vec2 h, float rc) {
+  vec2 q = abs(p) - h + rc;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rc;
+}
+// Triángulo que apunta hacia +x: base en x0 (media anchura hw), punta en x1.
+float tri(vec2 p, float x0, float x1, float hw) {
+  vec2 n = normalize(vec2(x1 - x0, hw).yx);
+  return max(x0 - p.x, dot(vec2(p.x - x1, abs(p.y)), n));
+}
+float ring(float d, float r, float th, float aa) {
+  return 1.0 - smoothstep(0.0, aa * 1.5, abs(d - r) - th * 0.5);
 }
 
 void main() {
@@ -106,61 +130,78 @@ void main() {
   vec3 base = v_color.rgb;
   if (dim) base = mix(u_mute, base, 0.3);
   else if (v_size < 0.8 && !focused && !selected) base = mix(u_mute, base, mix(0.62, 1.0, u_zf));
-  if (hover) base = mix(base, vec3(1.0), 0.25);
+  if (hover) base = mix(base, vec3(1.0), 0.22);
 
-  float d = capsule(v_local, v_half);
+  // Forma: punto (+ flecha) que se transforma en huella.
+  // Flecha de rumbo solo en lo que la persona mira (seleccionado, ruta en foco): en toda la flota
+  // eran cientos de flechas encimadas.
+  float ar = (selected || focused) ? u_ar : 0.0;
+  float dDot = length(v_local) - v_r;
+  float dArr = tri(v_local, v_r + 1.2, v_r * 1.75 + 1.0, v_r * 0.5) + (1.0 - ar) * v_r;
+  float dA = min(dDot, dArr);
+  float dB = rbox(v_local, v_foot, min(v_foot.y * 0.4, 1.6));
+  float d = mix(dA, dB, u_el);
   float aa = max(fwidth(d), 0.35);
-  float body = 1.0 - smoothstep(-aa, aa, d);
-  float fill = 1.0 - smoothstep(-aa, aa, d + 1.2);
+  float halo = mix(0.9, 1.5, u_zf);
+  float fill = 1.0 - smoothstep(-aa, aa, d);
+  float body = 1.0 - smoothstep(-aa, aa, d - halo);
   vec3 col = mix(u_rim, base, fill);
-  float alpha = body;
 
-  // «Ojo» hacia donde avanza.
-  float hx = max(v_half.x - v_half.y, 0.0);
-  vec2 eye = vec2(hx + v_half.y * 0.38, 0.0);
-  float de = length(v_local - eye) - v_half.y * 0.34;
-  float eyeA = (1.0 - smoothstep(-aa, aa, de)) * fill;
-  col = mix(col, mix(base, vec3(1.0), 0.65), eyeA * (dim ? 0.3 : 0.85));
-
-  // Foco y selección: anillo claro por fuera del cuerpo.
-  if ((focused || selected) && body < 0.99) {
-    float ring = 1.0 - smoothstep(0.0, aa * 1.5, abs(d - 1.5) - 0.75);
-    col = mix(col, u_light, ring);
-    alpha = max(alpha, ring);
-  }
-
-  float wave = 0.0;
-  vec3 waveCol = mix(v_color.rgb, vec3(1.0), 0.35);
-  if (selected) {
-    for (int i = 0; i < 2; i++) {
-      float k = fract(u_time / 1.9 + float(i) * 0.5);
-      float r = 4.0 + 38.0 * k;
-      wave = max(wave, (1.0 - smoothstep(0.0, aa * 2.0, abs(d - r) - 1.0)) * 0.6 * pow(1.0 - k, 1.4));
+  // Detalles de la huella: parabrisas oscuro al frente y articulaciones.
+  float det = u_el * fill * (dim ? 0.3 : 1.0);
+  if (det > 0.0) {
+    float ws = max(1.4, v_foot.x * 0.13);
+    float fr = smoothstep(v_foot.x - ws - aa, v_foot.x - ws + aa, v_local.x);
+    col = mix(col, mix(base, vec3(0.06, 0.07, 0.08), 0.5), fr * det);
+    float L = 2.0 * v_foot.x, xr = v_local.x + v_foot.x, jw = 0.5;
+    float j = 0.0;
+    if (v_size > 1.3) {
+      j = max(1.0 - smoothstep(jw - aa, jw + aa, abs(xr - 0.27 * L)), 1.0 - smoothstep(jw - aa, jw + aa, abs(xr - 0.56 * L)));
+    } else if (v_size > 0.9) {
+      j = 1.0 - smoothstep(jw - aa, jw + aa, abs(xr - 0.39 * L));
     }
-    waveCol = mix(u_light, v_color.rgb, 0.25);
-  } else if (arriving) {
-    float k = fract(u_time / 2.4);
-    float r = 3.0 + 22.0 * k;
-    wave = (1.0 - smoothstep(0.0, aa * 2.0, abs(d - r) - 0.8)) * 0.42 * pow(1.0 - k, 1.5);
-  } else if (v_ping >= 0.0 && v_ping < 1.0 && !dim) {
-    float r = 2.0 + 17.0 * v_ping;
-    wave = (1.0 - smoothstep(0.0, aa * 2.0, abs(d - r) - 0.7)) * 0.3 * pow(1.0 - v_ping, 2.0) * smoothstep(0.25, 0.5, u_zf);
-  }
-  if (wave > 0.0 && body < 0.5) {
-    col = mix(col, waveCol, wave / max(alpha + wave, 1e-3));
-    alpha = max(alpha, wave);
+    col = mix(col, u_rim, j * det * 0.9);
   }
 
-  if (v_tail > 0.0 && body < 0.01) {
-    float back = -v_local.x - v_half.x;
-    if (back > 0.0 && back < v_tail && abs(v_local.y) < v_half.y * 0.5) {
-      float a = 0.55 * pow(1.0 - back / v_tail, 1.6);
-      if (a > alpha) { col = v_color.rgb; alpha = a; }
+  // Premultiplicado: cuerpo y halo; debajo, anillo, ondas, sombra y estela.
+  vec4 acc = vec4(col * body, body);
+  if (selected || focused) {
+    float rg = ring(d, halo + 1.9, 1.3, aa);
+    acc += vec4(u_light * rg, rg) * (1.0 - acc.a);
+  }
+  float w = 0.0;
+  if (u_motion > 0.5 && !dim) {
+    if (selected) {
+      float k = fract(u_time / 3.2);
+      w = ring(d, halo + 3.0 + 15.0 * (1.0 - pow(1.0 - k, 3.0)), 1.1, aa) * 0.34 * pow(1.0 - k, 2.0);
+    } else if (arriving) {
+      float k = fract(u_time / 3.6 + fract(v_color.r * 7.0) * 0.5);
+      w = ring(d, halo + 2.0 + 10.0 * (1.0 - pow(1.0 - k, 3.0)), 1.0, aa) * 0.28 * pow(1.0 - k, 2.0);
+    }
+    if (v_ping >= 0.0 && v_ping < 1.0) {
+      float k = v_ping;
+      w = max(w, ring(d, halo + 2.0 + 12.0 * (1.0 - pow(1.0 - k, 3.0)), 1.0, aa) * 0.3 * pow(1.0 - k, 2.0));
     }
   }
-  alpha *= v_color.a * (stale ? 0.45 : 1.0) * (dim ? 0.8 : 1.0);
-  if (alpha < 0.01) discard;
-  frag = vec4(col * alpha, alpha);
+  if (w > 0.0) {
+    vec3 wc = selected ? mix(u_light, base, 0.35) : base;
+    acc += vec4(wc * w, w) * (1.0 - acc.a);
+  }
+  // Sombra corta solo con la huella (de cerca, sobre la línea de su ruta); como punto basta el halo.
+  float sh = (1.0 - smoothstep(halo, halo + 3.0, d)) * u_shadow * (dim ? 0.35 : 1.0) * u_el;
+  acc += vec4(0.0, 0.0, 0.0, sh) * (1.0 - acc.a);
+  if (v_tail > 0.0 && acc.a < 0.5) {
+    float back = -v_local.x - max(v_foot.x * u_el + v_r * (1.0 - u_el), 0.0);
+    float half_ = mix(v_r, v_foot.y, u_el) * 0.5;
+    if (back > 0.0 && back < v_tail && abs(v_local.y) < half_) {
+      float a = 0.5 * pow(1.0 - back / v_tail, 1.6);
+      acc += vec4(v_color.rgb * a, a) * (1.0 - acc.a);
+    }
+  }
+  float k = v_color.a * (stale ? 0.45 : 1.0) * (dim ? 0.8 : 1.0);
+  acc *= k;
+  if (acc.a < 0.01) discard;
+  frag = acc;
 }`;
 
 export class BusLayer implements CustomLayerInterface {
@@ -180,8 +221,13 @@ export class BusLayer implements CustomLayerInterface {
   rim: [number, number, number] = [0.043, 0.051, 0.062];
   light: [number, number, number] = [0.94, 0.95, 0.96];
   mute: [number, number, number] = [0.16, 0.18, 0.21];
+  shadow = 0.5;
+  /** Sin ondas si la persona pidió menos movimiento. */
+  motion = typeof matchMedia === 'undefined' || !matchMedia('(prefers-reduced-motion: reduce)').matches;
   onFrame?: () => void;
-  setColors(rim: [number, number, number], light: [number, number, number], mute: [number, number, number]) { this.rim = rim; this.light = light; this.mute = mute; }
+  setColors(rim: [number, number, number], light: [number, number, number], mute: [number, number, number], shadow: number) {
+    this.rim = rim; this.light = light; this.mute = mute; this.shadow = shadow;
+  }
   private fleet: Fleet;
   private only: 'all' | 'dim' | 'main';
 
@@ -209,7 +255,7 @@ export class BusLayer implements CustomLayerInterface {
     g.linkProgram(p);
     if (!g.getProgramParameter(p, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(p) ?? 'link');
     this.prog = p;
-    for (const n of ['u_matrix', 'u_mpp', 'u_ppm', 'u_zf', 'u_el', 'u_time', 'u_rim', 'u_light', 'u_mute']) this.u[n] = g.getUniformLocation(p, n);
+    for (const n of ['u_matrix', 'u_mpp', 'u_ppm', 'u_zf', 'u_el', 'u_ar', 'u_time', 'u_motion', 'u_shadow', 'u_rim', 'u_light', 'u_mute']) this.u[n] = g.getUniformLocation(p, n);
 
     this.vao = g.createVertexArray()!;
     g.bindVertexArray(this.vao);
@@ -262,8 +308,13 @@ export class BusLayer implements CustomLayerInterface {
       g.uniform1f(this.u.u_mpp, 1 / worldPx);
       g.uniform1f(this.u.u_ppm, worldPx / (40_075_016.686 * Math.cos(lat)));
       g.uniform1f(this.u.u_zf, Math.min(1, Math.max(0, (zoom - 10) / 5)));
-      g.uniform1f(this.u.u_el, Math.min(1, Math.max(0, (zoom - 13.5) / 2.5)));
+      // Punto → huella entre los zooms 15,2 y 16; flecha de rumbo desde el 13.
+      const el = Math.min(1, Math.max(0, (zoom - 15.2) / 0.8));
+      g.uniform1f(this.u.u_el, el * el * (3 - 2 * el));
+      g.uniform1f(this.u.u_ar, Math.min(1, Math.max(0, zoom - 13)));
       g.uniform1f(this.u.u_time, (performance.now() - this.t0) / 1000);
+      g.uniform1f(this.u.u_motion, this.motion ? 1 : 0);
+      g.uniform1f(this.u.u_shadow, this.shadow);
       g.uniform3fv(this.u.u_rim, this.rim);
       g.uniform3fv(this.u.u_light, this.light);
       g.uniform3fv(this.u.u_mute, this.mute);
@@ -282,11 +333,11 @@ export class BusLayer implements CustomLayerInterface {
     if (this.frames.length > 120) this.frames.shift();
     this.onFrame?.();
     if (this.only === 'dim') return; // la capa principal agenda el siguiente cuadro por las dos
-    const waves = this.fleet.selectedId !== null || this.fleet.arriving.size > 0 || this.fleet.pinging(now);
+    const waves = this.motion && (this.fleet.selectedId !== null || this.fleet.arriving.size > 0 || this.fleet.pinging(now));
     if (!moving && !waves && !this.fleet.animating(now)) return;
-    // Al ritmo que hace falta: fluido con ondas; si solo avanzan buses, según cuánto se mueven en
-    // pantalla a este zoom (a escala de ciudad, menos de un píxel por cuadro).
-    const fps = waves ? 45 : zoom < 12 ? 10 : zoom < 14 ? 20 : zoom < 16 ? 30 : 60;
+    // Al ritmo que hace falta: las ondas son lentas (30 cuadros bastan); si solo avanzan buses, según
+    // cuánto se mueven en pantalla a este zoom (a escala de ciudad, menos de un píxel por cuadro).
+    const fps = zoom >= 16 ? 60 : waves ? 30 : zoom < 12 ? 10 : zoom < 14 ? 20 : 30;
     clearTimeout(this.timer);
     this.timer = window.setTimeout(() => this.map.triggerRepaint(), Math.max(0, 1000 / fps - 4));
   }
