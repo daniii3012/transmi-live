@@ -173,7 +173,9 @@ void main() {
   }
   // Premultiplicado: cuerpo y halo; debajo, anillo, ondas, sombra y estela.
   vec4 acc = vec4(col * body, body);
-  if (selected || focused) {
+  // Anillo solo para el seleccionado: si los demás buses de su ruta (en foco) también lo llevaban,
+  // no se sabía cuál era el elegido.
+  if (selected) {
     float rg = ring(d, halo + 1.9, 1.3, aa);
     acc += vec4(u_light * rg, rg) * (1.0 - acc.a);
   }

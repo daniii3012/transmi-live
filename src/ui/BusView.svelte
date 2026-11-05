@@ -89,7 +89,8 @@
 
     {#if itinerary.length}
       <section class="itin" style:--c={route?.color}>
-        <div class="head"><span class="label">Próximas paradas</span><span class="label faint">estimado{paceNote ? ` · ${paceNote}` : ''}</span></div>
+        <div class="head"><span class="label">Próximas paradas</span><span class="label faint">estimado</span></div>
+        {#if paceNote}<p class="pace faint">Ritmo del bus: {paceNote}</p>{/if}
         <ol>
           {#each itinerary as e, i (e.index)}
             {@const on = watch.is(id, e.index)}
@@ -163,6 +164,7 @@
   li.first .name { color: var(--fg-0); }
   .eta { text-align: right; font-size: var(--fs-small); }
   .at { text-align: right; font-size: var(--fs-label); }
+  .pace { margin: calc(-1 * var(--sp-2)) 0 var(--sp-2); font-size: var(--fs-small); }
   .foot { margin: var(--sp-3) 0 0; font-size: var(--fs-label); line-height: 1.5; }
   .small { font-size: var(--fs-small); }
 </style>
