@@ -204,7 +204,7 @@ export class Controller {
         x0 = Math.min(x0, p.lonlat[i]); x1 = Math.max(x1, p.lonlat[i]);
         y0 = Math.min(y0, p.lonlat[i + 1]); y1 = Math.max(y1, p.lonlat[i + 1]);
       }
-      m.fitBounds([[x0, y0], [x1, y1]], { ...opts, maxZoom: 15.5 });
+      m.fitBounds([[x0, y0], [x1, y1]], { ...opts, maxZoom: 15.5, absolutePadding: true });
     } else if (v.kind === 'station') {
       const s = this.net.stations.get(v.id);
       if (s) this.flyTo([s.lon, s.lat], Math.max(m.getZoom(), 16), opts);
@@ -212,7 +212,7 @@ export class Controller {
       const s = this.net.streetStops.get(v.id);
       if (s) this.flyTo([s.lon, s.lat], Math.max(m.getZoom(), 16.5), opts);
     } else if (v.kind === 'plan' && this.planBounds) {
-      this.map.fitBounds(this.planBounds, { padding: this.padding(48), duration: 900, maxZoom: 16 });
+      this.map.fitBounds(this.planBounds, { padding: this.padding(48), duration: 900, maxZoom: 16, absolutePadding: true });
     } else if (v.kind === 'bus') {
       const b = this.fleet.buses.get(v.id);
       if (b) this.flyTo([b.x / KX, b.y / KY], Math.max(m.getZoom(), 15.5), opts);
@@ -226,12 +226,29 @@ export class Controller {
   }
 
   /** El centro del mapa queda en la parte visible (sobre la hoja inferior), y el paneo llega hasta ahí (R1.4). */
+  /** Relleno del mapa igual a la hoja. `setPadding` es un salto de cámara y cancela cualquier
+   * animación en curso (el encuadre del viaje, un vuelo a una estación): si la cámara se está moviendo,
+   * se aplica al terminar. */
+  private padWait = false;
   syncPadding() {
-    this.map.setPadding(this.padding());
+    const m = this.map;
+    if (m.isMoving() || this.flying) {
+      if (this.padWait) return;
+      this.padWait = true;
+      m.once('moveend', () => { this.padWait = false; this.syncPadding(); });
+      return;
+    }
+    m.setPadding(this.padding());
   }
 
   padding(extra = 0): PaddingOptions {
-    if (app.narrow) return { top: 56 + extra, bottom: Math.max(120, app.sheetHeight) + extra, left: extra / 2, right: extra / 2 };
+    if (app.narrow) {
+      // Con la hoja alta, el relleno no puede comerse la pantalla: si arriba + abajo pasan del alto,
+      // `fitBounds` no encuadra nada (le pasaba al viaje planeado). Siempre quedan ≥ 140 px de mapa.
+      const top = 56 + extra;
+      const bottom = Math.min(Math.max(120, app.sheetHeight) + extra, innerHeight - top - 140);
+      return { top, bottom: Math.max(0, bottom), left: extra / 2, right: extra / 2 };
+    }
     return { top: extra, bottom: extra, left: PANEL_W + 12 + extra, right: 56 + extra };
   }
 
@@ -288,7 +305,9 @@ export class Controller {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const [x, y] of all) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
       this.planBounds = [[x0, y0], [x1, y1]];
-      this.map.fitBounds([[x0, y0], [x1, y1]], { padding: this.padding(48), duration: 900, maxZoom: 16 });
+      // `absolutePadding`: el relleno dado reemplaza al del mapa (si no, MapLibre los suma y con la hoja
+      // alta no cabe nada).
+      this.map.fitBounds([[x0, y0], [x1, y1]], { padding: this.padding(48), duration: 900, maxZoom: 16, absolutePadding: true });
       this.afterMove(() => this.layers.drawPlan(), 900);
     }
   }
@@ -457,7 +476,7 @@ export class Controller {
   zoom(d: number) { this.map.easeTo({ zoom: this.map.getZoom() + d, duration: 220 }); }
   north() { this.map.easeTo({ bearing: 0, pitch: app.threeD ? this.map.getPitch() : 0, duration: 400 }); }
   overview() {
-    this.map.fitBounds([[-74.23, 4.47], [-74.02, 4.83]], { padding: this.padding(24), duration: 900 });
+    this.map.fitBounds([[-74.23, 4.47], [-74.02, 4.83]], { padding: this.padding(24), duration: 900, absolutePadding: true });
   }
 
   locate() {
