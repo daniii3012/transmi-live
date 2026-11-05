@@ -87,6 +87,7 @@ void main() {
   // Relleno con borde oscuro de 1 px que separa el bus de su propia línea.
   float inside = clamp(0.5 - d / aa, 0.0, 1.0);
   float fill = clamp(0.5 - (d + edge) / aa, 0.0, 1.0);
+  // Borde oscuro: separa el bus de su propia línea (que a escala de ciudad va a media intensidad).
   vec3 col = mix(vec3(0.027, 0.035, 0.043), base, fill);
   float alpha = inside;
   if (selected) {

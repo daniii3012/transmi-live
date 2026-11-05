@@ -16,6 +16,9 @@ export function mix(color: string, k: number, bg = BG): string {
   return '#' + a.map((v, i) => Math.round(b[i] + (v - b[i]) * k).toString(16).padStart(2, '0')).join('');
 }
 const ZONAL = { alimentador: '#3fbf6f', zonal: '#3d8bfd' };
+/** Troncal: a escala de ciudad la línea baja a la mitad para que los buses (del mismo color) se lean
+ * encima; desde z14, el color pleno. */
+const CORE_COLOR: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 11, ['get', 'dcolor'], 14, ['get', 'color']];
 const zonalColor = (k: number): ExpressionSpecification =>
   ['match', ['get', 'sys'], 'alimentador', mix(ZONAL.alimentador, k), mix(ZONAL.zonal, k)];
 /** Orden de dibujo (de abajo hacia arriba): numerados y zonas de tonos grises debajo, para que en
@@ -58,7 +61,7 @@ export class NetworkLayers {
     m.addLayer({
       id: 'routes-core', type: 'line', source: 'routes-core',
       layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['get', 'z'] },
-      paint: { 'line-color': ['get', 'color'], 'line-width': W([[10, 1.1], [13, 2], [16, 3.6], [19, 7]]) },
+      paint: { 'line-color': CORE_COLOR, 'line-width': W([[10, 1.1], [13, 2], [16, 3.6], [19, 7]]) },
     });
     m.addLayer({
       id: 'route-focus-glow', type: 'line', source: 'route-focus',
@@ -212,7 +215,7 @@ export class NetworkLayers {
     m.setFilter('routes-core-casing', visible);
     m.setFilter('routes-zonal', visible);
     const f = this.focusId;
-    m.setPaintProperty('routes-core', 'line-color', f ? '#252c34' : ['get', 'color']);
+    m.setPaintProperty('routes-core', 'line-color', f ? '#252c34' : CORE_COLOR);
     m.setPaintProperty('routes-zonal', 'line-color', zonalColor(f ? 0.12 : 0.3));
   }
 
@@ -225,7 +228,7 @@ export class NetworkLayers {
       const zi = r.zone ? ZONE_ORDER.indexOf(r.zone) + 1 : 0;
       features.push({
         type: 'Feature',
-        properties: { id: r.id, code: r.code, color: r.color, sys: r.sys, z: (r.sys === 'troncal' ? 100 : r.sys === 'dual' ? 50 : 10) + zi },
+        properties: { id: r.id, code: r.code, color: r.color, dcolor: mix(r.color, 0.5), sys: r.sys, z: (r.sys === 'troncal' ? 100 : r.sys === 'dual' ? 50 : 10) + zi },
         geometry: { type: 'LineString', coordinates: coords(path.lonlat) },
       });
     }

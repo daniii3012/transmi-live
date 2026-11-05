@@ -178,6 +178,7 @@ def nice(s: str) -> str:
     s = re.sub(r'\b20 de julio\b', '20 de Julio', s)
     # Destinos son nombres propios: palabras en minúscula de 4 letras o más, con mayúscula inicial.
     s = re.sub(r'(?<=\s)([a-záéíóúñ])(?=[a-záéíóúñ]{3,}\b)', lambda m: m.group(1).upper(), s)
+    s = re.sub(r'(?<=\s)(De|Del|Y)(?=\s)', lambda m: m.group(1).lower(), s)
     s = re.sub(r'\b(\d+)([a-z])\b', lambda m: m.group(1) + m.group(2).upper(), s)
     return s.replace('Av.. ', 'Av. ')
 
@@ -190,7 +191,8 @@ def short(name: str) -> str:
 def strip_code(part: str, codes: set[str]) -> str:
     """«H710 El Progreso» → «El Progreso» cuando H710 es un código de ruta."""
     m = re.match(r'^([A-Z]{0,3}\d+[A-Z]?|[A-Z]\d+-?[A-Z]?\d*)\s+(.*)$', part.strip())
-    if m and (m.group(1) in codes or re.match(r'^[A-Z]{1,3}\d', m.group(1))):
+    # Solo códigos con letra: «7 de Agosto» es un destino, no la ruta 7.
+    if m and re.search(r'[A-Z]', m.group(1)) and (m.group(1) in codes or re.match(r'^[A-Z]{1,3}\d', m.group(1))):
         return m.group(2)
     return part
 
