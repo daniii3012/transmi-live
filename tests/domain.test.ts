@@ -115,6 +115,11 @@ describe('tipo de bus', () => {
     expect(busKind('T10410')).toBe('biarticulated');
     expect(busKind('A10050')).toBe('articulated');
     expect(busKind('X9999')).toBeNull();
-    expect(busKind('X9999', 'B74')).toBe('articulated');
+    expect(busKind('X9999', 'B74', 'troncal')).toBe('articulated');
+    // C15 existe en troncal y en zonal: el zonal (serie Z) no hereda el biarticulado de la troncal.
+    expect(busKind('Z70700', 'C15', 'zonal')).toBeNull();
+    expect(busKind('Z70700', 'C15', 'troncal')).toBeNull();
+    expect(busKind('S10420', 'C15', 'troncal')).not.toBeNull();
+    expect(busKind('X9999', 'C15', 'zonal')).toBeNull();
   });
 });

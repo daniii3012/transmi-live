@@ -2,7 +2,9 @@ import fleet from '../../data/curated/fleet.json';
 
 /**
  * Tipo de bus (data/curated/fleet.json). Por la etiqueta de flota («N0172» → serie N, número 172); si
- * el número no cae en ningún rango conocido, por el tipo observado en su ruta (troncal).
+ * el número no cae en ningún rango conocido y la ruta es troncal, por el tipo observado en esa ruta.
+ * Hay códigos compartidos entre sistemas (C15, C25, 7 existen en troncal y en zonal): el respaldo se
+ * aplica solo a la ruta troncal, y la serie Z (flota zonal) nunca toma un tipo troncal.
  */
 export type BusKind = 'articulated' | 'biarticulated' | 'dual' | 'dual-articulated';
 const RANGES = fleet.ranges as unknown as Record<string, Partial<Record<BusKind, [number, number][]>>>;
@@ -17,8 +19,9 @@ export const KIND_NAME: Record<BusKind, string> = {
 /** Largo en metros de cada tipo. */
 export const KIND_LENGTH: Record<BusKind, number> = { articulated: 18, biarticulated: 27, dual: 12, 'dual-articulated': 18 };
 
-export function busKind(label: string, routeCode?: string): BusKind | null {
+export function busKind(label: string, routeCode?: string, sys?: string): BusKind | null {
   const m = /^([A-Z]+)0*(\d+)$/.exec(label.trim());
+  if (m?.[1].startsWith('Z')) return null;
   if (m) {
     const series = RANGES[m[1]];
     // El alimentador escribe un cero que el bus no lleva pintado: «K10657» es el K1657 de la calle.
@@ -30,5 +33,5 @@ export function busKind(label: string, routeCode?: string): BusKind | null {
       }
     }
   }
-  return routeCode ? ROUTES[routeCode] ?? null : null;
+  return routeCode && sys === 'troncal' ? ROUTES[routeCode] ?? null : null;
 }
