@@ -7,8 +7,8 @@ import { Fleet } from '../live/fleet';
  * 18 m (chasis Volvo B340M / Scania / Mercedes-Benz O500 con carrocería Marcopolo Gran Viale o Busscar)
  * y biarticulado de 27 m (Volvo Gran Artic 300). Proporciones tomadas de sus fichas: ancho 2,55 m,
  * alto 3,2 m con el aire acondicionado, cuerpo delantero de unos 11 m y tramos traseros de 6–7 m unidos
- * por fuelles. Los zonales (padrón de 12 m) usan un cuerpo rígido; sus variantes (busetón, buseta) y
- * los BYD eléctricos quedan para después.
+ * por fuelles. Los zonales usan un cuerpo rígido al largo estimado por su tipo de servicio (padrón,
+ * busetón, buseta). Los BYD eléctricos (sin dato por bus que los distinga) usan el mismo cuerpo.
  *
  * Partes: faldón y techo del color de la ruta, franja de ventanas oscura, parabrisas, letrero de ruta
  * ámbar al frente, fuelles grafito y la cápsula del aire acondicionado. Luz direccional fija desde el
@@ -55,6 +55,14 @@ void main() {
   float realW = 2.55 * u_ppm;
   float sw = max(1.0, 6.5 / realW);
   vec3 p = vec3(a_vpos.x, a_vpos.y * sw, a_vpos.z * sqrt(sw));
+  // Cuerpo rígido (modelo de 12 m): al largo del bus (padrón 12 m, busetón ~10 m, buseta ~8,5 m), un
+  // poco más bajo y angosto si es corto.
+  if (u_j1 < -100.0) {
+    float k = 18.0 * a_size / 12.0;
+    p.x *= k;
+    p.y *= mix(0.92, 1.0, clamp((k - 0.7) / 0.3, 0.0, 1.0));
+    p.z *= mix(0.9, 1.0, clamp((k - 0.7) / 0.3, 0.0, 1.0));
+  }
   // Cada tramo sigue su propio rumbo y gira en su fuelle: el delantero con el del bus, el trasero con
   // el del recorrido detrás; el del medio (biarticulado), con el promedio.
   vec2 f = normalize(a_dir);
@@ -156,7 +164,7 @@ const KINDS: BodyKind[] = ['rigid', 'articulated', 'biarticulated'];
 
 /** Tipo de cuerpo según el tamaño de la capa (1 articulado, 1,5 biarticulado, ~0,67 padrón). */
 export function bodyOf(size: number): BodyKind | null {
-  return size >= 1.3 ? 'biarticulated' : size >= 0.9 ? 'articulated' : size > 0.5 ? 'rigid' : null;
+  return size >= 1.3 ? 'biarticulated' : size >= 0.9 ? 'articulated' : size > 0.44 ? 'rigid' : null;
 }
 
 export class BusBodies {

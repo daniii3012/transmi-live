@@ -68,6 +68,14 @@ const hexRGB = (hex: string): [number, number, number] => [1, 3, 5].map((i) => p
 
 /** Tamaño relativo por sistema: articulados de 18 m en troncal y dual, 12 m en zonal. */
 const SIZE: Record<SystemKey, number> = { troncal: 1, dual: 1, alimentador: 0.68, zonal: 0.66, cable: 0.4 };
+/** Largo relativo a un articulado de 18 m. El biarticulado mide 27 m. En el zonal no hay dato por bus:
+ * se estima por el tipo de servicio (urbano, padrón de 12 m; complementario, busetón de ~10 m;
+ * especial, buseta de ~8,5 m, la de las rutas de ladera). */
+function sizeOf(b: Bus): number {
+  if (b.kind === 'biarticulated') return 1.5;
+  if (b.sys === 'zonal') return b.route?.sub === 'especial' ? 0.47 : b.route?.sub === 'complementario' ? 0.56 : 0.66;
+  return b.sys ? SIZE[b.sys] : 0.66;
+}
 
 /** Desplazamiento en mercator (0–1) para una posición en metros locales. */
 export function mercator(x: number, y: number, out: number[] | Float64Array) {
@@ -344,7 +352,7 @@ export class Fleet {
       const c = this.colorOf(b);
       out[o + 4] = c[0]; out[o + 5] = c[1]; out[o + 6] = c[2];
       out[o + 7] = Math.min(1, (now - b.bornAt) / 600);
-      out[o + 8] = (b.sys ? SIZE[b.sys] : 0.66) * (b.kind === 'biarticulated' ? 1.5 : 1); // 27 m frente a 18
+      out[o + 8] = sizeOf(b);
       out[o + 9] = flags;
       // Onda de lectura nueva (1,6 s, con desfase propio) solo donde la persona está mirando: el bus
       // seleccionado, la ruta en foco y los próximos en llegar. En toda la flota sería ruido cada 15 s.

@@ -53,7 +53,7 @@
       <RouteBadge {route} size="lg" />
       <div class="names">
         <h1>{route?.dest ?? 'Ruta sin datos'}</h1>
-        <p class="dim">Bus <span class="num">{bus.label}</span>&nbsp;· <span class="num">{bus.plate}</span>{#if bus.kind}&nbsp;· {KIND_NAME[bus.kind]}{/if}</p>
+        <p class="dim">Bus <span class="num">{bus.label}</span>&nbsp;· <span class="num">{bus.plate}</span>{#if bus.kind}&nbsp;· {KIND_NAME[bus.kind]}{:else if bus.sys === 'zonal' && bus.route?.sub}&nbsp;· <span title="Estimado por el tipo de servicio">{bus.route.sub === 'especial' ? 'buseta' : bus.route.sub === 'complementario' ? 'busetón' : 'padrón'}</span>{/if}</p>
       </div>
     </header>
 
