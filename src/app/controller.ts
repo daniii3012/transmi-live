@@ -118,6 +118,44 @@ export class Controller {
     cancelAnimationFrame(this.followRaf);
   }
 
+  /**
+   * «Resaltar llegadas» (modo de la ficha de estación o paradero, apagado por defecto): solo los buses
+   * que llegan quedan en foco, el resto se atenúa debajo, y cada uno lleva el tramo que le falta hasta
+   * la parada. `frame`: encuadrar la estación y esos buses (al encender el modo).
+   */
+  private spotOn = false;
+  spotlight(items: { busId: string; routeId: string; s1: number; color: string }[] | null, place?: [number, number], frame = false) {
+    if (!items) {
+      if (!this.spotOn) return;
+      this.spotOn = false;
+      this.fleet.focusBuses = null;
+      this.layers.setApproach(null);
+      this.map.triggerRepaint();
+      return;
+    }
+    this.spotOn = true;
+    this.fleet.focusBuses = new Set(items.map((i) => i.busId));
+    const features: GeoJSON.Feature[] = [];
+    const pts: [number, number][] = place ? [place] : [];
+    for (const it of items) {
+      const b = this.fleet.buses.get(it.busId);
+      const path = this.net.paths.get(it.routeId);
+      if (!b) continue;
+      pts.push([b.x / KX, b.y / KY]);
+      if (!path || !b.onPath) continue;
+      const s0 = b.s || b.sFix;
+      if (it.s1 - s0 < 5) continue;
+      features.push({ type: 'Feature', properties: { color: it.color }, geometry: { type: 'LineString', coordinates: path.slice(s0, it.s1) } });
+    }
+    this.layers.setApproach({ type: 'FeatureCollection', features });
+    if (frame && pts.length > 1) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+      this.map.fitBounds([[x0, y0], [x1, y1]], { padding: this.padding(48), duration: 800, maxZoom: 16.4, absolutePadding: true });
+    }
+    this.map.triggerRepaint();
+  }
+
   /** Buses que llegan pronto a la estación abierta (onda suave en el mapa). */
   setArriving(ids: string[]) {
     const s = new Set(ids);

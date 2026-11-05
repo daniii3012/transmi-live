@@ -8,9 +8,9 @@ import { BusBodies } from './busBodies';
  *
  *  - Apoyados en el suelo: las esquinas se calculan en coordenadas mercator, así que en 3D el bus se
  *    inclina con la calle en vez de quedar plano frente a la cámara.
- *  - Tres escalas, sin píldoras: a escala de ciudad un punto; a escala de barrio, punto con una
- *    flecha hacia donde avanza; de cerca, la huella del bus vista desde arriba (rectángulo de
- *    esquinas cortas, parabrisas al frente y las articulaciones del articulado y del biarticulado).
+ *  - Dos escalas, sin píldoras: lejos, un punto; de cerca, la huella del bus vista desde arriba
+ *    (rectángulo de esquinas cortas, parabrisas al frente y las articulaciones del articulado y del
+ *    biarticulado). Sin flecha de rumbo (con el anillo de foco parecía un pin de lugar).
  *    El paso entre punto y huella es un morfismo de distancias con signo, no un fundido.
  *  - Separación del trazado: halo del color del fondo y una sombra corta; la línea de la ruta no
  *    tapa al bus aunque sea del mismo color.
@@ -68,7 +68,7 @@ void main() {
   vec2 foot = vec2(len, wid) * 0.5;
   float pad = selected ? 24.0 : (arriving || a_ping >= 0.0) ? 17.0 : 6.0;
   float tail = trail ? max(30.0, len * 3.0) : 0.0;
-  float front = max(r * 1.75 + 1.0, foot.x) + pad;
+  float front = max(r, foot.x) + pad;
   float back = max(r, foot.x) + max(pad, tail);
   float side = max(r, foot.y) + pad;
   float lx = a_corner.x < 0.0 ? -back : front;
@@ -99,7 +99,6 @@ in float v_size;
 in float v_ping;
 uniform float u_zf;
 uniform float u_el;      // 0 punto … 1 huella
-uniform float u_ar;      // flecha de rumbo (aparece a escala de barrio)
 uniform float u_time;
 uniform float u_motion;  // 0 con prefers-reduced-motion
 uniform float u_shadow;  // intensidad de la sombra según el tema
@@ -138,14 +137,10 @@ void main() {
   if (hover) base = mix(base, vec3(1.0), 0.22);
 
   // Forma: punto (+ flecha) que se transforma en huella.
-  // Flecha de rumbo solo en lo que la persona mira (seleccionado, ruta en foco): en toda la flota
-  // eran cientos de flechas encimadas.
-  // La flecha se desvanece antes de que el punto se transforme en huella (si no, la mezcla sale con
-  // forma de hoja).
-  float ar = (selected || focused) ? u_ar * (1.0 - smoothstep(0.0, 0.3, u_el)) : 0.0;
+  // Sin flecha de rumbo: con el anillo parecía un pin de lugar. El rumbo lo dan el tramo de la ruta
+  // en foco y, de cerca, el parabrisas de la huella.
   float dDot = length(v_local) - v_r;
-  float dArr = tri(v_local, v_r + 1.2, v_r * 1.75 + 1.0, v_r * 0.5) + (1.0 - ar) * v_r;
-  float dA = min(dDot, dArr);
+  float dA = dDot;
   float dB = rbox(v_local, v_foot, min(v_foot.y * 0.4, 1.6));
   float d = mix(dA, dB, u_el);
   float aa = max(fwidth(d), 0.35);
@@ -269,7 +264,7 @@ export class BusLayer implements CustomLayerInterface {
     g.linkProgram(p);
     if (!g.getProgramParameter(p, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(p) ?? 'link');
     this.prog = p;
-    for (const n of ['u_matrix', 'u_mpp', 'u_ppm', 'u_zf', 'u_el', 'u_ar', 'u_time', 'u_motion', 'u_shadow', 'u_bodies', 'u_rim', 'u_light', 'u_mute']) this.u[n] = g.getUniformLocation(p, n);
+    for (const n of ['u_matrix', 'u_mpp', 'u_ppm', 'u_zf', 'u_el', 'u_time', 'u_motion', 'u_shadow', 'u_bodies', 'u_rim', 'u_light', 'u_mute']) this.u[n] = g.getUniformLocation(p, n);
     this.bodies.init(g);
 
     this.vao = g.createVertexArray()!;
@@ -332,7 +327,6 @@ export class BusLayer implements CustomLayerInterface {
       // Punto → huella entre los zooms 15,2 y 16; flecha de rumbo desde el 13.
       const el = Math.min(1, Math.max(0, (zoom - 15.2) / 0.8));
       g.uniform1f(this.u.u_el, el * el * (3 - 2 * el));
-      g.uniform1f(this.u.u_ar, Math.min(1, Math.max(0, zoom - 13)));
       g.uniform1f(this.u.u_time, (performance.now() - this.t0) / 1000);
       g.uniform1f(this.u.u_motion, this.motion ? 1 : 0);
       g.uniform1f(this.u.u_shadow, this.shadow);

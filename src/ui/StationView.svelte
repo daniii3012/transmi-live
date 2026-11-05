@@ -41,6 +41,24 @@
     return () => ctl?.setArriving([]);
   });
 
+  /** «Resaltar en el mapa»: modo opcional (apagado al abrir cada estación) que deja en foco solo los
+   * buses que llegan, con el tramo que les falta. Se actualiza con cada segundo (los buses avanzan). */
+  let spotlight = $state(false);
+  let framed = false;
+  $effect(() => {
+    void id;
+    spotlight = false;
+    framed = false;
+  });
+  $effect(() => {
+    void app.now;
+    if (!spotlight || !next?.length || !place) { ctl?.spotlight(null); framed = false; return; }
+    const items = next.slice(0, 8).map((a) => ({ busId: a.bus.id, routeId: a.route.id, s1: a.bus.sFix + a.meters, color: a.route.color }));
+    ctl?.spotlight(items, [place.lon, place.lat], !framed);
+    framed = true;
+  });
+  $effect(() => () => ctl?.spotlight(null));
+
   /** Vagones con las rutas que paran en cada uno. */
   const platforms = $derived(
     (station?.platforms ?? []).map((p) => ({ ...p, rs: p.routes.map((r) => net.routes.get(r)).filter((r): r is Route => !!r) })).filter((p) => p.rs.length),
@@ -73,7 +91,17 @@
     {/if}
 
     <section>
-      <div class="head"><span class="label">Próximas llegadas</span><span class="label faint">estimado</span></div>
+      <div class="head">
+        <span class="label">Próximas llegadas</span>
+        {#if next?.length}
+          <button class="spot" class:on={spotlight} role="switch" aria-checked={spotlight} onclick={() => (spotlight = !spotlight)}
+            title="Deja en el mapa solo los buses que llegan, con lo que les falta">
+            <span class="sw" aria-hidden="true"></span>Resaltar en el mapa
+          </button>
+        {:else}
+          <span class="label faint">estimado</span>
+        {/if}
+      </div>
       {#if next === null}
         <p class="faint small">Calculando…</p>
       {:else if next.length === 0}
@@ -138,6 +166,12 @@
   .head { display: flex; justify-content: space-between; margin-bottom: var(--sp-2); }
   .small { font-size: var(--fs-small); margin: 0; }
   ul { list-style: none; margin: 0; padding: 0; }
+  .spot { display: inline-flex; align-items: center; gap: var(--sp-2); height: 24px; padding: 0 var(--sp-2); font-family: var(--font-mono); font-size: var(--fs-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-2); border: 1px solid var(--line-2); }
+  .spot:hover { color: var(--fg-0); }
+  .spot .sw { width: 14px; height: 8px; border: 1px solid currentColor; position: relative; }
+  .spot .sw::after { content: ''; position: absolute; top: 1px; left: 1px; width: 4px; height: 4px; background: currentColor; transition: transform var(--t-in) var(--ease-out); }
+  .spot.on { color: var(--bg-1); border-color: var(--fg-0); background: var(--fg-0); }
+  .spot.on .sw::after { transform: translateX(6px); }
   .arrivals li button { width: 100%; height: var(--row); display: grid; grid-template-columns: auto 1fr auto; gap: var(--sp-3); align-items: center; border-bottom: 1px solid var(--line-1); text-align: left; }
   .arrivals li button:hover { background: var(--bg-2); }
   .dest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

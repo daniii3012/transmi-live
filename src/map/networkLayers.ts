@@ -59,7 +59,7 @@ export class NetworkLayers {
     const T = THEMES[theme];
     BG = T.bg;
     const m = this.map;
-    for (const id of ['routes-core-casing', 'plan-casing']) m.setPaintProperty(id, 'line-color', T.bg);
+    for (const id of ['routes-core-casing', 'plan-casing', 'approach-casing']) m.setPaintProperty(id, 'line-color', T.bg);
     (m.getSource('corridors') as GeoJSONSource)?.setData(this.corridorsFC());
     m.setPaintProperty('stations-label', 'text-halo-color', T.bg);
     m.setPaintProperty('stations-label', 'text-color', ['case', ['get', 'closed'], T.closed, ['boolean', ['feature-state', 'dim'], false], T.labelDim, T.label]);
@@ -92,6 +92,7 @@ export class NetworkLayers {
     m.addSource('selected-place', { type: 'geojson', data: empty() });
     m.addSource('user', { type: 'geojson', data: empty() });
     m.addSource('plan', { type: 'geojson', data: empty(), lineMetrics: true });
+    m.addSource('approach', { type: 'geojson', data: empty() });
     m.addSource('street-stops', { type: 'geojson', data: empty() });
 
     m.addLayer({
@@ -135,6 +136,17 @@ export class NetworkLayers {
       paint: { 'line-width': W([[10, 2.6], [13, 3.4], [16, 4], [19, 4.6]]), 'line-gradient': gradient('#ffffff', 1) },
     });
     // Viaje planeado: tramos en bus del color de su ruta, caminatas punteadas, extremos.
+    // Llegadas resaltadas: lo que le falta a cada bus hasta la estación, con el color de su ruta.
+    m.addLayer({
+      id: 'approach-casing', type: 'line', source: 'approach',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': BG, 'line-width': W([[10, 4.5], [14, 6], [18, 7]]) },
+    });
+    m.addLayer({
+      id: 'approach', type: 'line', source: 'approach',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': ['get', 'color'], 'line-width': W([[10, 2.4], [14, 3.4], [18, 4]]) },
+    });
     m.addLayer({
       id: 'plan-casing', type: 'line', source: 'plan', filter: ['==', ['get', 'kind'], 'ride'],
       layout: { 'line-join': 'round', 'line-cap': 'round' },
@@ -291,6 +303,14 @@ export class NetworkLayers {
   private planFull: FC | null = null;
   private planAnim = 0;
   /** Dibuja un viaje (o lo quita con `null`); con viaje, la red se atenúa como con una ruta en foco. */
+  /** Tramos de llegada (modo «resaltar llegadas» de la estación); con ellos, el resto se atenúa. */
+  setApproach(fc: FC | null) {
+    (this.map.getSource('approach') as GeoJSONSource).setData(fc ?? empty());
+    this.approachOn = !!fc;
+    this.applyFilters();
+  }
+  private approachOn = false;
+
   setPlan(fc: FC | null) {
     cancelAnimationFrame(this.planAnim);
     this.planFull = fc;
@@ -407,7 +427,7 @@ export class NetworkLayers {
     m.setFilter('routes-core-casing', coreVisible);
     for (const id of ['corridors', 'corridors-street']) m.setLayoutProperty(id, 'visibility', hidden.includes('troncal') ? 'none' : 'visible');
     m.setFilter('routes-zonal', visible);
-    const f = this.focusId || this.planOn;
+    const f = this.focusId || this.planOn || this.approachOn;
     const dim = THEMES[this.theme].dim;
     m.setPaintProperty('routes-core', 'line-color', f ? dim : CORE_COLOR);
     for (const id of ['corridors', 'corridors-street']) m.setPaintProperty(id, 'line-color', f ? dim : ['get', 'soft']);

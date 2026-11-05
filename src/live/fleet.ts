@@ -100,6 +100,8 @@ export class Fleet {
   interval = 20_000;
   hidden = new Set<SystemKey>();
   focusRoute: string | null = null;
+  /** Buses puntuales en foco (llegadas resaltadas de una estación); manda sobre las rutas. */
+  focusBuses: Set<string> | null = null;
   /** Varias rutas en foco a la vez (las de un viaje planeado); manda sobre `focusRoute`. */
   focusRoutes: Set<string> | null = null;
   selectedId: string | null = null;
@@ -339,8 +341,9 @@ export class Fleet {
     let n = 0;
     const focus = this.focusRoute;
     const set = this.focusRoutes;
-    const inFocus = (b: Bus) => (set ? set.has(b.routeId) : !focus || b.routeId === focus);
-    const anyFocus = !!set || !!focus;
+    const fb = this.focusBuses;
+    const inFocus = (b: Bus) => (fb ? fb.has(b.id) : set ? set.has(b.routeId) : !focus || b.routeId === focus);
+    const anyFocus = !!fb || !!set || !!focus;
     let selected: Bus | null = null;
     const write = (b: Bus, flags: number) => {
       mercator(b.x, b.y, m);
