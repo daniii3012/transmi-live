@@ -37,6 +37,9 @@
   .scrim { position: fixed; inset: 0; z-index: 30; }
   .panel { position: absolute; right: calc(var(--sp-4) + 48px); bottom: calc(var(--sp-6) + 20px); width: 280px; background: var(--bg-1); border: 1px solid var(--line-2); z-index: 31; animation: in var(--t-in) var(--ease-out); }
   .panel.narrow { right: var(--sp-3); left: var(--sp-3); width: auto; bottom: calc(var(--sheet) + var(--sp-3)); }
+  /* En teléfonos bajos (o con la hoja alta) el panel no pasa de la barra superior: se desplaza. */
+  .panel { max-height: calc(100dvh - var(--safe-top) - 64px - var(--sp-6) - 20px); overflow-y: auto; overscroll-behavior: contain; }
+  .panel.narrow { max-height: calc(100dvh - var(--sheet) - var(--safe-top) - 72px); }
   .head { height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--sp-3); border-bottom: 1px solid var(--line-1); }
   .x { width: 24px; height: 24px; color: var(--fg-2); font-size: 16px; }
   .theme { display: grid; gap: 6px; padding: 10px var(--sp-3); border-bottom: 1px solid var(--line-1); }

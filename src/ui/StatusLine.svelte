@@ -17,7 +17,7 @@
   <span class="label" role="status" aria-live="polite">{label}</span>
   {#if p.feedTime}
     <span class="sep" aria-hidden="true">·</span>
-    <span class="num"><span class="sr">datos de las </span>{fmtHMS(p.feedTime * 1000)}</span>
+    <span class="num"><span class="sr">datos de las </span>{fmtHMS(p.feedTime * 1000).slice(0, 5)}<span class="sec">{fmtHMS(p.feedTime * 1000).slice(5)}</span></span>
     {#if !compact}
       <span class="sep" aria-hidden="true">·</span>
       <span class="num faint">hace {ago(age ?? 0)}</span>
@@ -59,4 +59,6 @@
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(236, 239, 242, 0.5); } 70%, 100% { box-shadow: 0 0 0 6px rgba(236, 239, 242, 0); } }
   @keyframes blink { 50% { opacity: 0.2; } }
   @media (prefers-reduced-motion: reduce) { .dot { animation: none !important; } }
+  /* Pantallas angostas (375 px): sin segundos, para que el conteo de buses quepa entero. */
+  @media (max-width: 389px) { .compact .sec { display: none; } }
 </style>
