@@ -40,6 +40,8 @@ jobs:
         run: |
           test -n "$GTFS_URL" || { echo "::error::Falta el secreto GTFS_URL"; exit 1; }
           test -n "$API_BASE" || { echo "::error::Falta la variable API_BASE"; exit 1; }
+      - name: Pruebas de la geometría física
+        run: python3 tools/test_busway.py
       - name: Datos de la red
         env:
           GTFS_URL: ${{ secrets.GTFS_URL }}
