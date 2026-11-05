@@ -8,6 +8,7 @@ import { Poller } from '../live/poller';
 import { apiBase } from '../live/api';
 import { fetchAlerts } from '../live/alerts';
 import { KX, KY } from '../domain/geo';
+import { watch } from './watch.svelte';
 import type { SystemKey } from '../domain/types';
 import { app, saveLayers, savePrefs, loadPrefs } from './store.svelte';
 import { setMetro } from '../map/metroLayers';
@@ -90,7 +91,7 @@ export class Controller {
       if (document.hidden) this.wake = null;
       else if (app.following) void this.keepAwake(true);
     });
-    this.clock = window.setInterval(() => (app.now = Date.now()), 1000);
+    this.clock = window.setInterval(() => { app.now = Date.now(); watch.check(this.net, this.fleet, app.now); }, 1000);
     this.poller.start();
     this.setTheme(themePref());
     onSystemChange(() => { if (app.themePref === 'system') this.setTheme('system'); });

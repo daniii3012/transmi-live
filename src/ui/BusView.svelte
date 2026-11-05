@@ -7,6 +7,15 @@
   import RouteBadge from './RouteBadge.svelte';
   import Back from './Back.svelte';
   import { KIND_NAME } from '../domain/fleetTypes';
+  import { watch } from '../app/watch.svelte';
+
+  /** Avisar cuando el bus esté a 2 min de esa parada (o quitar el aviso). */
+  function toggleWatch(e: { index: number; name: string; seconds: number }) {
+    if (!bus || !route) return;
+    if (watch.is(bus.id, e.index)) { watch.set(null); return; }
+    watch.set({ busId: bus.id, busLabel: bus.label, routeCode: route.code, color: route.color, index: e.index, stopName: e.name, threshold: e.seconds > 180 ? 120 : 30 });
+    watch.show(`Te aviso cuando el ${route.code} esté a ${e.seconds > 180 ? '2 min' : 'punto de llegar'} de ${e.name}.`, null);
+  }
 
   let { id }: { id: string } = $props();
   const net = $derived(app.net!);
@@ -83,12 +92,17 @@
         <div class="head"><span class="label">Próximas paradas</span><span class="label faint">estimado{paceNote ? ` · ${paceNote}` : ''}</span></div>
         <ol>
           {#each itinerary as e, i (e.index)}
-            <li class:first={i === 0}>
-              <button onclick={() => (e.station ? go({ kind: 'station', id: e.station.id }) : go({ kind: 'stop', id: e.stopId }))}>
+            {@const on = watch.is(id, e.index)}
+            <li class:first={i === 0} class:watched={on}>
+              <button class="row" onclick={() => (e.station ? go({ kind: 'station', id: e.station.id }) : go({ kind: 'stop', id: e.stopId }))}>
                 <span class="tick"></span>
                 <span class="name">{e.name}</span>
                 <span class="eta num">{etaText(e.seconds)}</span>
                 <span class="at num faint">{fmtHM(e.at)}</span>
+              </button>
+              <button class="bell" class:on onclick={() => toggleWatch(e)} aria-pressed={on}
+                aria-label={on ? `Quitar el aviso de ${e.name}` : `Avisarme cuando llegue a ${e.name}`} title={on ? 'Quitar aviso' : 'Avisarme al llegar'}>
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5c-2.2 0-3.6 1.6-3.6 3.8v2.6L2 10h10l-1.4-2.1V5.3C10.6 3.1 9.2 1.5 7 1.5z" fill={on ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M5.6 11.6a1.5 1.5 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
               </button>
             </li>
           {/each}
@@ -136,8 +150,13 @@
   li::before { content: ''; position: absolute; left: 7px; top: 0; bottom: 0; width: 2px; background: var(--c); opacity: 0.7; }
   li.first::before { top: 20px; }
   li:last-child::before { bottom: 20px; }
-  li button { width: 100%; height: 40px; display: grid; grid-template-columns: 16px 1fr auto 44px; gap: var(--sp-3); align-items: center; text-align: left; }
-  li button:hover .name { color: var(--fg-0); }
+  li { display: grid; grid-template-columns: 1fr 36px; align-items: center; }
+  li .row { width: 100%; height: 40px; display: grid; grid-template-columns: 16px 1fr auto 44px; gap: var(--sp-3); align-items: center; text-align: left; }
+  li .row:hover .name { color: var(--fg-0); }
+  .bell { width: 36px; height: 36px; display: grid; place-items: center; color: var(--fg-3); }
+  .bell:hover { color: var(--fg-0); }
+  .bell.on { color: var(--fg-0); }
+  li.watched .name { color: var(--fg-0); }
   .tick { width: 10px; height: 10px; margin-left: 3px; background: var(--bg-1); border: 2px solid var(--c); position: relative; z-index: 1; }
   li.first .tick { background: var(--c); }
   .name { color: var(--fg-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

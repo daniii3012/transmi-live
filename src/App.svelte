@@ -21,6 +21,8 @@
   import MapControls from './ui/MapControls.svelte';
   import LayersPanel from './ui/LayersPanel.svelte';
   import MapMenu from './ui/MapMenu.svelte';
+  import Toast from './ui/Toast.svelte';
+  import { watch } from './app/watch.svelte';
   import { hideStationBuildings } from './map/stationBuildings';
   import { SpeedLayer } from './map/speedLayer';
   import { applyTheme, effective } from './app/theme';
@@ -58,7 +60,7 @@
         app.net = net;
         app.fleet = fleet;
         controller.start();
-        Object.assign(w, { __net: net, __fleet: fleet, __layers: layers, __ctl: controller, __fps: () => buses.fps(), __app: app });
+        Object.assign(w, { __net: net, __fleet: fleet, __layers: layers, __ctl: controller, __fps: () => buses.fps(), __app: app, __watch: watch });
         await layers.loadZonal();
         fleet.relocate();
         view.map.triggerRepaint();
@@ -118,6 +120,7 @@
   <MapControls {bearing} />
   <LayersPanel />
   <MapMenu />
+  <Toast />
   {#if app.searchOpen}<Search />{/if}
 {:else}
   <div class="boot" class:failed>
