@@ -32,6 +32,7 @@ uniform float u_j2;    // centro del segundo fuelle (biarticulado); −1000 si n
 uniform float u_ppm;   // píxeles por metro
 uniform float u_mpm;   // unidades mercator por metro
 uniform vec3 u_mute;   // atenuados: hacia el tono del tema
+uniform float u_rise;  // 0 → 1: el cuerpo crece desde el suelo al acercar o inclinar (sin aparecer de golpe)
 out vec3 v_color;
 out float v_shade;
 out float v_alpha;
@@ -54,7 +55,7 @@ void main() {
   // Mismo tamaño que la huella plana en la transición: ancho mínimo de 6,5 px, largo real.
   float realW = 2.55 * u_ppm;
   float sw = max(1.0, 6.5 / realW);
-  vec3 p = vec3(a_vpos.x, a_vpos.y * sw, a_vpos.z * sqrt(sw));
+  vec3 p = vec3(a_vpos.x, a_vpos.y * sw, a_vpos.z * sqrt(sw) * u_rise);
   // Cuerpo rígido (modelo de 12 m): al largo del bus (padrón 12 m, busetón ~10 m, buseta ~8,5 m), un
   // poco más bajo y angosto si es corto.
   if (u_j1 < -100.0) {
@@ -189,7 +190,7 @@ export class BusBodies {
     g.linkProgram(p);
     if (!g.getProgramParameter(p, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(p) ?? 'link');
     this.prog = p;
-    for (const n of ['u_matrix', 'u_ppm', 'u_mpm', 'u_mute', 'u_j1', 'u_j2']) this.u[n] = g.getUniformLocation(p, n);
+    for (const n of ['u_matrix', 'u_ppm', 'u_mpm', 'u_mute', 'u_j1', 'u_j2', 'u_rise']) this.u[n] = g.getUniformLocation(p, n);
     this.inst = g.createBuffer()!;
     const S = Fleet.STRIDE * 4;
     for (const k of KINDS) {
@@ -216,7 +217,7 @@ export class BusBodies {
   }
 
   /** Dibuja los cuerpos de los buses del búfer de la capa (ya recortado a la vista). */
-  draw(g: WebGL2RenderingContext, matrix: Float32Array, data: Float32Array, count: number, ppm: number, mpm: number, mute: [number, number, number]) {
+  draw(g: WebGL2RenderingContext, matrix: Float32Array, data: Float32Array, count: number, ppm: number, mpm: number, mute: [number, number, number], rise = 1) {
     const S = Fleet.STRIDE;
     // Reparto por tipo de cuerpo.
     const n: Record<BodyKind, number> = { rigid: 0, articulated: 0, biarticulated: 0 };
@@ -232,6 +233,7 @@ export class BusBodies {
     g.uniform1f(this.u.u_ppm, ppm);
     g.uniform1f(this.u.u_mpm, mpm);
     g.uniform3fv(this.u.u_mute, mute);
+    g.uniform1f(this.u.u_rise, rise);
     g.enable(g.DEPTH_TEST);
     g.depthFunc(g.LEQUAL);
     g.depthMask(true);

@@ -307,7 +307,11 @@ export class BusLayer implements CustomLayerInterface {
     const box = this.view();
     const moving = this.fleet.update(now, box);
     const zoom = this.map.getZoom();
-    const bodies = this.map.getPitch() > 15 && zoom >= 16.3;
+    // Cuerpos 3D con la vista inclinada y de cerca; crecen desde el suelo entre z16,3–16,8 y entre
+    // 10°–25° de inclinación.
+    const pitch = this.map.getPitch();
+    const bodies = pitch > 10 && zoom >= 16.3;
+    const rise = Math.min(1, (zoom - 16.3) / 0.5) * Math.min(1, (pitch - 10) / 15);
     this.fleet.rearDirs = bodies;
     const { data, count } = this.fleet.fill(now, this.only, box);
     if (count) {
@@ -347,7 +351,7 @@ export class BusLayer implements CustomLayerInterface {
       g.bindVertexArray(null);
       if (bodies) {
         const ppm = worldPx / (40_075_016.686 * Math.cos(lat));
-        this.bodies.draw(g, mm, data, count, ppm, ppm / worldPx, this.mute);
+        this.bodies.draw(g, mm, data, count, ppm, ppm / worldPx, this.mute, Math.max(0.02, rise));
       }
     }
     this.frames.push(performance.now());
