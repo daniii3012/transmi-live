@@ -7,6 +7,8 @@
   import { SYSTEM_ORDER, type Route } from '../domain/types';
   import RouteBadge from './RouteBadge.svelte';
   import Back from './Back.svelte';
+  import Star from './Star.svelte';
+  import AlertList from './AlertList.svelte';
 
   let { id, kind }: { id: string; kind: 'station' | 'stop' } = $props();
   const net = $derived(app.net!);
@@ -35,17 +37,23 @@
   const platforms = $derived(
     (station?.platforms ?? []).map((p) => ({ ...p, rs: p.routes.map((r) => net.routes.get(r)).filter((r): r is Route => !!r) })).filter((p) => p.rs.length),
   );
+  const alerts = $derived(app.alerts.filter((a) => a.stops.some((s) => stopIds.has(s))));
   const kindLabel = $derived(station ? (station.kind === 'portal' ? 'Portal' : station.kind === 'cable' ? 'Estación de cable' : 'Estación troncal') : 'Paradero');
 </script>
 
 {#if place}
   <div class="view">
     <Back />
-    <header>
-      <div class="label">{kindLabel}{stop ? ` · ${stop.code}` : ''}</div>
-      <h1>{station?.short ?? stop?.name}</h1>
-      {#if station && station.name !== station.short}<p class="faint sponsor">{station.name}</p>{/if}
+    <header class="head1">
+      <div class="names">
+        <div class="label">{kindLabel}{stop ? ` · ${stop.code}` : ''}</div>
+        <h1>{station?.short ?? stop?.name}</h1>
+        {#if station && station.name !== station.short}<p class="faint sponsor">{station.name}</p>{/if}
+      </div>
+      <Star kind={kind} {id} />
     </header>
+
+    <AlertList {alerts} />
 
     {#if station?.closed}
       <p class="notice">Sin servicio programado en el horario vigente. Varias estaciones de la Caracas están cerradas por las obras del metro.</p>
@@ -106,6 +114,8 @@
 
 <style>
   .view { padding: var(--sp-4); display: grid; gap: var(--sp-5); }
+  .head1 { display: flex; gap: var(--sp-3); align-items: flex-start; }
+  .names { flex: 1; min-width: 0; }
   h1 { margin: 2px 0 0; font-size: var(--fs-title); font-weight: 500; line-height: 1.2; letter-spacing: -0.01em; }
   .sponsor { margin: 2px 0 0; font-size: var(--fs-small); }
   .notice { margin: 0; padding: var(--sp-3); border: 1px solid var(--line-2); border-left: 2px solid var(--warn); font-size: var(--fs-small); color: var(--fg-1); }

@@ -6,13 +6,20 @@
   import { clock, fmtNum, meters, ago } from '../domain/time';
   import RouteBadge from './RouteBadge.svelte';
   import Back from './Back.svelte';
+  import Star from './Star.svelte';
+  import AlertList from './AlertList.svelte';
 
   let { id }: { id: string } = $props();
   const net = $derived(app.net!);
   const route = $derived(net.routes.get(id));
   const sysName = $derived(route ? net.systems.find((s) => s.key === route.sys)?.name : '');
   let serviceReady = $state(false);
-  onMount(() => { void net.loadService().then(() => (serviceReady = true)); });
+  let stopsReady = $state(false);
+  onMount(() => {
+    void net.loadService().then(() => (serviceReady = true));
+    // Nombres de los paraderos zonales: llegan con stops.json.
+    void net.loadStreetStops().then(() => (stopsReady = true));
+  });
 
   const pattern = $derived.by(() => (app.patternsReady ? net.pattern(id) : undefined));
   const buses = $derived.by(() => {
@@ -24,11 +31,13 @@
     return serviceReady ? frequencyNow(net, id, app.now) : null;
   });
   const others = $derived(route?.pair?.map((p) => net.routes.get(p)!).filter(Boolean) ?? []);
+  const alerts = $derived(app.alerts.filter((a) => a.routes.includes(id)));
 
   const ROW = 40;
   /** Paradas del patrón. */
   const rows = $derived.by(() => {
     if (!pattern) return [];
+    void stopsReady;
     return pattern.stops.map((sid, i) => ({ i, id: sid, name: net.placeName(sid), s: pattern.s[i], station: net.stationOf.get(sid) }));
   });
   /** Buses sobre el diagrama: `y` exacta por abscisa (centro de fila a centro de fila) y `ly` de la
@@ -60,7 +69,10 @@
         <h1>{route.dest}</h1>
         <p class="dim">{route.loop ? 'Circuito · ' : 'Desde '}{route.origin ?? '—'}</p>
       </div>
+      <Star kind="route" {id} />
     </header>
+
+    <AlertList {alerts} />
 
     <div class="meta label">{sysName}{route.sub ? ` · ${route.sub}` : ''}{route.zone ? ` · zona ${route.zone}` : ''}</div>
 
@@ -122,7 +134,7 @@
 <style>
   .view { padding: var(--sp-4); display: grid; gap: var(--sp-4); }
   .title { display: flex; gap: var(--sp-3); align-items: flex-start; }
-  .names { min-width: 0; }
+  .names { min-width: 0; flex: 1; }
   h1 { margin: 0; font-size: var(--fs-title); font-weight: 500; line-height: 1.2; letter-spacing: -0.01em; }
   .names p { margin: 2px 0 0; font-size: var(--fs-small); }
   .meta { margin-top: -8px; }

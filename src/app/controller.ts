@@ -6,6 +6,7 @@ import type { NetworkLayers } from '../map/networkLayers';
 import type { BusLayer } from '../map/busLayer';
 import { Poller } from '../live/poller';
 import { apiBase } from '../live/api';
+import { fetchAlerts } from '../live/alerts';
 import { KX, KY } from '../domain/geo';
 import type { SystemKey } from '../domain/types';
 import { app } from './store.svelte';
@@ -22,6 +23,7 @@ export class Controller {
   private followRaf = 0;
   private clock = 0;
   private flying = false;
+  private alertsTimer = 0;
 
   constructor(private map: MLMap, private net: Network, private fleet: Fleet, private layers: NetworkLayers, private buses: BusLayer) {
     this.poller = new Poller(apiBase(), (d) => this.onData(d), (s) => (app.poll = s));
@@ -38,12 +40,16 @@ export class Controller {
     addEventListener('resize', () => (app.narrow = innerWidth < 760));
     this.clock = window.setInterval(() => (app.now = Date.now()), 1000);
     this.poller.start();
+    const alerts = async () => { if (!document.hidden) { const a = await fetchAlerts(apiBase()); if (a) app.alerts = a; } };
+    void alerts();
+    this.alertsTimer = window.setInterval(alerts, 60_000);
     this.apply(app.view, true);
   }
 
   stop() {
     this.poller.stop();
     clearInterval(this.clock);
+    clearInterval(this.alertsTimer);
     cancelAnimationFrame(this.followRaf);
   }
 
@@ -81,6 +87,10 @@ export class Controller {
     if (v.kind === 'stop') station = v.id;
     f.focusRoute = focus;
     this.layers.setFocus(focus);
+    // Ruta zonal sin su recorrido todavía (llega después del arranque): se espera y se repite.
+    if (focus && !this.net.paths.has(focus)) {
+      void this.net.loadZonalShapes().then(() => { if (this.fleet.focusRoute === focus) { this.layers.setFocus(null); this.layers.setFocus(focus); this.frame(v); } });
+    }
     this.layers.setSelectedPlace(station);
     if (v.kind !== 'bus') this.stopFollow();
     this.map.triggerRepaint();
@@ -210,6 +220,9 @@ export class Controller {
       (p) => {
         app.locating = false;
         const c: [number, number] = [p.coords.longitude, p.coords.latitude];
+        app.userPos = c;
+        void this.net.loadStreetStops();
+        void this.net.loadPatterns().then(() => (app.patternsReady = true));
         this.layers.setUserLocation(c, p.coords.accuracy);
         this.flyTo(c, 16, { padding: this.padding(), duration: 900 });
       },

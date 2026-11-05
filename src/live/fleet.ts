@@ -2,6 +2,7 @@ import type { Network } from '../data/network';
 import type { Route, SystemKey } from '../domain/types';
 import { KX, KY, type MetricPath } from '../domain/geo';
 import { LAT0, LON0, Q, type VehiclesV1 } from './api';
+import { busKind, type BusKind } from '../domain/fleetTypes';
 
 /** Reglas medidas en el simulador sobre 706.281 lecturas troncales (ver decisiones/006). */
 export const MAX_OFF = 60;
@@ -19,6 +20,8 @@ export interface Bus {
   route: Route | undefined;
   path: MetricPath | undefined;
   sys: SystemKey | undefined;
+  /** Tipo de bus por su etiqueta (articulado, biarticulado, dual), si se conoce. */
+  kind: BusKind | null;
   /** Lectura más reciente. */
   fixX: number;
   fixY: number;
@@ -117,7 +120,7 @@ export class Fleet {
       if (!b || b.routeId !== routeId) {
         const route = this.net.routes.get(routeId);
         const fresh: Bus = {
-          id, label: d.label[i], plate: d.plate[i], routeId, route, path: this.net.paths.get(routeId), sys: route?.sys,
+          id, label: d.label[i], plate: d.plate[i], routeId, route, path: this.net.paths.get(routeId), sys: route?.sys, kind: busKind(d.label[i]),
           fixX: x, fixY: y, fixAt, age, stopId: d.stop[i], seq: d.seq[i], start: d.start[i],
           onPath: false, offPath: Infinity, sFix: 0, s0: 0, s1: 0, x0: x, y0: y, x1: x, y1: y, t0: now, t1: now,
           speed: null, hist: [], bornAt: b ? b.bornAt : now, x, y, hx: 1, hy: 0, s: 0,
@@ -288,7 +291,7 @@ export class Fleet {
       const c = this.colorOf(b);
       out[o + 4] = c[0]; out[o + 5] = c[1]; out[o + 6] = c[2];
       out[o + 7] = Math.min(1, (now - b.bornAt) / 600);
-      out[o + 8] = b.sys ? SIZE[b.sys] : 0.66;
+      out[o + 8] = (b.sys ? SIZE[b.sys] : 0.66) * (b.kind === 'biarticulated' ? 1.5 : 1); // 27 m frente a 18
       out[o + 9] = flags;
       n++;
     };

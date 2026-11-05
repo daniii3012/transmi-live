@@ -6,6 +6,7 @@
   import { ago, bogotaSeconds, fmtHM, meters } from '../domain/time';
   import RouteBadge from './RouteBadge.svelte';
   import Back from './Back.svelte';
+  import { KIND_NAME } from '../domain/fleetTypes';
 
   let { id }: { id: string } = $props();
   const net = $derived(app.net!);
@@ -13,12 +14,15 @@
   const bus = $derived.by(() => { void app.version; return app.fleet?.buses.get(id); });
   const route = $derived(bus?.route);
   const pattern = $derived.by(() => (app.patternsReady && bus ? net.pattern(bus.routeId) : undefined));
+  let stopsReady = $state(false);
+  $effect(() => { void net.loadStreetStops().then(() => (stopsReady = true)); });
   const age = $derived(bus ? Math.max(0, (app.now - bus.fixAt) / 1000) : 0);
   const progress = $derived(bus && route && route.len ? Math.min(1, Math.max(0, bus.sFix / route.len)) : null);
   const kmh = $derived(bus?.speed != null ? Math.round(bus.speed * 3.6) : null);
 
   const itinerary = $derived.by(() => {
     void app.now;
+    void stopsReady;
     if (!bus || !pattern || !bus.onPath) return [];
     const band = bandIndex(bogotaSeconds(app.now));
     const t = bandTimes(pattern, band);
@@ -49,7 +53,7 @@
       <RouteBadge {route} size="lg" />
       <div class="names">
         <h1>{route?.dest ?? 'Ruta sin datos'}</h1>
-        <p class="dim">Bus <span class="num">{bus.label}</span> · <span class="num">{bus.plate}</span></p>
+        <p class="dim">Bus <span class="num">{bus.label}</span> · <span class="num">{bus.plate}</span>{#if bus.kind} · {KIND_NAME[bus.kind]}{/if}</p>
       </div>
     </header>
 

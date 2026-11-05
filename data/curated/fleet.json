@@ -1,0 +1,183 @@
+{
+ "_nota": "Tipo de bus por la etiqueta de flota (serie y número). Clasificación propia del simulador a partir de las lecturas de posición: ninguna fuente publica la carrocería. Fuera de estos rangos, sin clasificar.",
+ "types": {
+  "articulated": {
+   "name": "Articulado",
+   "length": 18
+  },
+  "biarticulated": {
+   "name": "Biarticulado",
+   "length": 27
+  },
+  "dual": {
+   "name": "Dual",
+   "length": 18
+  }
+ },
+ "ranges": {
+  "E": {
+   "articulated": [
+    [
+     1,
+     49
+    ],
+    [
+     300,
+     399
+    ]
+   ],
+   "biarticulated": [
+    [
+     50,
+     199
+    ]
+   ],
+   "dual": [
+    [
+     700,
+     799
+    ]
+   ]
+  },
+  "D": {
+   "articulated": [
+    [
+     1,
+     99
+    ]
+   ],
+   "biarticulated": [
+    [
+     100,
+     299
+    ]
+   ],
+   "dual": [
+    [
+     500,
+     599
+    ]
+   ]
+  },
+  "N": {
+   "articulated": [
+    [
+     1,
+     99
+    ]
+   ],
+   "biarticulated": [
+    [
+     100,
+     199
+    ]
+   ],
+   "dual": [
+    [
+     500,
+     699
+    ]
+   ]
+  },
+  "U": {
+   "articulated": [
+    [
+     1000,
+     1299
+    ]
+   ],
+   "biarticulated": [
+    [
+     1400,
+     1699
+    ]
+   ]
+  },
+  "T": {
+   "articulated": [
+    [
+     1000,
+     1299
+    ]
+   ],
+   "biarticulated": [
+    [
+     1400,
+     1699
+    ]
+   ]
+  },
+  "M": {
+   "articulated": [
+    [
+     1000,
+     1299
+    ]
+   ],
+   "biarticulated": [
+    [
+     1400,
+     1699
+    ]
+   ]
+  },
+  "A": {
+   "articulated": [
+    [
+     1000,
+     1299
+    ]
+   ],
+   "biarticulated": [
+    [
+     1400,
+     1699
+    ]
+   ]
+  },
+  "S": {
+   "articulated": [
+    [
+     1000,
+     1299
+    ]
+   ],
+   "biarticulated": [
+    [
+     1400,
+     1699
+    ]
+   ]
+  },
+  "K": {
+   "articulated": [
+    [
+     1000,
+     1299
+    ]
+   ],
+   "biarticulated": [
+    [
+     1400,
+     1699
+    ]
+   ]
+  },
+  "BO": {
+   "dual": [
+    [
+     900,
+     999
+    ]
+   ]
+  },
+  "KE": {
+   "dual": [
+    [
+     900,
+     999
+    ]
+   ]
+  }
+ }
+}
