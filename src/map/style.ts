@@ -20,7 +20,7 @@ export const PALETTES = {
   },
   light: {
     bg: '#e9ecef', water: '#c7d4e0', waterLine: '#b9c9d8', park: '#dde5dc', wood: '#d8e0d6',
-    building: '#dfe2e6', buildingLine: '#d3d8dd', b3dLow: '#e2e5e9', b3dHigh: '#d0d6dc', aeroway: '#e0e4e8',
+    building: '#dfe2e6', buildingLine: '#d3d8dd', b3dLow: '#dbdfe3', b3dHigh: '#cbd1d7', aeroway: '#e0e4e8',
     road0: '#f3f4f6', road1: '#f7f8f9', road2: '#fbfbfc', road3: '#ffffff', road4: '#ffffff', rail: '#c3c9cf',
     label: '#7d8690', labelMajor: '#5f6872', place: '#8a939c', labelHalo: '#e9ecef',
   },
@@ -205,6 +205,9 @@ export function applyBaseTheme(map: import('maplibre-gl').Map, theme: Theme) {
   set('building', 'fill-color', P.building);
   set('building', 'fill-outline-color', P.buildingLine);
   set('building-3d', 'fill-extrusion-color', ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 6], 0, P.b3dLow, 60, P.b3dHigh]);
+  // Luz de las extrusiones según el tema: en claro, más suave (con la luz por defecto las paredes salían
+  // como trazos oscuros sueltos sobre techos del color del suelo); en oscuro, la de siempre.
+  map.setLight({ anchor: 'viewport', color: '#ffffff', position: [1.15, 210, 30], intensity: theme === 'light' ? 0.28 : 0.5 });
   set('road-path', 'line-color', P.road0);
   set('road-service', 'line-color', P.road0);
   set('road-minor', 'line-color', P.road1);
