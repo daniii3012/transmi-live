@@ -65,7 +65,7 @@ export class NetworkLayers {
     m.setPaintProperty('stations-label', 'text-color', ['case', ['get', 'closed'], T.closed, ['boolean', ['feature-state', 'dim'], false], T.labelDim, T.label]);
     m.setPaintProperty('street-stops', 'circle-color', T.stopFill);
     m.setPaintProperty('station-fp', 'fill-color', T.fp);
-    m.setPaintProperty('station-fp-line', 'line-color', T.fpEdge);
+    m.setPaintProperty('station-fp-line', 'line-color', ['case', ['boolean', ['feature-state', 'sel'], false], T.light, T.fpEdge]);
     m.setPaintProperty('station-fp-3d', 'fill-extrusion-color', T.fpBody);
     m.setPaintProperty('station-fp-roof', 'fill-extrusion-color', T.fpRoof);
     m.setPaintProperty('street-stops', 'circle-stroke-color', T.stopStroke);
@@ -181,7 +181,11 @@ export class NetworkLayers {
     });
     m.addLayer({
       id: 'station-fp-line', type: 'line', source: 'station-fp', minzoom: 14.8,
-      paint: { 'line-color': T0.fpEdge, 'line-width': W([[15, 0.6], [18, 1.2]]), 'line-opacity': fpOn },
+      paint: {
+        'line-color': ['case', ['boolean', ['feature-state', 'sel'], false], T0.light, T0.fpEdge],
+        'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 15, ['case', ['boolean', ['feature-state', 'sel'], false], 1.6, 0.6], 18, ['case', ['boolean', ['feature-state', 'sel'], false], 2.4, 1.2]],
+        'line-opacity': fpOn,
+      },
     });
     m.addLayer({
       id: 'station-fp-3d', type: 'fill-extrusion', source: 'station-fp', minzoom: 14.8, layout: { visibility: 'none' },
@@ -211,6 +215,7 @@ export class NetworkLayers {
     m.addLayer({
       id: 'selected-place', type: 'symbol', source: 'selected-place',
       layout: { 'icon-image': 'sel', 'icon-allow-overlap': true, 'icon-ignore-placement': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 17, 1.1] },
+      paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 15.2, 1, 15.8, ['case', ['get', 'fp'], 0, 1]] },
     });
     m.addLayer({
       id: 'user-accuracy', type: 'circle', source: 'user',
@@ -261,10 +266,17 @@ export class NetworkLayers {
   }
 
   /** Marca de selección (escuadras) sobre una estación o paradero; `null` la quita. */
+  private selFp: string | null = null;
   setSelectedPlace(id: string | null) {
-    const s = id ? this.net.stations.get(id) ?? this.net.streetStops.get(id) : undefined;
+    const st = id ? this.net.stations.get(id) : undefined;
+    const s = st ?? (id ? this.net.streetStops.get(id) : undefined);
+    // Estación con huella: se resalta su contorno (desde z15 la escuadra quedaría en medio de una
+    // plataforma de 100 m); la escuadra queda para la escala de ciudad y los paraderos.
+    if (this.selFp) this.map.setFeatureState({ source: 'station-fp', id: this.selFp }, { sel: false });
+    this.selFp = st?.fp ? st.id : null;
+    if (this.selFp) this.map.setFeatureState({ source: 'station-fp', id: this.selFp }, { sel: true });
     (this.map.getSource('selected-place') as GeoJSONSource).setData(s
-      ? { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [s.lon, s.lat] } }] }
+      ? { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { fp: !!st?.fp }, geometry: { type: 'Point', coordinates: [s.lon, s.lat] } }] }
       : empty());
   }
 
