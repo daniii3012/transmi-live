@@ -358,7 +358,8 @@ export class BusLayer implements CustomLayerInterface {
     if (!moving && !waves && !this.fleet.animating(now)) return;
     // Al ritmo que hace falta: las ondas son lentas (30 cuadros bastan); si solo avanzan buses, según
     // cuánto se mueven en pantalla a este zoom (a escala de ciudad, menos de un píxel por cuadro).
-    const fps = zoom >= 16 ? 60 : waves ? 30 : zoom < 12 ? 10 : zoom < 14 ? 20 : 30;
+    // A z16 un bus a 10 m/s avanza ~0,3 px por cuadro a 30 cuadros: 60 solo desde z17,5 (R1.17, calor).
+    const fps = zoom >= 17.5 ? 60 : zoom >= 14 || waves ? 30 : zoom < 12 ? 10 : 20;
     clearTimeout(this.timer);
     this.timer = window.setTimeout(() => this.map.triggerRepaint(), Math.max(0, 1000 / fps - 4));
   }
