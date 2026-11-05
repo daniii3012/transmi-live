@@ -43,7 +43,9 @@ export class Network {
   hash = '';
   bands: string[] = [];
   /** Tramos de corredor troncal con su letra (o null si no se pudo deducir). */
-  corridors: { z: string | null; street?: boolean; c: [number, number][] }[] = [];
+  corridors: { z: string | null; street?: boolean; osm?: boolean; c: [number, number][] }[] = [];
+  /** Calzada exclusiva (OSM), para la guía a nivel de calle; se carga al acercarse (`loadLanes`). */
+  lanes: { z: string | null; c: Float64Array }[] | null = null;
   private patterns?: Record<string, Pattern>;
   /** Cambios en la red (60 días) y alias de ids re-emitidos (decisión 011). */
   changes: ChangesFile = { v: 1, updated: '', entries: [], aliases: {} };
@@ -56,7 +58,7 @@ export class Network {
       getJSON<Meta>('meta.json'),
       getJSON<NetworkFile>('network.json'),
       getJSON<ShapesFile>('shapes-core.json'),
-      getJSON<{ segments: { z: string | null; street?: boolean; c: [number, number][] }[] }>('corridors.json'),
+      getJSON<{ segments: { z: string | null; street?: boolean; osm?: boolean; c: [number, number][] }[] }>('corridors.json'),
     ]);
     n.corridors = corr.segments;
     n.meta = meta;
@@ -100,6 +102,15 @@ export class Network {
       this.bands = f.bands;
       this.patterns = f.patterns;
       return f.patterns;
+    });
+  }
+
+  loadLanes(): Promise<void> {
+    return this.once('lanes', async () => {
+      try {
+        const f = await getJSON<{ scale: number; lanes: { z: string | null; d: number[] }[] }>('lanes.json');
+        this.lanes = f.lanes.map((l) => ({ z: l.z, c: decodeShape(l.d, f.scale) }));
+      } catch { this.lanes = []; /* sin calzada: queda el eje */ }
     });
   }
 

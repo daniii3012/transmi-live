@@ -61,6 +61,7 @@ export class NetworkLayers {
     const m = this.map;
     for (const id of ['routes-core-casing', 'plan-casing', 'approach-casing']) m.setPaintProperty(id, 'line-color', T.bg);
     (m.getSource('corridors') as GeoJSONSource)?.setData(this.corridorsFC());
+    if (this.net.lanes) (m.getSource('lanes') as GeoJSONSource)?.setData(this.lanesFC());
     m.setPaintProperty('stations-label', 'text-halo-color', T.bg);
     m.setPaintProperty('stations-label', 'text-color', ['case', ['get', 'closed'], T.closed, ['boolean', ['feature-state', 'dim'], false], T.labelDim, T.label]);
     m.setPaintProperty('street-stops', 'circle-color', T.stopFill);
@@ -87,6 +88,7 @@ export class NetworkLayers {
     m.addSource('routes-zonal', { type: 'geojson', data: empty(), tolerance: 0.6 });
     m.addSource('routes-core', { type: 'geojson', data: this.routesFC(['troncal', 'dual', 'cable']), tolerance: 0.3 });
     m.addSource('corridors', { type: 'geojson', data: this.corridorsFC(), tolerance: 0.3 });
+    m.addSource('lanes', { type: 'geojson', data: empty(), tolerance: 0.2 });
     m.addSource('route-focus', { type: 'geojson', data: empty(), lineMetrics: true });
     m.addSource('stations', { type: 'geojson', data: this.stationsFC(), promoteId: 'id' });
     m.addSource('station-fp', { type: 'geojson', data: this.footprintsFC(), promoteId: 'id' });
@@ -109,8 +111,30 @@ export class NetworkLayers {
     m.addLayer({
       id: 'corridors', type: 'line', source: 'corridors', filter: ['!', ['get', 'street']],
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': ['get', 'soft'], 'line-width': W([[10, 1.1], [13, 1.6], [16, 2.2], [19, 2.6]]) },
+      // A nivel de calle el eje del catálogo (trazo grueso) cede ante la calzada de OSM donde la hay
+      // (`osm`); donde no, se aclara.
+      paint: {
+        'line-color': ['get', 'soft'], 'line-width': W([[10, 1.1], [13, 1.6], [16, 2.2], [19, 2.6]]),
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 15.5, 1, 16.5, ['case', ['get', 'osm'], 0, 0.7], 18, ['case', ['get', 'osm'], 0, 0.45]],
+      },
     });
+    // Calzada exclusiva (OSM) a nivel de calle: un trazo fino por carril, sobre la vía real (glorietas,
+    // giros, estaciones). Se carga la primera vez que el mapa pasa de z 14,5.
+    m.addLayer({
+      id: 'corridor-lanes', type: 'line', source: 'lanes', minzoom: 15,
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': ['get', 'soft'], 'line-width': W([[15, 0.8], [17, 1.4], [19, 2.4]]),
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 15, 0, 16.5, 0.9],
+      },
+    });
+    const wantLanes = () => {
+      if (m.getZoom() < 14.5 || this.net.lanes) return;
+      m.off('zoomend', wantLanes);
+      void this.net.loadLanes().then(() => (m.getSource('lanes') as GeoJSONSource)?.setData(this.lanesFC()));
+    };
+    m.on('zoomend', wantLanes);
+    wantLanes();
     m.addLayer({
       id: 'corridors-street', type: 'line', source: 'corridors', filter: ['get', 'street'],
       layout: { 'line-join': 'round', 'line-cap': 'butt' },
@@ -450,12 +474,12 @@ export class NetworkLayers {
     const coreVisible: ExpressionSpecification = ['all', visible, this.dual ? ['!=', ['get', 'sys'], 'troncal'] : ['==', ['get', 'sys'], 'cable']];
     m.setFilter('routes-core', coreVisible);
     m.setFilter('routes-core-casing', coreVisible);
-    for (const id of ['corridors', 'corridors-street']) m.setLayoutProperty(id, 'visibility', hidden.includes('troncal') ? 'none' : 'visible');
+    for (const id of ['corridors', 'corridors-street', 'corridor-lanes']) m.setLayoutProperty(id, 'visibility', hidden.includes('troncal') ? 'none' : 'visible');
     m.setFilter('routes-zonal', visible);
     const f = this.focusId || this.planOn || this.approachOn;
     const dim = THEMES[this.theme].dim;
     m.setPaintProperty('routes-core', 'line-color', f ? dim : CORE_COLOR);
-    for (const id of ['corridors', 'corridors-street']) m.setPaintProperty(id, 'line-color', f ? dim : ['get', 'soft']);
+    for (const id of ['corridors', 'corridors-street', 'corridor-lanes']) m.setPaintProperty(id, 'line-color', f ? dim : ['get', 'soft']);
     m.setPaintProperty('routes-zonal', 'line-color', zonalColor(f ? 0.12 : 0.3));
   }
 
@@ -475,14 +499,29 @@ export class NetworkLayers {
     return { type: 'FeatureCollection', features };
   }
 
-  private corridorsFC(): FC {
+  private soft(z: string | null) {
     const zones = palette.zones as Record<string, { color: string }>;
+    return mix(z && zones[z] ? zones[z].color : '#8b939e', this.theme === 'light' ? 0.5 : 0.55);
+  }
+
+  private corridorsFC(): FC {
     return {
       type: 'FeatureCollection',
       features: this.net.corridors.map((s) => ({
         type: 'Feature',
-        properties: { z: s.z, street: !!s.street, soft: mix(s.z && zones[s.z] ? zones[s.z].color : '#8b939e', this.theme === 'light' ? 0.5 : 0.55) },
+        properties: { z: s.z, street: !!s.street, osm: !!s.osm, soft: this.soft(s.z) },
         geometry: { type: 'LineString', coordinates: s.c },
+      })),
+    };
+  }
+
+  private lanesFC(): FC {
+    return {
+      type: 'FeatureCollection',
+      features: (this.net.lanes ?? []).map((l) => ({
+        type: 'Feature',
+        properties: { soft: this.soft(l.z) },
+        geometry: { type: 'LineString', coordinates: coords(l.c) },
       })),
     };
   }

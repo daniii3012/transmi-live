@@ -114,6 +114,108 @@ def simplify(pts: list[tuple[float, float]], tol: float) -> list[int]:
     return [i for i in range(n) if keep[i]]
 
 
+def densify(pts, step: float):
+    """Puntos cada `step` m (o menos) sobre una polilínea en metros."""
+    out = [pts[0]]
+    for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+        n = max(1, int(math.hypot(bx - ax, by - ay) // step))
+        out.extend((ax + (bx - ax) * k / n, ay + (by - ay) * k / n) for k in range(1, n + 1))
+    return out
+
+
+def street_level_guide(segs, lanes, cover_m: float = 35.0):
+    """Guía de troncal a nivel de calle. Los ejes del catálogo son de trazo grueso (vértices cada ~90 m):
+    en glorietas y giros se apartan de la vía hasta 20–30 m. Donde OSM tiene la calzada exclusiva, esa
+    geometría es la fiel: los tramos del eje cubiertos por un carril de OSM a menos de `cover_m` se marcan
+    `osm` (la página los desvanece al acercarse) y cada carril sale con la zona (color) del eje más cercano."""
+    G = 50.0
+    lane_grid = defaultdict(list)
+    lanes_m = []
+    for w in lanes:
+        m = [xy(lo, la) for lo, la in w['c']]
+        lanes_m.append(m)
+        for x, y in densify(m, 5.0):
+            lane_grid[(int(x // G), int(y // G))].append((x, y))
+
+    def covered(x, y):
+        gx, gy = int(x // G), int(y // G)
+        r2 = cover_m * cover_m
+        return any((x - a) ** 2 + (y - b) ** 2 <= r2 for i in (-1, 0, 1) for j in (-1, 0, 1) for a, b in lane_grid.get((gx + i, gy + j), ()))
+
+    axis_grid = defaultdict(list)
+    out_segs = []
+    for s in segs:
+        pts = densify([xy(lo, la) for lo, la in s['c']], 10.0)
+        for x, y in pts:
+            axis_grid[(int(x // G), int(y // G))].append((x, y, s.get('z')))
+        flags = [not s.get('street') and covered(x, y) for x, y in pts]
+        # Huecos y salientes cortos (< 40 m) no parten el tramo.
+        runs = []
+        for f in flags:
+            if runs and runs[-1][0] == f:
+                runs[-1][1] += 1
+            else:
+                runs.append([f, 1])
+        for k in range(1, len(runs) - 1):
+            if runs[k][1] < 4:
+                runs[k][0] = runs[k - 1][0]
+        i = 0
+        merged = []
+        for f, n in runs:
+            if merged and merged[-1][0] == f:
+                merged[-1][2] = i + n
+            else:
+                merged.append([f, i, i + n])
+            i += n
+        for f, a, b in merged:
+            part = pts[max(0, a - 1):b]  # comparten el vértice de unión
+            if len(part) < 2:
+                continue
+            keep = simplify(part, 0.5)
+            out_segs.append({**s, **({'osm': True} if f else {}), 'c': [[round(part[k][0] / KX, 6), round(part[k][1] / KY, 6)] for k in keep]})
+
+    def zone_of(m):
+        x, y = m[len(m) // 2]
+        gx, gy = int(x // G), int(y // G)
+        best = None
+        for i in (-1, 0, 1):
+            for j in (-1, 0, 1):
+                for a, b, z in axis_grid.get((gx + i, gy + j), ()):
+                    d = (x - a) ** 2 + (y - b) ** 2
+                    if d < 60 * 60 and (best is None or d < best[0]):
+                        best = (d, z)
+        return best[1] if best else None
+
+    out_lanes = []
+    for w, m in zip(lanes, lanes_m):
+        if len(m) < 2:
+            continue
+        keep = simplify(m, 0.3)
+        enc, px, py = [], 0, 0  # mismo formato que los recorridos: enteros ×1e6 por diferencias
+        for k in keep:
+            x, y = round(m[k][0] / KX * E6), round(m[k][1] / KY * E6)
+            enc.extend((x - px, y - py))
+            px, py = x, y
+        out_lanes.append({'z': zone_of(m), 'd': enc})
+    cov = sum(1 for s in out_segs if s.get('osm'))
+    log(f'guía a nivel de calle: {len(out_lanes)} carriles de OSM; {cov} de {len(out_segs)} tramos del eje cubiertos')
+    return out_segs, out_lanes
+
+
+def chaikin(pts, iterations: int = 3):
+    """Suaviza una polilínea cortando esquinas (Chaikin); conserva los extremos."""
+    for _ in range(iterations):
+        if len(pts) < 3:
+            return pts
+        out = [pts[0]]
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            out.append((0.75 * ax + 0.25 * bx, 0.75 * ay + 0.25 * by))
+            out.append((0.25 * ax + 0.75 * bx, 0.25 * ay + 0.75 * by))
+        out.append(pts[-1])
+        pts = out
+    return pts
+
+
 def cumulative(pts):
     c = [0.0]
     for i in range(1, len(pts)):
@@ -710,10 +812,25 @@ def main():
     cur = ROOT / 'data' / 'curated' / 'corridors.json'
     if cur.exists():
         segs = json.loads(cur.read_text())['segments']
-        log(f'guía de troncal: {len(segs)} ejes curados')
+        # Los ejes vienen con vértices cada ~90 m: a nivel de calle las curvas (glorietas, giros) se
+        # veían como cuerdas. Chaikin (3 pasadas) las redondea; la simplificación a 0,5 m quita los
+        # puntos que sobran en las rectas.
+        for seg in segs:
+            pts = [xy(lo, la) for lo, la in seg['c']]
+            sm = chaikin(pts, 3)
+            keep = simplify(sm, 0.5)
+            seg['c'] = [[round(sm[i][0] / KX, 6), round(sm[i][1] / KY, 6)] for i in keep]
+        log(f'guía de troncal: {len(segs)} ejes curados, {sum(len(s["c"]) for s in segs)} puntos tras suavizar')
     else:
         segs = list(corridor_segments.values())
+    lanes_out = []
+    if busway:
+        segs, lanes_out = street_level_guide(segs, busway['lanes'])
     write('corridors.json', {'v': 1, 'hash': digest, 'segments': segs})
+    if lanes_out:
+        # A nivel de calle (z ≥ 15,5) la guía es la calzada exclusiva de OSM: la página la carga solo al
+        # acercarse.
+        write('lanes.json', {'v': 1, 'hash': digest, 'scale': E6, 'license': busway.get('license'), 'lanes': lanes_out})
     write('stops.json', {'v': 1, 'hash': digest, 'cols': ['id', 'code', 'name', 'lon', 'lat', 'routes'], 'stops': street})
     # v2: abscisas y tiempos por diferencias (36 % menos con gzip); el cliente reconstruye los acumulados
     # (src/domain/patterns.ts).
