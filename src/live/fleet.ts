@@ -256,6 +256,16 @@ export class Fleet {
     return moving;
   }
 
+  /** Recorridos que llegaron tarde (zonal): los buses que aún no lo tenían se ubican ya, sin
+   * esperar a su próxima lectura. */
+  relocate(now = Date.now()) {
+    for (const b of this.buses.values()) {
+      if (b.path) continue;
+      b.path = this.net.paths.get(b.routeId);
+      if (b.path) this.place(b, b.fixX, b.fixY, b.fixAt, now, true);
+    }
+  }
+
   /** ¿Avanza ahora a más de ~2 m/s? */
   private moving(b: Bus, now: number): boolean {
     if (now >= b.t1 || b.t1 <= b.t0) return false;
@@ -313,14 +323,16 @@ export class Fleet {
       out[o + 9] = flags;
       n++;
     };
-    // Dos pasadas: atenuados abajo, el resto encima.
-    for (let pass = only === 'main' ? 1 : 0; pass < (only === 'dim' ? 1 : 2); pass++) {
+    // Pasadas: atenuados abajo; luego zonal y alimentador; encima troncal, dual y cable.
+    const major = (b: Bus) => b.sys === 'troncal' || b.sys === 'dual' || b.sys === 'cable';
+    for (let pass = only === 'main' ? 1 : 0; pass < (only === 'dim' ? 1 : 3); pass++) {
       for (const b of this.buses.values()) {
         if (b.age > DROP_AGE) continue;
         if (b.sys && this.hidden.has(b.sys)) continue;
         if (b.id === this.selectedId) { selected = b; continue; }
         const dim = anyFocus && !inFocus(b);
         if ((pass === 0) !== dim) continue;
+        if (pass > 0 && (pass === 2) !== major(b)) continue;
         const trail = !dim && (this.trails || (anyFocus && inFocus(b))) && this.moving(b, now);
         write(b, (dim ? 1 : 0) | (b.age > STALE_AGE ? 2 : 0) | (b.id === this.hoverId ? 8 : 0) | (trail ? 16 : 0) | (anyFocus && !dim ? 32 : 0));
       }

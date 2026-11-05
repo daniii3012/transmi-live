@@ -26,8 +26,10 @@ out vec4 v_color;
 out float v_flags;
 out float v_pad;
 out float v_tail;
+out float v_size;
 
 void main() {
+  v_size = a_size;
   float flags = a_flags;
   bool dim = mod(flags, 2.0) >= 1.0;
   bool selected = mod(floor(flags / 4.0), 2.0) >= 1.0;
@@ -69,7 +71,9 @@ in vec4 v_color;
 in float v_flags;
 in float v_pad;
 in float v_tail;
+in float v_size;
 uniform float u_dpr;
+uniform float u_zf;
 out vec4 frag;
 
 // Distancia con signo (px) a la silueta: cuerpo recto y trompa que se angosta en el 30 % delantero.
@@ -92,6 +96,9 @@ void main() {
   // Bus de la ruta en foco: cuerpo claro, para leerse sobre su propio trazo resaltado.
   if (focused || selected) base = mix(base, vec3(0.96), 0.62);
   if (dim) base = mix(vec3(0.16, 0.18, 0.21), base, 0.28);
+  // Zonal y alimentador (tamaño < 0,8) a escala de ciudad: menos saturados, para que la troncal se lea
+  // encima; a escala de calle recuperan su color.
+  else if (v_size < 0.8 && !focused && !selected) base = mix(vec3(0.13, 0.16, 0.22), base, mix(0.6, 1.0, u_zf));
   if (hover) base = mix(base, vec3(1.0), 0.28);
   float d = body(v_local, v_half);
   float aa = 0.75 * u_dpr;

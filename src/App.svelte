@@ -49,7 +49,8 @@
         controller.start();
         Object.assign(w, { __net: net, __fleet: fleet, __layers: layers, __ctl: controller, __fps: () => buses.fps(), __app: app });
         await layers.loadZonal();
-        for (const b of fleet.buses.values()) if (!b.path) b.path = net.paths.get(b.routeId);
+        fleet.relocate();
+        view.map.triggerRepaint();
         void layers.loadStreetStops();
       } catch (e) {
         failed = e instanceof Error ? e.message : String(e);
