@@ -118,7 +118,7 @@
   .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .s { font-size: var(--fs-small); white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
   .icon { width: 38px; height: 22px; display: inline-flex; align-items: center; justify-content: center; }
-  .icon::before { content: ''; width: 9px; height: 9px; background: var(--station); outline: 2px solid var(--bg-1); }
+  .icon::before { content: ''; width: 9px; height: 9px; background: var(--station); box-shadow: 0 0 0 1.5px var(--fg-1); }
   .icon.stop::before { border-radius: 50%; background: var(--bg-1); border: 1.5px solid var(--stop); }
   .empty { margin: 0; padding: var(--sp-4); font-size: var(--fs-small); line-height: 1.5; }
   @keyframes fade { from { opacity: 0; } }

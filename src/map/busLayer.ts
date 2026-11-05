@@ -140,7 +140,9 @@ void main() {
   // Forma: punto (+ flecha) que se transforma en huella.
   // Flecha de rumbo solo en lo que la persona mira (seleccionado, ruta en foco): en toda la flota
   // eran cientos de flechas encimadas.
-  float ar = (selected || focused) ? u_ar : 0.0;
+  // La flecha se desvanece antes de que el punto se transforme en huella (si no, la mezcla sale con
+  // forma de hoja).
+  float ar = (selected || focused) ? u_ar * (1.0 - smoothstep(0.0, 0.3, u_el)) : 0.0;
   float dDot = length(v_local) - v_r;
   float dArr = tri(v_local, v_r + 1.2, v_r * 1.75 + 1.0, v_r * 0.5) + (1.0 - ar) * v_r;
   float dA = min(dDot, dArr);

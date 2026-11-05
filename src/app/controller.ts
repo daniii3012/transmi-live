@@ -219,7 +219,8 @@ export class Controller {
       this.map.fitBounds(this.planBounds, { padding: this.padding(48), duration: 900, maxZoom: 16, absolutePadding: true });
     } else if (v.kind === 'bus') {
       const b = this.fleet.buses.get(v.id);
-      if (b) this.flyTo([b.x / KX, b.y / KY], Math.max(m.getZoom(), 15.5), opts);
+      // 16,4: la huella del bus ya está formada (entre 15,2 y 16 el punto se transforma).
+      if (b) this.flyTo([b.x / KX, b.y / KY], Math.max(m.getZoom(), 16.4), opts);
     }
   }
 
@@ -381,7 +382,7 @@ export class Controller {
     if (app.following) this.stopFollow();
     else {
       const b = this.selectedBus();
-      if (b) this.flyTo([b.x / KX, b.y / KY], Math.max(this.map.getZoom(), 15.5), { padding: this.padding(), duration: 600 });
+      if (b) this.flyTo([b.x / KX, b.y / KY], Math.max(this.map.getZoom(), 16.4), { padding: this.padding(), duration: 600 });
       this.startFollow();
     }
   }

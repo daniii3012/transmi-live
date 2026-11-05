@@ -657,7 +657,8 @@ def main():
         rs = stop_routes.get(i)
         if not rs:
             continue
-        street.append([s['stop_id'], s['stop_code'], clean(s['stop_name']),
+        # El sufijo «_TM» de los códigos de paradero es interno del paquete: se muestra sin él.
+        street.append([s['stop_id'], re.sub(r'_TM$', '', s['stop_code'] or ''), clean(s['stop_name']),
                        round(float(s['stop_lon']), 6), round(float(s['stop_lat']), 6),
                        sorted(routes[ri]['route_id'] for ri in rs)])
 

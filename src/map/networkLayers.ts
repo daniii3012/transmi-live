@@ -12,7 +12,7 @@ import type { Theme } from '../app/theme';
 /** Colores de la red que dependen del tema (fondo de las mezclas, atenuado, nombres, estaciones). */
 const THEMES = {
   dark: { bg: '#101418', dim: '#2a3139', label: '#a7b0b9', labelDim: '#3d4650', closed: '#56606b', station: '#e3e7eb', stopFill: '#161b20', stopStroke: '#7b93b8', light: '#e9ecef', fp: '#3a434d', fpEdge: '#8b96a1', fpBody: '#363e46', fpRoof: '#6a747e' },
-  light: { bg: '#e9ecef', dim: '#cfd5db', label: '#4a5560', labelDim: '#b4bbc2', closed: '#a3abb4', station: '#ffffff', stopFill: '#fbfbfc', stopStroke: '#5f7aa3', light: '#12171c', fp: '#ffffff', fpEdge: '#7d8892', fpBody: '#aeb6be', fpRoof: '#dde2e7' },
+  light: { bg: '#e9ecef', dim: '#cfd5db', label: '#4a5560', labelDim: '#b4bbc2', closed: '#a3abb4', station: '#ffffff', stopFill: '#fbfbfc', stopStroke: '#5f7aa3', light: '#12171c', fp: '#eef1f4', fpEdge: '#8f99a3', fpBody: '#aeb6be', fpRoof: '#dde2e7' },
 } as const;
 let BG: string = THEMES.dark.bg;
 
