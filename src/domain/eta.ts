@@ -67,8 +67,13 @@ export interface Eta { index: number; stopId: string; s: number; seconds: number
 export let PACE_SPAN = 120;
 export const setPaceSpan = (s: number) => (PACE_SPAN = s);
 
+/** Escala del horario: los buses ruedan algo más rápido que lo programado. 0,95 deja el sesgo cerca de cero
+ * hasta 20 min (validado con dos días distintos de septiembre); ver PRUEBAS.md. */
+export let SCHED_SCALE = 0.95;
+export const setSchedScale = (s: number) => (SCHED_SCALE = s);
+
 /** Segundos del horario `sched` ajustados por el ritmo `k`. */
-export const adjust = (sched: number, k: number) => sched + (k - 1) * Math.min(sched, PACE_SPAN);
+export const adjust = (sched: number, k: number) => sched * SCHED_SCALE + (k - 1) * Math.min(sched, PACE_SPAN);
 
 /**
  * Llegadas estimadas a las paradas que le quedan al bus. `sFix` es la abscisa de la última lectura

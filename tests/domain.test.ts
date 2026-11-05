@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { MetricPath, decodeShape, KX, KY } from '../src/domain/geo';
-import { etas, timeAt, pace, bandIndex, nextStopIndex, etaText } from '../src/domain/eta';
+import { etas, timeAt, pace, bandIndex, nextStopIndex, etaText, setSchedScale } from '../src/domain/eta';
+import { beforeEach } from 'vitest';
 import { textOn, ago, meters } from '../src/domain/time';
 import type { Pattern } from '../src/domain/types';
 
@@ -39,6 +40,7 @@ const pattern: Pattern = {
 };
 
 describe('llegadas', () => {
+  beforeEach(() => setSchedScale(1));
   it('tiempo del horario interpolado por distancia', () => {
     expect(timeAt(pattern, pattern.t[1]!, 500)).toBe(60);
     expect(timeAt(pattern, pattern.t[1]!, 2500)).toBe(300);
@@ -69,6 +71,12 @@ describe('llegadas', () => {
     const k = pace(pattern, pattern.t[1]!, [{ at: 0, s: 0 }, { at: 240_000, s: 1000 }]);
     expect(k).toBe(1.8); // 240 s reales frente a 120 del horario → 2, acotado a 1,8
     expect(pace(pattern, pattern.t[1]!, [{ at: 0, s: 0 }])).toBe(1);
+  });
+
+  it('la escala del horario acorta la estimación (buses más rápidos que lo programado)', () => {
+    setSchedScale(0.95);
+    expect(etas(pattern, 1, 0, 0)[0].seconds).toBeCloseTo(114, 6);
+    setSchedScale(1);
   });
 
   it('textos', () => {
