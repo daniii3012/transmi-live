@@ -86,6 +86,10 @@ export class Controller {
       this.apply(parse());
     });
     addEventListener('resize', () => (app.narrow = innerWidth < 760));
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.wake = null;
+      else if (app.following) void this.keepAwake(true);
+    });
     this.clock = window.setInterval(() => (app.now = Date.now()), 1000);
     this.poller.start();
     this.setTheme(themePref());
@@ -313,8 +317,18 @@ export class Controller {
   }
 
   // ── Seguimiento ────────────────────────────────────────────────────────────────────────────
+  /** Pantalla encendida mientras se sigue un bus (Screen Wake Lock; donde no exista, nada). */
+  private wake: { release(): Promise<void> } | null = null;
+  private async keepAwake(on: boolean) {
+    const wl = (navigator as Navigator & { wakeLock?: { request(t: 'screen'): Promise<{ release(): Promise<void> }> } }).wakeLock;
+    if (!on) { await this.wake?.release().catch(() => {}); this.wake = null; return; }
+    if (!wl || this.wake || document.hidden) return;
+    try { this.wake = await wl.request('screen'); } catch { this.wake = null; }
+  }
+
   startFollow() {
     app.following = true;
+    void this.keepAwake(true);
     this.followOffset = [0, 0];
     cancelAnimationFrame(this.followRaf);
     let last = 0, lx = 0, ly = 0;
@@ -359,6 +373,7 @@ export class Controller {
 
   stopFollow() {
     app.following = false;
+    void this.keepAwake(false);
     cancelAnimationFrame(this.followRaf);
   }
 
