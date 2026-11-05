@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "data": "python3 tools/build_data.py"
+    "data": "python3 tools/build_data.py",
+    "test:datos": "python3 tools/test_busway.py"
   },
   "engines": {
     "node": ">=22"
