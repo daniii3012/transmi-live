@@ -9,6 +9,10 @@ export interface PollState {
   vehicles: number;
 }
 
+function saveData(): boolean {
+  return (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
+}
+
 /**
  * Sondeo del API: cada `interval` ms con la pestaña visible; nada con la pestaña oculta; espera
  * creciente tras errores (15 → 30 → 60 s). `If-None-Match` evita bajar dos veces la misma instantánea.
@@ -80,7 +84,10 @@ export class Poller {
       this.set({ status: 'error', error: r.message });
     }
     if (this.stopped || document.hidden) return;
-    const wait = this.failures ? Math.min(60_000, this.interval * 2 ** (this.failures - 1)) : this.interval;
+    // Con el ahorro de datos del sistema (Android/Chrome), cada 30 s: en `passthrough` cada sondeo son
+    // ≈ 290 kB. El movimiento entre lecturas lo suaviza el rastreo; la flota se adapta al intervalo.
+    const every = saveData() ? Math.max(this.interval, 30_000) : this.interval;
+    const wait = this.failures ? Math.min(60_000, every * 2 ** (this.failures - 1)) : every;
     this.timer = window.setTimeout(() => this.tick(), wait);
   }
 }
