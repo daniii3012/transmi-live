@@ -2,6 +2,8 @@
   import { app } from '../app/store.svelte';
   import { norm } from './derive';
   import { endName, type End } from '../planner/places';
+  import { favorites } from '../app/favorites.svelte';
+  import { recentEnds, rememberEnd } from '../planner/recent';
 
   let { label, value, onpick, mark }: { label: string; value: End | null; onpick: (e: End | null) => void; mark: 'from' | 'to' } = $props();
   const net = $derived(app.net!);
@@ -13,7 +15,21 @@
   const results = $derived.by(() => {
     const n = norm(q);
     const out: { key: string; end: End; title: string; sub: string; stop?: boolean }[] = [{ key: 'u', end: { kind: 'here' }, title: 'Mi ubicación', sub: 'GPS del dispositivo' }];
-    if (!n) return out;
+    if (!n) {
+      // Sin texto: los lugares guardados (estaciones y paraderos con estrella) y los usados hace poco.
+      const seen = new Set<string>();
+      const add = (kind: 'station' | 'stop', id: string, sub: string) => {
+        const key = `${kind === 'station' ? 's' : 'p'}${id}`;
+        if (seen.has(key)) return;
+        const s = kind === 'station' ? net.stations.get(id) : net.streetStops.get(id);
+        if (!s) return;
+        seen.add(key);
+        out.push({ key, end: { kind, id }, title: 'short' in s ? s.short : s.name, sub, stop: kind === 'stop' });
+      };
+      for (const f of favorites.list) if (f.kind === 'station' || f.kind === 'stop') add(f.kind, f.id, 'guardado');
+      for (const r of recentEnds()) add(r.kind, r.id, 'reciente');
+      return out.slice(0, 9);
+    }
     const words = n.split(' ');
     const has = (t: string) => words.every((w) => t.includes(w));
     for (const s of net.stations.values()) if (!s.closed && has(norm(s.name))) { out.push({ key: `s${s.id}`, end: { kind: 'station', id: s.id }, title: s.short, sub: s.kind === 'portal' ? 'portal' : 'estación' }); if (out.length > 7) break; }
@@ -24,7 +40,7 @@
   $effect(() => { void results; active = 0; });
 
   function open() { editing = true; q = ''; void net.loadStreetStops(); setTimeout(() => input?.focus()); }
-  function pick(e: End) { editing = false; onpick(e); }
+  function pick(e: End) { editing = false; rememberEnd(e); onpick(e); }
   function key(e: KeyboardEvent) {
     if (e.key === 'Escape') { editing = false; }
     else if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(results.length - 1, active + 1); }
