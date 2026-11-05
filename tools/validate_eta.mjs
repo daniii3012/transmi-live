@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { MetricPath, decodeShape, KX, KY } from '../src/domain/geo.ts';
+import { undeltaPatterns } from '../src/domain/patterns.ts';
 import { etas, bandIndex, bandTimes, pace, setPaceSpan, setSchedScale, setSchedFar } from '../src/domain/eta.ts';
 if (process.env.SCHED_SCALE) setSchedScale(Number(process.env.SCHED_SCALE));
 if (process.env.PACE_SPAN) setPaceSpan(Number(process.env.PACE_SPAN));
@@ -19,7 +20,7 @@ const every = Number(rest[rest.indexOf('--every') + 1] || 6);
 const data = (f) => JSON.parse(readFileSync(new URL(`../public/data/${f}`, import.meta.url)));
 const net = data('network.json');
 const shapes = data('shapes-core.json');
-const patterns = data('patterns.json').patterns;
+const patterns = undeltaPatterns(data('patterns.json'));
 const routes = new Map(net.routes.map((r) => [r.id, r]));
 const paths = new Map(Object.entries(shapes.shapes).map(([id, enc]) => [id, new MetricPath(decodeShape(enc, shapes.scale))]));
 

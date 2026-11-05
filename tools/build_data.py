@@ -695,7 +695,12 @@ def main():
         segs = list(corridor_segments.values())
     write('corridors.json', {'v': 1, 'hash': digest, 'segments': segs})
     write('stops.json', {'v': 1, 'hash': digest, 'cols': ['id', 'code', 'name', 'lon', 'lat', 'routes'], 'stops': street})
-    write('patterns.json', {'v': 1, 'hash': digest, 'bands': [k for _, _, k in BANDS], 'patterns': patterns_out})
+    # v2: abscisas y tiempos por diferencias (36 % menos con gzip); el cliente reconstruye los acumulados
+    # (src/domain/patterns.ts).
+    def delta(a):
+        return [x - (a[i - 1] if i else 0) for i, x in enumerate(a)]
+    patterns_v2 = {rid: {**p, 's': delta(p['s']), 't': [delta(x) if x else None for x in p['t']]} for rid, p in patterns_out.items()}
+    write('patterns.json', {'v': 2, 'hash': digest, 'bands': [k for _, _, k in BANDS], 'patterns': patterns_v2})
     write('service.json', {'v': 1, 'hash': digest, 'service': service_out})
     write('meta.json', meta)
     off = sorted(max_off)

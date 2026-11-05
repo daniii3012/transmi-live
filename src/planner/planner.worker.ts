@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { undeltaPatterns } from '../domain/patterns';
 import { buildModel, type Sources } from './model';
 import { alternatives, accessFrom, type Access, type Journey, type Model } from './raptor';
 
@@ -9,6 +10,7 @@ const models = new Map<string, Model>();
 async function load(base: string): Promise<Sources> {
   const get = (f: string) => fetch(`${base}data/${f}`).then((r) => r.json());
   const [network, stops, patterns, service] = await Promise.all([get('network.json'), get('stops.json'), get('patterns.json'), get('service.json')]);
+  undeltaPatterns(patterns);
   return { network, stops, patterns, service };
 }
 

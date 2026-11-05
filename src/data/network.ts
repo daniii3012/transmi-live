@@ -1,5 +1,6 @@
 import { MetricPath, decodeShape } from '../domain/geo';
 import type { Route, Station, StreetStop, SystemInfo, Pattern, RouteService, SystemKey } from '../domain/types';
+import { undeltaPatterns } from '../domain/patterns';
 
 const BASE = `${import.meta.env.BASE_URL}data/`;
 
@@ -12,7 +13,7 @@ async function getJSON<T>(name: string): Promise<T> {
 interface NetworkFile { v: number; hash: string; systems: SystemInfo[]; routes: Route[]; stations: Station[] }
 interface ShapesFile { v: number; hash: string; scale: number; shapes: Record<string, number[]> }
 interface StopsFile { cols: string[]; stops: [string, string, string, number, number, string[]][] }
-interface PatternsFile { bands: string[]; patterns: Record<string, Pattern> }
+interface PatternsFile { v?: number; bands: string[]; patterns: Record<string, Pattern> }
 interface ServiceFile { service: Record<string, RouteService> }
 export interface Meta { hash: string; built: string; bands: { from: number; to: number; key: string }[]; counts: Record<string, unknown> }
 
@@ -83,6 +84,7 @@ export class Network {
   loadPatterns(): Promise<Record<string, Pattern>> {
     return this.once('patterns', async () => {
       const f = await getJSON<PatternsFile>('patterns.json');
+      undeltaPatterns(f);
       this.bands = f.bands;
       this.patterns = f.patterns;
       return f.patterns;
