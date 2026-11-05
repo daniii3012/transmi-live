@@ -148,7 +148,7 @@
     font-family: var(--font-mono);
     font-size: 10px;
     letter-spacing: 0.04em;
-    color: var(--fg-3);
+    color: var(--fg-2);
   }
   .foot a { color: var(--fg-2); text-decoration: none; }
   .foot a:hover { color: var(--fg-0); }

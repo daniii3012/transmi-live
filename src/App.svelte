@@ -74,7 +74,12 @@
       return;
     }
     if (typing || app.searchOpen) return;
-    if (e.key === 'Escape' && app.view.kind !== 'home') go({ kind: 'home' });
+    // Esc cierra primero lo que esté encima (menú del mapa, capas) y luego vuelve a la vista anterior.
+    if (e.key === 'Escape') {
+      if (app.ctxMenu) app.ctxMenu = null;
+      else if (app.layersOpen) app.layersOpen = false;
+      else if (app.view.kind !== 'home') ctl?.back();
+    }
     else if ((e.key === 'f' || e.key === 'F') && app.view.kind === 'bus') ctl?.toggleFollow();
     else if ((e.key === 'r' || e.key === 'R') && app.view.kind === 'bus') {
       const b = app.fleet?.buses.get(app.view.id);

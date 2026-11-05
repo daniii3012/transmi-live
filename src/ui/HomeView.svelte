@@ -202,7 +202,7 @@
   kbd { font-family: var(--font-mono); font-size: var(--fs-label); border: 1px solid var(--line-2); padding: 0 5px; line-height: 16px; color: var(--fg-2); }
   .block { display: grid; gap: var(--sp-2); }
   .head { display: flex; justify-content: space-between; align-items: baseline; }
-  .hint { color: var(--fg-3); }
+  .hint { color: var(--fg-2); }
   ul { list-style: none; margin: 0; padding: 0; }
   .systems { display: grid; }
   .sys {

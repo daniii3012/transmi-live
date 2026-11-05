@@ -10,10 +10,10 @@
   --line-2: #323b45;
   --fg-0: #e9ecef;
   --fg-1: #a7b0b9;
-  --fg-2: #77818c;
+  --fg-2: #848e99;  /* AA: 5,2 sobre el panel, 4,8 sobre filas */
   --fg-3: #4d5661;
   --warn: #e0a43a;
-  --error: #e5534b;
+  --error: #ec6a62;
   --glass: rgba(22, 27, 32, 0.92);
   --scrim: rgba(10, 13, 16, 0.55);
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
@@ -62,9 +62,9 @@
   --line-2: #cdd3d9;
   --fg-0: #12171c;
   --fg-1: #4a5560;
-  --fg-2: #737d88;
+  --fg-2: #656f7a;  /* AA: 4,9 sobre el panel, 4,6 sobre filas */
   --fg-3: #aab1b9;
-  --warn: #b7791f;
+  --warn: #8f5d10;
   --error: #c53a33;
   --glass: rgba(251, 251, 252, 0.94);
   --scrim: rgba(233, 236, 239, 0.6);

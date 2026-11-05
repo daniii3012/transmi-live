@@ -10,14 +10,16 @@
   );
 </script>
 
-<div class="status {p.status}" class:compact role="status" aria-live="polite">
+<!-- Solo el estado se anuncia (al cambiar); la hora y la antigüedad cambian cada segundo y se leen al
+     recorrer la página, no como aviso. -->
+<div class="status {p.status}" class:compact>
   <span class="dot" aria-hidden="true"></span>
-  <span class="label">{label}</span>
+  <span class="label" role="status" aria-live="polite">{label}</span>
   {#if p.feedTime}
-    <span class="sep">·</span>
-    <span class="num">{fmtHMS(p.feedTime * 1000)}</span>
+    <span class="sep" aria-hidden="true">·</span>
+    <span class="num"><span class="sr">datos de las </span>{fmtHMS(p.feedTime * 1000)}</span>
     {#if !compact}
-      <span class="sep">·</span>
+      <span class="sep" aria-hidden="true">·</span>
       <span class="num faint">hace {ago(age ?? 0)}</span>
     {/if}
   {/if}

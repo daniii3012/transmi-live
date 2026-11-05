@@ -109,7 +109,7 @@
   }
   .field { display: flex; align-items: center; gap: var(--sp-3); height: 52px; padding: 0 var(--sp-4); border-bottom: 1px solid var(--line-1); color: var(--fg-2); }
   input { flex: 1; background: none; border: 0; outline: none; font-size: 16px; color: var(--fg-0); min-width: 0; }
-  input::placeholder { color: var(--fg-3); }
+  input::placeholder { color: var(--fg-2); }
   .esc { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--fg-2); border: 1px solid var(--line-2); padding: 2px 6px; }
   .results { list-style: none; margin: 0; padding: 0 0 var(--sp-2); overflow-y: auto; }
   .group { padding: var(--sp-3) var(--sp-4) var(--sp-1); }

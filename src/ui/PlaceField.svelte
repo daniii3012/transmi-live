@@ -39,7 +39,7 @@
   {#if editing}
     <input bind:this={input} bind:value={q} onkeydown={key} onblur={() => setTimeout(() => (editing = false), 150)} placeholder="Estación, paradero o mi ubicación" autocomplete="off" spellcheck="false" aria-label={label} />
   {:else}
-    <button class="val" class:empty={!value} onclick={open}>{value ? endName(net, value) : 'Elegir…'}</button>
+    <button class="val" class:empty={!value} onclick={open} aria-label="{label}: {value ? endName(net, value) : 'sin elegir'}">{value ? endName(net, value) : 'Elegir…'}</button>
     {#if value}<button class="x" onclick={() => onpick(null)} aria-label="Quitar">×</button>{/if}
   {/if}
 </div>
@@ -65,7 +65,7 @@
   .x { width: 24px; height: 24px; color: var(--fg-2); font-size: 16px; }
   .x:hover { color: var(--fg-0); }
   input { background: none; border: 0; outline: none; color: var(--fg-0); min-width: 0; font-size: 16px; grid-column: 3 / 5; }
-  input::placeholder { color: var(--fg-3); }
+  input::placeholder { color: var(--fg-2); }
   .drop { list-style: none; margin: -1px 0 0; padding: 0; border: 1px solid var(--line-2); background: var(--bg-1); }
   .drop button { width: 100%; height: 36px; display: grid; grid-template-columns: 20px 1fr auto; gap: var(--sp-2); align-items: center; padding: 0 var(--sp-3); text-align: left; }
   .drop button.active { background: var(--bg-3); }

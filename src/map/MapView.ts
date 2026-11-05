@@ -43,7 +43,18 @@ export class MapView {
       dragRotate: true,
       fadeDuration: 150,
       canvasContextAttributes: { antialias: true, powerPreference: 'high-performance' },
+      // Textos de los controles del mapa para lectores de pantalla, en español.
+      locale: {
+        'Map.Title': 'Mapa de TransMilenio en vivo',
+        'AttributionControl.ToggleAttribution': 'Mostrar u ocultar atribución',
+        'NavigationControl.ZoomIn': 'Acercar',
+        'NavigationControl.ZoomOut': 'Alejar',
+        'NavigationControl.ResetBearing': 'Orientar al norte',
+      },
     });
+    // El lienzo no se puede recorrer bus por bus: lo mismo está en los paneles (rutas, estaciones,
+    // llegadas), que sí se leen. Se describe para que el lector sepa qué es.
+    this.map.getCanvas().setAttribute('aria-label', 'Mapa de TransMilenio en vivo. Los buses, rutas y estaciones también están en el panel.');
     this.map.addControl(new AttributionControl({ compact: true }), 'bottom-right');
     this.map.touchZoomRotate.enableRotation();
   }
