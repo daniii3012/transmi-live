@@ -11,8 +11,8 @@ import type { Theme } from '../app/theme';
 
 /** Colores de la red que dependen del tema (fondo de las mezclas, atenuado, nombres, estaciones). */
 const THEMES = {
-  dark: { bg: '#101418', dim: '#2a3139', label: '#a7b0b9', labelDim: '#3d4650', closed: '#56606b', station: '#e3e7eb', stopFill: '#161b20', stopStroke: '#7b93b8', light: '#e9ecef' },
-  light: { bg: '#e9ecef', dim: '#cfd5db', label: '#4a5560', labelDim: '#b4bbc2', closed: '#a3abb4', station: '#ffffff', stopFill: '#fbfbfc', stopStroke: '#5f7aa3', light: '#12171c' },
+  dark: { bg: '#101418', dim: '#2a3139', label: '#a7b0b9', labelDim: '#3d4650', closed: '#56606b', station: '#e3e7eb', stopFill: '#161b20', stopStroke: '#7b93b8', light: '#e9ecef', fp: '#3a434d', fpEdge: '#8b96a1', fpBody: '#363e46', fpRoof: '#6a747e' },
+  light: { bg: '#e9ecef', dim: '#cfd5db', label: '#4a5560', labelDim: '#b4bbc2', closed: '#a3abb4', station: '#ffffff', stopFill: '#fbfbfc', stopStroke: '#5f7aa3', light: '#12171c', fp: '#ffffff', fpEdge: '#7d8892', fpBody: '#aeb6be', fpRoof: '#dde2e7' },
 } as const;
 let BG: string = THEMES.dark.bg;
 
@@ -64,6 +64,10 @@ export class NetworkLayers {
     m.setPaintProperty('stations-label', 'text-halo-color', T.bg);
     m.setPaintProperty('stations-label', 'text-color', ['case', ['get', 'closed'], T.closed, ['boolean', ['feature-state', 'dim'], false], T.labelDim, T.label]);
     m.setPaintProperty('street-stops', 'circle-color', T.stopFill);
+    m.setPaintProperty('station-fp', 'fill-color', T.fp);
+    m.setPaintProperty('station-fp-line', 'line-color', T.fpEdge);
+    m.setPaintProperty('station-fp-3d', 'fill-extrusion-color', T.fpBody);
+    m.setPaintProperty('station-fp-roof', 'fill-extrusion-color', T.fpRoof);
     m.setPaintProperty('street-stops', 'circle-stroke-color', T.stopStroke);
     m.setPaintProperty('user', 'circle-stroke-color', T.bg);
     m.setPaintProperty('plan-walk', 'line-color', T.light);
@@ -84,6 +88,7 @@ export class NetworkLayers {
     m.addSource('corridors', { type: 'geojson', data: this.corridorsFC(), tolerance: 0.3 });
     m.addSource('route-focus', { type: 'geojson', data: empty(), lineMetrics: true });
     m.addSource('stations', { type: 'geojson', data: this.stationsFC(), promoteId: 'id' });
+    m.addSource('station-fp', { type: 'geojson', data: this.footprintsFC(), promoteId: 'id' });
     m.addSource('selected-place', { type: 'geojson', data: empty() });
     m.addSource('user', { type: 'geojson', data: empty() });
     m.addSource('plan', { type: 'geojson', data: empty(), lineMetrics: true });
@@ -159,6 +164,26 @@ export class NetworkLayers {
         'circle-stroke-opacity': ['interpolate', ['linear'], ['zoom'], 15, 0, 15.5, 1],
       },
     });
+    // Huellas de estación (F7.7): desde z15 la estación es su planta real, entre los carriles; en 3D,
+    // cuerpo de vidrio y techo. El cuadro de la estación se desvanece donde hay huella.
+    const T0 = THEMES[this.theme];
+    const fpOn: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 14.8, 0, 15.6, ['case', ['boolean', ['feature-state', 'dim'], false], 0.35, 1]];
+    m.addLayer({
+      id: 'station-fp', type: 'fill', source: 'station-fp', minzoom: 14.8,
+      paint: { 'fill-color': T0.fp, 'fill-opacity': fpOn },
+    });
+    m.addLayer({
+      id: 'station-fp-line', type: 'line', source: 'station-fp', minzoom: 14.8,
+      paint: { 'line-color': T0.fpEdge, 'line-width': W([[15, 0.6], [18, 1.2]]), 'line-opacity': fpOn },
+    });
+    m.addLayer({
+      id: 'station-fp-3d', type: 'fill-extrusion', source: 'station-fp', minzoom: 14.8, layout: { visibility: 'none' },
+      paint: { 'fill-extrusion-color': T0.fpBody, 'fill-extrusion-base': 0, 'fill-extrusion-height': 3.3, 'fill-extrusion-opacity': 0.92 },
+    });
+    m.addLayer({
+      id: 'station-fp-roof', type: 'fill-extrusion', source: 'station-fp', minzoom: 14.8, layout: { visibility: 'none' },
+      paint: { 'fill-extrusion-color': T0.fpRoof, 'fill-extrusion-base': 3.3, 'fill-extrusion-height': 3.8, 'fill-extrusion-opacity': 0.96 },
+    });
     m.addLayer({
       id: 'stations', type: 'symbol', source: 'stations', minzoom: 10.5,
       layout: {
@@ -168,7 +193,13 @@ export class NetworkLayers {
         'icon-ignore-placement': true,
         'symbol-sort-key': ['case', ['==', ['get', 'kind'], 'portal'], 0, 1],
       },
-      paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 11, ['case', ['boolean', ['feature-state', 'dim'], false], 0.22, 1]] },
+      paint: {
+        'icon-opacity': ['interpolate', ['linear'], ['zoom'],
+          10.5, 0,
+          11, ['case', ['boolean', ['feature-state', 'dim'], false], 0.22, 1],
+          15.4, ['case', ['boolean', ['feature-state', 'dim'], false], 0.22, 1],
+          15.9, ['case', ['get', 'fp'], 0, ['boolean', ['feature-state', 'dim'], false], 0.22, 1]],
+      },
     });
     m.addLayer({
       id: 'selected-place', type: 'symbol', source: 'selected-place',
@@ -340,7 +371,9 @@ export class NetworkLayers {
   /** Con una ruta en foco, las estaciones donde no para se atenúan. */
   private dimStations(routeId: string | null) {
     for (const s of this.net.stations.values()) {
-      this.map.setFeatureState({ source: 'stations', id: s.id }, { dim: !!routeId && !s.routes.includes(routeId) });
+      const dim = !!routeId && !s.routes.includes(routeId);
+      this.map.setFeatureState({ source: 'stations', id: s.id }, { dim });
+      if (s.fp) this.map.setFeatureState({ source: 'station-fp', id: s.id }, { dim });
     }
   }
 
@@ -395,10 +428,28 @@ export class NetworkLayers {
       type: 'FeatureCollection',
       features: [...this.net.stations.values()].map((s) => ({
         type: 'Feature',
-        properties: { id: s.id, short: s.short, kind: s.kind, closed: !!s.closed },
+        properties: { id: s.id, short: s.short, kind: s.kind, closed: !!s.closed, fp: !!s.fp },
         geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
       })),
     };
+  }
+
+  private footprintsFC(): FC {
+    return {
+      type: 'FeatureCollection',
+      features: [...this.net.stations.values()].filter((s) => s.fp?.length).map((s) => ({
+        type: 'Feature',
+        properties: { id: s.id, est: s.fpk === 'est', closed: !!s.closed },
+        geometry: { type: 'MultiPolygon', coordinates: s.fp!.map((ring) => [ring]) },
+      })),
+    };
+  }
+
+  /** Huellas planas en 2D; con volumen y techo en 3D. */
+  set3d(on: boolean) {
+    const m = this.map;
+    for (const id of ['station-fp', 'station-fp-line']) m.setLayoutProperty(id, 'visibility', on ? 'none' : 'visible');
+    for (const id of ['station-fp-3d', 'station-fp-roof']) m.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
   }
 
   /** Marcas de estación dibujadas en lienzo: cuadrado claro con borde oscuro; portal más grande;

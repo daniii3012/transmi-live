@@ -33,6 +33,9 @@ from array import array
 from collections import Counter, defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import busway as bw  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 LAT0 = 4.65
 KX = 111_320.0 * math.cos(math.radians(LAT0))
@@ -257,6 +260,28 @@ def main():
         npts += len(ll)
     del raw
     log(f'recorridos {len(shapes)}: {npts_raw} → {npts} puntos')
+
+    # ── Calzada exclusiva (OSM): recorridos troncales y duales sobre su carril (F7.6) ──────────
+    bw_path = ROOT / 'data' / 'curated' / 'busway.json'
+    lane_idx = None
+    busway = None
+    if bw_path.exists():
+        busway = json.loads(bw_path.read_text())
+        lane_idx = bw.LaneIndex(busway['lanes'], xy)
+        on_busway = {shape_of_route[r['route_id']] for r in routes
+                     if r['agency_id'] in ('1', '6') and r['route_id'] in shape_of_route}
+        tot_len = snapped_len = 0.0
+        for sid in on_busway:
+            if sid not in shapes:
+                continue
+            ll, m, cum = shapes[sid]
+            pts, frac = bw.snap_path(m, lane_idx)
+            keep = simplify(pts, 1.0)
+            m2 = [pts[i] for i in keep]
+            shapes[sid] = ([(x / KX, y / KY) for x, y in m2], m2, cumulative(m2))
+            tot_len += cum[-1]
+            snapped_len += cum[-1] * frac
+        log(f'calzada exclusiva: {len(on_busway)} recorridos, {snapped_len / max(tot_len, 1) * 100:.0f} % de su largo sobre el carril de OSM')
 
     # ── Horarios: viajes completos en memoria compacta ───────────────────────────────────────
     t_seq: dict[str, array] = {}
@@ -497,17 +522,66 @@ def main():
             if d < 500 and (norm(o['stop_name']).startswith(norm(s['stop_name'])[:8]) or norm(s['stop_name']).startswith(norm(o['stop_name'])[:8])):
                 shells.add(s['stop_id'])
                 break
+    # Huellas de estación (F7.7): el edificio o las plataformas de OSM; si no hay, una estimada entre
+    # los carriles de los dos sentidos con el largo de sus vagones.
+    fp_osm = {s['id']: s for s in (busway or {}).get('stations', [])}
+    n_fp = Counter()
+
+    def footprint(s, kind: str) -> dict:
+        """Huella aceptada solo si su centro queda a ≤ 120 m de los vagones (o del punto de la
+        estación si no tiene): así se descarta un edificio de OSM que no es el de esta estación
+        (Quirigua) o que cubre solo una de sus partes (Ricaurte)."""
+        sid = s['stop_id']
+        wagons = [stop_xy[stop_ix[k['stop_id']]] for k in kids.get(sid, [])]
+        ref = (sum(p[0] for p in wagons) / len(wagons), sum(p[1] for p in wagons) / len(wagons)) if wagons else stop_xy[stop_ix[sid]]
+
+        def near(rings_m) -> bool:
+            pts = [p for r in rings_m for p in r[:-1]]
+            cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+            return math.hypot(cx - ref[0], cy - ref[1]) <= 120
+
+        if sid in fp_osm:
+            rings = fp_osm[sid]['polys']
+            if near([[xy(lo, la) for lo, la in r] for r in rings]):
+                n_fp['osm'] += 1
+                return {'fp': [[[round(lo, 6), round(la, 6)] for lo, la in ring] for ring in rings], 'fpk': 'osm'}
+            n_fp['osm_lejos'] += 1
+        if lane_idx is None:
+            return {}
+        # Portales y estaciones partidas (vagones a más de 300 m entre sí): sin estimar.
+        spread = max((math.hypot(a[0] - b[0], a[1] - b[1]) for a in wagons for b in wagons), default=0)
+        if kind == 'portal' or spread > 300:
+            n_fp['none'] += 1
+            return {}
+        ring = bw.estimate_footprint(stop_xy[stop_ix[sid]], wagons, lane_idx)
+        if not ring or not near([ring]):
+            n_fp['none'] += 1
+            return {}
+        n_fp['est'] += 1
+        return {'fp': [[[round(x / KX, 6), round(y / KY, 6)] for x, y in ring]], 'fpk': 'est'}
+
     stations = []
+    shifts: list[tuple[float, str]] = []
     for s in stops:
         if s['location_type'] != '1' or s['stop_id'] in shells:
             continue
         name = nice(s['stop_name'])
         kind = 'cable' if s['stop_id'].startswith('cable') else 'portal' if re.match(r'(?i)portal|terminal', name) else 'station'
         rs = sorted({routes[ri]['route_id'] for ri in stop_routes.get(stop_ix[s['stop_id']], ())})
+        fp = footprint(s, kind) if kind != 'cable' else {}
+        lon, lat = float(s['stop_lon']), float(s['stop_lat'])
+        if fp:
+            # El punto del GTFS a veces queda lejos de la plataforma (Calle 57: ~250 m al sur); la huella
+            # sale de los vagones y de la calzada, así que el nombre y el punto van a su centro.
+            pts = [p for ring in fp['fp'] for p in ring[:-1]]
+            clon, clat = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+            shifts.append((math.hypot((clon - lon) * KX, (clat - lat) * KY), name))
+            lon, lat = clon, clat
         stations.append({
             'id': s['stop_id'], 'name': name, 'short': short(name), 'kind': kind,
-            'lon': round(float(s['stop_lon']), 6), 'lat': round(float(s['stop_lat']), 6),
+            'lon': round(lon, 6), 'lat': round(lat, 6),
             'routes': rs, **({} if rs else {'closed': True}),
+            **fp,
             'platforms': [
                 {'id': k['stop_id'], 'name': clean(k['stop_name']), 'code': k['stop_code'],
                  'routes': sorted(routes[ri]['route_id'] for ri in stop_routes.get(stop_ix[k['stop_id']], ())),
@@ -515,6 +589,12 @@ def main():
                 for k in sorted(kids.get(s['stop_id'], []), key=lambda k: k['stop_name'])
             ],
         })
+
+    log(f'huellas de estación: {n_fp["osm"]} de OSM ({n_fp["osm_lejos"]} descartadas por lejanas), {n_fp["est"]} estimadas, {n_fp["none"]} sin huella')
+    shifts.sort(reverse=True)
+    if shifts:
+        log(f'punto de estación al centro de la huella: mediana {shifts[len(shifts) // 2][0]:.0f} m; mayores: '
+            + ', '.join(f'{n} {d:.0f} m' for d, n in shifts[:6]))
 
     # Paraderos: todo lo que no es estación ni vagón y tiene al menos una ruta.
     street = []

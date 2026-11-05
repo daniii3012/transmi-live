@@ -29,6 +29,9 @@ export interface Station {
   lat: number;
   routes: string[];
   closed?: boolean;
+  /** Huella (anillos lon, lat): de OSM o estimada entre los carriles (F7.7). */
+  fp?: [number, number][][];
+  fpk?: 'osm' | 'est';
   platforms: Platform[];
 }
 

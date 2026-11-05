@@ -21,6 +21,7 @@
   import MapControls from './ui/MapControls.svelte';
   import LayersPanel from './ui/LayersPanel.svelte';
   import MapMenu from './ui/MapMenu.svelte';
+  import { hideStationBuildings } from './map/stationBuildings';
   import { applyTheme, effective } from './app/theme';
 
   let container: HTMLDivElement;
@@ -40,6 +41,7 @@
         const [net] = await Promise.all([Network.load(), view.ready()]);
         const layers = new NetworkLayers(view.map, net, effective());
         layers.mount();
+        hideStationBuildings(view.map, net);
         const fleet = new Fleet(net);
         // Orden de capas (DISENO.md): buses atenuados bajo la ruta en foco; el resto sobre las estaciones.
         const buses = new BusLayer(fleet, 'main');

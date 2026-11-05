@@ -364,7 +364,7 @@ export class Controller {
     const b = this.fleet.pick(project, e.point.x, e.point.y, r);
     if (b) return go({ kind: 'bus', id: b.id });
     const box: [[number, number], [number, number]] = [[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]];
-    const st = this.map.queryRenderedFeatures(box, { layers: ['stations'] })[0];
+    const st = this.map.queryRenderedFeatures(box, { layers: ['stations', 'station-fp', 'station-fp-3d', 'station-fp-roof'].filter((l) => this.map.getLayoutProperty(l, 'visibility') !== 'none') })[0];
     if (st) return go({ kind: 'station', id: String(st.properties.id) });
     const sp = this.map.getLayer('street-stops') && this.map.queryRenderedFeatures(box, { layers: ['street-stops'] })[0];
     if (sp) return go({ kind: 'stop', id: String(sp.properties.id) });
@@ -380,7 +380,7 @@ export class Controller {
     let pointer = !!b;
     if (!b) {
       const box: [[number, number], [number, number]] = [[e.point.x - 6, e.point.y - 6], [e.point.x + 6, e.point.y + 6]];
-      pointer = this.map.queryRenderedFeatures(box, { layers: ['stations', 'street-stops'] }).length > 0;
+      pointer = this.map.queryRenderedFeatures(box, { layers: ['stations', 'street-stops', 'station-fp'] }).length > 0;
     }
     this.map.getCanvas().style.cursor = pointer ? 'pointer' : '';
     if (id !== this.fleet.hoverId) {
@@ -443,6 +443,7 @@ export class Controller {
     // Los edificios van debajo de la red: la tapan donde corresponde, pero nunca a los buses.
     this.map.setLayoutProperty('building-3d', 'visibility', on ? 'visible' : 'none');
     this.map.setLayoutProperty('building', 'visibility', on ? 'none' : 'visible');
+    this.layers.set3d(on);
     if (instant) { this.map.jumpTo({ pitch: on ? 55 : 0 }); return; }
     const v = app.view;
     this.map.easeTo({ pitch: on ? 55 : 0, bearing: on ? (this.map.getBearing() || -18) : this.map.getBearing(), duration: 700 });

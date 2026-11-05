@@ -4,6 +4,9 @@
 
 - **OpenStreetMap** — calles, manzanas, edificios y nombres. © colaboradores de OpenStreetMap, ODbL.
   <https://www.openstreetmap.org/copyright>
+- **OpenStreetMap, calzada de la troncal** — ejes de la calzada exclusiva por sentido, edificios y
+  plataformas de las estaciones, puentes y deprimidos (`data/curated/busway.json`, derivado de OSM y
+  bajo ODbL; importado de los datos curados del simulador con `tools/import_busway.py`).
 - **OpenMapTiles** — esquema de las teselas vectoriales. <https://openmaptiles.org>
 - **OpenFreeMap** — teselas y tipografías del mapa base, sin clave. <https://openfreemap.org>
 - **MapLibre GL JS** — motor del mapa. <https://maplibre.org>
@@ -21,6 +24,20 @@
 - **Mini Tokyo 3D** — movimiento fluido de toda la flota y cámara que acompaña. <https://minitokyo3d.com>
 - **Watch Dogs** (mapa del juego) y **Cities: Skylines** (vista de transporte público) — la ciudad
   como fondo neutro y la red en primer plano.
+
+- **Apple Human Interface Guidelines** (Motion, Maps, Color, Accessibility) y **Material Design 3**
+  (Motion) — criterios de movimiento, selección, contraste y temas.
+  <https://developer.apple.com/design/human-interface-guidelines> · <https://m3.material.io>
+
+## Referencias para los buses en 3D
+
+Proporciones de las fichas de fabricante: ancho 2,55 m, alto ≈ 3,2 m, articulado de 18 m y
+biarticulado de 27 m.
+
+- **Marcopolo Gran Viale BRT** y **Busscar** — carrocerías de la troncal. <https://www.marcopolo.com.br>
+- **Volvo B340M y Gran Artic 300**, **Scania K**, **Mercedes-Benz O500** — chasis articulados y
+  biarticulados. <https://www.volvobuses.com>
+- **BYD** — buses eléctricos de la flota zonal y troncal (modelo pendiente). <https://www.byd.com>
 
 ## Trabajo previo
 
