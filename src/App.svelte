@@ -91,8 +91,6 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="map" bind:this={container}></div>
-
 {#if app.net}
   <Panel>
     {#key app.view.kind === 'home' ? 'home' : app.view.kind === 'plan' ? 'plan' : `${app.view.kind}:${app.view.id}`}
@@ -124,8 +122,12 @@
   </div>
 {/if}
 
+<!-- El mapa va después del panel en el documento (el teclado recorre primero el panel, que es el
+     contenido principal); se ve debajo por su z-index. -->
+<div class="map" bind:this={container}></div>
+
 <style>
-  .map { position: absolute; inset: 0; background: var(--bg-0); }
+  .map { position: absolute; inset: 0; background: var(--bg-0); z-index: 0; }
   .viewwrap { min-height: 100%; }
   .boot {
     position: absolute;
