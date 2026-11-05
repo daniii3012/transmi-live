@@ -73,7 +73,13 @@ export let SCHED_SCALE = 0.95;
 export const setSchedScale = (s: number) => (SCHED_SCALE = s);
 
 /** Segundos del horario `sched` ajustados por el ritmo `k`. */
-export const adjust = (sched: number, k: number) => sched * SCHED_SCALE + (k - 1) * Math.min(sched, PACE_SPAN);
+/** Desde `SCHED_T1` segundos de horario, el factor pasa a `SCHED_FAR` (los horizontes largos no
+ * llevan el mismo sesgo que los cortos). Por defecto, sin tramo largo. */
+export let SCHED_T1 = Infinity;
+export let SCHED_FAR = 1;
+export const setSchedFar = (t1: number, far: number) => { SCHED_T1 = t1; SCHED_FAR = far; };
+const scaled = (sched: number) => (sched <= SCHED_T1 ? sched * SCHED_SCALE : SCHED_T1 * SCHED_SCALE + (sched - SCHED_T1) * SCHED_FAR);
+export const adjust = (sched: number, k: number) => scaled(sched) + (k - 1) * Math.min(sched, PACE_SPAN);
 
 /**
  * Llegadas estimadas a las paradas que le quedan al bus. `sFix` es la abscisa de la última lectura

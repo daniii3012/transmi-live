@@ -9,9 +9,10 @@
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { MetricPath, decodeShape, KX, KY } from '../src/domain/geo.ts';
-import { etas, bandIndex, bandTimes, pace, setPaceSpan, setSchedScale } from '../src/domain/eta.ts';
+import { etas, bandIndex, bandTimes, pace, setPaceSpan, setSchedScale, setSchedFar } from '../src/domain/eta.ts';
 if (process.env.SCHED_SCALE) setSchedScale(Number(process.env.SCHED_SCALE));
 if (process.env.PACE_SPAN) setPaceSpan(Number(process.env.PACE_SPAN));
+if (process.env.SCHED_T1) setSchedFar(Number(process.env.SCHED_T1), Number(process.env.SCHED_FAR ?? 1));
 
 const [src, ...rest] = process.argv.slice(2);
 const every = Number(rest[rest.indexOf('--every') + 1] || 6);
