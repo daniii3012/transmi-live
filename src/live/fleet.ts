@@ -99,7 +99,11 @@ export class Fleet {
   /** Estelas para toda la flota (si no, solo la ruta en foco y el seleccionado). */
   trails = false;
   /** Buffer intercalado para la capa WebGL. */
-  static readonly STRIDE = 11;
+  static readonly STRIDE = 13;
+  /** Calcular el rumbo del tramo trasero (cuerpos 3D que se doblan en las curvas). */
+  rearDirs = false;
+  private rp0 = [0, 0];
+  private rp1 = [0, 0];
   /** Buses que llegan pronto a la estación abierta: se marcan con una onda suave. */
   arriving = new Set<string>();
   private buf = new Float32Array(1024 * Fleet.STRIDE);
@@ -346,6 +350,14 @@ export class Fleet {
       // seleccionado, la ruta en foco y los próximos en llegar. En toda la flota sería ruido cada 15 s.
       const ping = (now - b.pingAt) / 1000 - b.seed * 0.7;
       out[o + 10] = b.pingAt && flags & (4 | 32 | 64) && ping >= 0 && ping < 1.6 ? ping / 1.6 : -1;
+      // Rumbo del tramo trasero: el recorrido entre 0,53 y 0,14 del largo por detrás del centro.
+      out[o + 11] = b.hx; out[o + 12] = -b.hy;
+      if (this.rearDirs && b.onPath && b.path && b.path.size > 1) {
+        const L = 18 * out[o + 8];
+        const a = b.path.pointAt(b.s - 0.53 * L, this.rp0), c = b.path.pointAt(b.s - 0.14 * L, this.rp1);
+        const dx = c[0] - a[0], dy = c[1] - a[1], l = Math.hypot(dx, dy);
+        if (l > 1) { out[o + 11] = dx / l; out[o + 12] = -dy / l; }
+      }
       n++;
     };
     const inView = (b: Bus) => !box || (b.x >= box[0] && b.x <= box[2] && b.y >= box[1] && b.y <= box[3]);

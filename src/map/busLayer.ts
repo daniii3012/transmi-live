@@ -306,8 +306,10 @@ export class BusLayer implements CustomLayerInterface {
     const now = Date.now();
     const box = this.view();
     const moving = this.fleet.update(now, box);
-    const { data, count } = this.fleet.fill(now, this.only, box);
     const zoom = this.map.getZoom();
+    const bodies = this.map.getPitch() > 15 && zoom >= 16.3;
+    this.fleet.rearDirs = bodies;
+    const { data, count } = this.fleet.fill(now, this.only, box);
     if (count) {
       g.useProgram(this.prog);
       const m = opts.defaultProjectionData.mainMatrix as unknown as ArrayLike<number>;
@@ -329,7 +331,6 @@ export class BusLayer implements CustomLayerInterface {
       g.uniform1f(this.u.u_motion, this.motion ? 1 : 0);
       g.uniform1f(this.u.u_shadow, this.shadow);
       // Cuerpos 3D: con la vista inclinada y de cerca (desde z16,3 el ancho real ya pasa de 2 px).
-      const bodies = this.map.getPitch() > 15 && zoom >= 16.3;
       g.uniform1f(this.u.u_bodies, bodies ? 1 : 0);
       g.uniform3fv(this.u.u_rim, this.rim);
       g.uniform3fv(this.u.u_light, this.light);

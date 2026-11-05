@@ -25,7 +25,10 @@ layout(location=4) in vec2 a_dir;
 layout(location=5) in vec4 a_color;
 layout(location=6) in float a_size;
 layout(location=7) in float a_flags;
+layout(location=8) in vec2 a_dir2;   // rumbo del tramo trasero
 uniform mat4 u_matrix;
+uniform float u_j1;    // centro del primer fuelle (x del modelo, m); −1000 si es rígido
+uniform float u_j2;    // centro del segundo fuelle (biarticulado); −1000 si no hay
 uniform float u_ppm;   // píxeles por metro
 uniform float u_mpm;   // unidades mercator por metro
 uniform vec3 u_mute;   // atenuados: hacia el tono del tema
@@ -52,11 +55,27 @@ void main() {
   float realW = 2.55 * u_ppm;
   float sw = max(1.0, 6.5 / realW);
   vec3 p = vec3(a_vpos.x, a_vpos.y * sw, a_vpos.z * sqrt(sw));
-  vec2 fwd = normalize(a_dir);
-  vec2 side = vec2(-fwd.y, fwd.x);
-  vec2 w = a_pos + (fwd * p.x + side * p.y) * u_mpm;
+  // Cada tramo sigue su propio rumbo y gira en su fuelle: el delantero con el del bus, el trasero con
+  // el del recorrido detrás; el del medio (biarticulado), con el promedio.
+  vec2 f = normalize(a_dir);
+  vec2 r = normalize(a_dir2);
+  vec2 m = normalize(f + r);
+  vec2 d = f;
+  vec2 base = vec2(0.0);
+  float x = p.x;
+  if (x < u_j1) {
+    if (u_j2 < -100.0 || x >= u_j2) {
+      d = u_j2 < -100.0 ? r : m;
+      base = f * u_j1 - d * u_j1;
+    } else {
+      d = r;
+      base = f * u_j1 + m * (u_j2 - u_j1) - r * u_j2;
+    }
+  }
+  vec2 side = vec2(-d.y, d.x);
+  vec2 w = a_pos + (base + d * x + side * p.y) * u_mpm;
   gl_Position = u_matrix * vec4(w, p.z * u_mpm, 1.0);
-  vec3 n = normalize(vec3(fwd * a_vnorm.x + side * a_vnorm.y, a_vnorm.z));
+  vec3 n = normalize(vec3(d * a_vnorm.x + side * a_vnorm.y, a_vnorm.z));
   vec3 L = normalize(vec3(-0.35, -0.45, 0.82));
   v_shade = 0.6 + 0.4 * max(dot(n, L), 0.0);
   vec3 c = a_color.rgb;
@@ -162,7 +181,7 @@ export class BusBodies {
     g.linkProgram(p);
     if (!g.getProgramParameter(p, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(p) ?? 'link');
     this.prog = p;
-    for (const n of ['u_matrix', 'u_ppm', 'u_mpm', 'u_mute']) this.u[n] = g.getUniformLocation(p, n);
+    for (const n of ['u_matrix', 'u_ppm', 'u_mpm', 'u_mute', 'u_j1', 'u_j2']) this.u[n] = g.getUniformLocation(p, n);
     this.inst = g.createBuffer()!;
     const S = Fleet.STRIDE * 4;
     for (const k of KINDS) {
@@ -181,7 +200,7 @@ export class BusBodies {
         g.vertexAttribPointer(loc, size, g.FLOAT, false, S, offset * 4);
         g.vertexAttribDivisor(loc, 1);
       };
-      attr(3, 2, 0); attr(4, 2, 2); attr(5, 4, 4); attr(6, 1, 8); attr(7, 1, 9);
+      attr(3, 2, 0); attr(4, 2, 2); attr(5, 4, 4); attr(6, 1, 8); attr(7, 1, 9); attr(8, 2, 11);
       g.bindVertexArray(null);
       this.vaos[k] = vao;
       this.counts[k] = data.length / 7;
@@ -210,8 +229,11 @@ export class BusBodies {
     g.depthMask(true);
     g.enable(g.BLEND);
     g.blendFunc(g.ONE, g.ONE_MINUS_SRC_ALPHA);
+    const J: Record<BodyKind, [number, number]> = { rigid: [-1000, -1000], articulated: [-2.4, -1000], biarticulated: [2.1, -5.9] };
     for (const k of KINDS) {
       if (!n[k]) continue;
+      g.uniform1f(this.u.u_j1, J[k][0]);
+      g.uniform1f(this.u.u_j2, J[k][1]);
       g.bindBuffer(g.ARRAY_BUFFER, this.inst);
       g.bufferData(g.ARRAY_BUFFER, this.split[k].subarray(0, n[k] * S), g.DYNAMIC_DRAW);
       g.bindVertexArray(this.vaos[k]);
