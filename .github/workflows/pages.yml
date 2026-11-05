@@ -2,7 +2,7 @@
 #
 # Requiere en el repositorio (Settings → Secrets and variables → Actions):
 #   secreto  GTFS_URL   dirección del paquete GTFS (no se escribe en el código)
-#   variable API_BASE   dirección del Worker (p. ej. https://transmi-live.<cuenta>.workers.dev)
+#   variable API_BASE   dirección del Worker (https://transmi-live.<subdominio>.workers.dev)
 #   variable SITE_URL   dirección publicada (opcional; por defecto https://<usuario>.github.io/<repo>/)
 # y Pages con «GitHub Actions» como fuente. Se lanza a mano o a diario, después de que el paquete
 # se regenera (≈ 04:20 de Bogotá).
@@ -43,7 +43,7 @@ jobs:
           test -n "$GTFS_URL" || { echo "::error::Falta el secreto GTFS_URL"; exit 1; }
           test -n "$API_BASE" || { echo "::error::Falta la variable API_BASE"; exit 1; }
       - name: Pruebas de las herramientas de datos
-        run: python3 tools/test_busway.py && python3 tools/test_diff.py
+        run: python3 tools/test_busway.py && python3 tools/test_diff.py && python3 tools/test_fleet.py
       - name: Datos publicados (para comparar)
         env:
           SITE_URL: ${{ vars.SITE_URL }}
@@ -62,6 +62,12 @@ jobs:
         run: |
           curl -sfL --retry 3 -o "$RUNNER_TEMP/gtfs.zip" "$GTFS_URL"
           python3 tools/build_data.py "$RUNNER_TEMP/gtfs.zip"
+      - name: Series de flota nuevas
+        env:
+          API_BASE: ${{ vars.API_BASE }}
+        run: |
+          # Una petición al Worker: buses troncales y duales cuyo número no está en fleet.json (al issue).
+          python3 tools/check_fleet.py "$API_BASE" || echo "::warning::No se pudo revisar la flota"
       - name: Avisar si hay que revisar lo curado
         if: hashFiles('.cache/revision.txt') != ''
         env:
