@@ -36,12 +36,25 @@ export type FetchResult =
   | { status: 'same' }
   | { status: 'error'; message: string };
 
+let decoder: Worker | null = null;
+/** Protobuf (Worker en modo `passthrough`) → formato v1, en un Web Worker. */
+function decodePb(buf: ArrayBuffer): Promise<VehiclesV1> {
+  decoder ??= new Worker(new URL('./pb/decode.worker.ts', import.meta.url), { type: 'module' });
+  const w = decoder;
+  return new Promise((resolve, reject) => {
+    w.onmessage = (e: MessageEvent<{ ok: boolean; data?: VehiclesV1; message?: string }>) => (e.data.ok ? resolve(e.data.data!) : reject(new Error(e.data.message)));
+    w.postMessage(buf, [buf]);
+  });
+}
+
 export async function fetchVehicles(base: string, etag: string | null, signal?: AbortSignal): Promise<FetchResult> {
   try {
     const res = await fetch(`${base}/v1/vehicles`, { headers: etag ? { 'if-none-match': etag } : {}, signal, cache: 'no-store' });
     if (res.status === 304) return { status: 'same' };
     if (!res.ok) return { status: 'error', message: `HTTP ${res.status}` };
-    const data = (await res.json()) as VehiclesV1;
+    // El Worker decide el formato: JSON compacto o, en modo `passthrough`, el protobuf tal cual.
+    const pb = (res.headers.get('content-type') ?? '').includes('protobuf');
+    const data = pb ? await decodePb(await res.arrayBuffer()) : ((await res.json()) as VehiclesV1);
     if (data.v !== 1) return { status: 'error', message: 'formato desconocido' };
     return { status: 'ok', data, etag: res.headers.get('etag') };
   } catch (e) {
