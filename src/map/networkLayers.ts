@@ -70,6 +70,7 @@ export class NetworkLayers {
     m.setPaintProperty('station-fp-roof', 'fill-extrusion-color', T.fpRoof);
     m.setPaintProperty('street-stops', 'circle-stroke-color', T.stopStroke);
     m.setPaintProperty('user', 'circle-stroke-color', T.bg);
+    m.setPaintProperty('stations-alert', 'circle-stroke-color', T.bg);
     m.setPaintProperty('plan-walk', 'line-color', T.light);
     m.setPaintProperty('plan-ends', 'circle-color', ['case', ['get', 'dest'], T.light, T.bg]);
     m.setPaintProperty('plan-ends', 'circle-stroke-color', T.light);
@@ -240,6 +241,17 @@ export class NetworkLayers {
       id: 'user', type: 'circle', source: 'user',
       paint: { 'circle-radius': 5, 'circle-color': '#ffffff', 'circle-stroke-color': '#07090b', 'circle-stroke-width': 2.5 },
     });
+    // Estaciones con una alerta activa (desvío, cierre): marca ámbar en la esquina del cuadro.
+    m.addLayer({
+      id: 'stations-alert', type: 'circle', source: 'stations', minzoom: 11.5, filter: ['==', ['get', 'alert'], true],
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 11.5, 2.2, 16, 3.4],
+        'circle-color': '#e0a43a',
+        'circle-stroke-width': 1.2,
+        'circle-stroke-color': BG,
+        'circle-translate': ['interpolate', ['linear'], ['zoom'], 11.5, ['literal', [4, -4]], 16, ['literal', [7, -7]]],
+      },
+    });
     m.addLayer({
       id: 'stations-label', type: 'symbol', source: 'stations', minzoom: 12.5,
       filter: ['any', ['>=', ['zoom'], 13.6], ['==', ['get', 'kind'], 'portal']],
@@ -278,6 +290,19 @@ export class NetworkLayers {
   }
 
   /** Marca de selección (escuadras) sobre una estación o paradero; `null` la quita. */
+  /** Estaciones con alerta activa (por sus vagones o la estación misma). */
+  private alerted = new Set<string>();
+  setAlerts(alerts: { stops: string[] }[]) {
+    const next = new Set<string>();
+    for (const a of alerts) for (const sid of a.stops) {
+      const st = this.net.stations.get(sid) ?? this.net.stationOf.get(sid);
+      if (st) next.add(st.id);
+    }
+    if (next.size === this.alerted.size && [...next].every((x) => this.alerted.has(x))) return;
+    this.alerted = next;
+    (this.map.getSource('stations') as GeoJSONSource)?.setData(this.stationsFC());
+  }
+
   private selFp: string | null = null;
   setSelectedPlace(id: string | null) {
     const st = id ? this.net.stations.get(id) : undefined;
@@ -467,7 +492,7 @@ export class NetworkLayers {
       type: 'FeatureCollection',
       features: [...this.net.stations.values()].map((s) => ({
         type: 'Feature',
-        properties: { id: s.id, short: s.short, kind: s.kind, closed: !!s.closed, fp: !!s.fp },
+        properties: { id: s.id, short: s.short, kind: s.kind, closed: !!s.closed, fp: !!s.fp, alert: this.alerted.has(s.id) },
         geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
       })),
     };

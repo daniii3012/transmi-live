@@ -98,7 +98,7 @@ export class Controller {
     this.applyLayers();
     this.setHidden(app.hidden);
     if (loadPrefs().threeD) this.set3d(true, true);
-    const alerts = async () => { if (!document.hidden) { const a = await fetchAlerts(apiBase()); if (a) app.alerts = a; } };
+    const alerts = async () => { if (!document.hidden) { const a = await fetchAlerts(apiBase()); if (a) { app.alerts = a; this.layers.setAlerts(a); } } };
     void alerts();
     this.alertsTimer = window.setInterval(alerts, 60_000);
     // Acceso directo «Cerca de mí» del ícono instalado (?cerca=1): se ubica y se quita el parámetro.
