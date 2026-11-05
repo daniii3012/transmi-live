@@ -56,8 +56,11 @@ void main() {
   bool arriving = bit(flags, 64.0);
   float k = dim ? 0.8 : (focused || selected ? 1.2 : 1.0);
   float sz = min(a_size, 1.0);
-  // Punto: radio en px según el zoom.
-  float r = 0.5 * mix(4.4, 9.0, u_zf) * mix(0.8, 1.0, sz) * k;
+  // Punto: radio en px según el zoom. Zonal y alimentador (≈ 5.000 a la vez) a escala de ciudad
+  // más pequeños: la troncal se lee encima; recuperan su tamaño hacia z14,5.
+  float minor = (a_size < 0.8 && !focused && !selected) ? 1.0 : 0.0;
+  float near_ = smoothstep(0.35, 0.9, u_zf);
+  float r = 0.5 * mix(4.4, 9.0, u_zf) * mix(0.8, 1.0, sz) * k * mix(1.0, mix(0.62, 1.0, near_), minor);
   // Huella: tamaño real (18 m un articulado, 27 m un biarticulado, 2,55 m de ancho) con un mínimo
   // legible y proporción de bus, no de píldora.
   float wid = max(2.55 * u_ppm, 6.5 * mix(0.85, 1.0, sz) * k);
@@ -131,7 +134,7 @@ void main() {
   bool arriving = bit(flags, 64.0);
   vec3 base = v_color.rgb;
   if (dim) base = mix(u_mute, base, 0.3);
-  else if (v_size < 0.8 && !focused && !selected) base = mix(u_mute, base, mix(0.62, 1.0, u_zf));
+  else if (v_size < 0.8 && !focused && !selected) base = mix(u_mute, base, mix(0.5, 1.0, smoothstep(0.35, 0.9, u_zf)));
   if (hover) base = mix(base, vec3(1.0), 0.22);
 
   // Forma: punto (+ flecha) que se transforma en huella.

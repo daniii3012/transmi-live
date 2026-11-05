@@ -345,6 +345,13 @@ def main():
         if par and m:
             letters_of[par].add(m.group(1))
 
+    # Estaciones cuyos vagones no traen letra (casi toda la Caracas central): la letra de su troncal
+    # desde la lista curada (data/curated/station_corridors.json).
+    curated_letters = json.loads((ROOT / 'data' / 'curated' / 'station_corridors.json').read_text())['stations']
+    for st_id, z_ in curated_letters.items():
+        if not letters_of.get(st_id):
+            letters_of[st_id] = {z_}
+
     def letters(si: int) -> set:
         sid = stops[si]['stop_id']
         return letters_of.get(parent.get(sid, sid), set())
@@ -590,6 +597,52 @@ def main():
             ],
         })
 
+    # Tramos sin letra: casi todos son de expresos que saltan estaciones y van por encima de tramos
+    # locales ya coloreados. Si ≥ 80 % de su largo coincide (a ≤ 12 m) con tramos con letra, se descartan
+    # por duplicados; si no, toman la letra más frecuente de lo que tienen a ≤ 25 m.
+    n_before = sum(1 for v in corridor_segments.values() if not v['z'])
+    grid_z: dict[tuple, list] = defaultdict(list)
+    GZ = 25.0
+    for v in corridor_segments.values():
+        if not v['z']:
+            continue
+        pts = [xy(lo, la) for lo, la in v['c']]
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            n = max(1, int(math.hypot(bx - ax, by - ay) // 10))
+            for k in range(n + 1):
+                x, y = ax + (bx - ax) * k / n, ay + (by - ay) * k / n
+                grid_z[(int(x // GZ), int(y // GZ))].append((x, y, v['z']))
+    dropped = 0
+    for key in list(corridor_segments):
+        v = corridor_segments[key]
+        if v['z']:
+            continue
+        pts = [xy(lo, la) for lo, la in v['c']]
+        samples = []
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            n = max(1, int(math.hypot(bx - ax, by - ay) // 10))
+            samples += [(ax + (bx - ax) * k / n, ay + (by - ay) * k / n) for k in range(n)]
+        covered = 0
+        votes = Counter()
+        for x, y in samples:
+            best = None
+            for gx in (int(x // GZ) - 1, int(x // GZ), int(x // GZ) + 1):
+                for gy in (int(y // GZ) - 1, int(y // GZ), int(y // GZ) + 1):
+                    for px, py, zz in grid_z.get((gx, gy), ()):
+                        d = math.hypot(px - x, py - y)
+                        if best is None or d < best[0]:
+                            best = (d, zz)
+            if best and best[0] <= 12:
+                covered += 1
+            if best and best[0] <= 25:
+                votes[best[1]] += 1
+        if samples and covered / len(samples) >= 0.8:
+            del corridor_segments[key]
+            dropped += 1
+        elif votes:
+            v['z'] = votes.most_common(1)[0][0]
+    log(f'tramos de corredor: {len(corridor_segments)}; sin letra {n_before} → {sum(1 for v in corridor_segments.values() if not v["z"])} '
+        f'({dropped} expresos duplicados descartados)')
     log(f'huellas de estación: {n_fp["osm"]} de OSM ({n_fp["osm_lejos"]} descartadas por lejanas), {n_fp["est"]} estimadas, {n_fp["none"]} sin huella')
     shifts.sort(reverse=True)
     if shifts:
