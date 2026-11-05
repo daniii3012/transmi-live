@@ -97,6 +97,8 @@ export class Controller {
     }
     this.layers.setSelectedPlace(station);
     if (v.kind !== 'bus') this.stopFollow();
+    if (v.kind !== 'plan') this.showJourney(null, null, null);
+    if (v.kind === 'plan') void this.net.loadPatterns().then(() => (app.patternsReady = true));
     this.map.triggerRepaint();
     if (v.kind === 'route' || v.kind === 'bus' || v.kind === 'station') void this.net.loadPatterns().then(() => (app.patternsReady = true));
     if (v.kind === 'stop') void this.net.loadStreetStops().then(() => this.frame(v, initial));
@@ -141,6 +143,61 @@ export class Controller {
   padding(extra = 0): PaddingOptions {
     if (app.narrow) return { top: 56 + extra, bottom: Math.max(120, app.sheetHeight) + extra, left: extra / 2, right: extra / 2 };
     return { top: extra, bottom: extra, left: PANEL_W + extra, right: 56 + extra };
+  }
+
+  // ── Viaje planeado ─────────────────────────────────────────────────────────────────────────
+  private planKey = '';
+  showJourney(j: import('../planner/planner.worker').Answer['journeys'][number] | null, from: import('../planner/places').End | null, to: import('../planner/places').End | null) {
+    if (!j || app.view.kind !== 'plan') {
+      if (this.planKey) { this.layers.setPlan(null); this.planKey = ''; this.fleet.focusRoutes = null; this.map.triggerRepaint(); }
+      return;
+    }
+    const key = JSON.stringify([j.depart, j.arrive, j.legs.map((l) => (l.kind === 'ride' ? j.routeIds[l.route] : 'w'))]);
+    if (key === this.planKey) return;
+    this.planKey = key;
+    const net = this.net;
+    const where = (s: number | null, end: typeof from): [number, number] | null => {
+      if (s !== null) {
+        const id = j.stopIds[s];
+        const st = net.stationOf.get(id);
+        const p = st?.platforms.find((x) => x.id === id) ?? st ?? net.streetStops.get(id);
+        return p ? [p.lon, p.lat] : null;
+      }
+      if (!end) return null;
+      if (end.kind === 'here') return app.userPos;
+      if (end.kind === 'point') return [end.lon, end.lat];
+      const p = end.kind === 'station' ? net.stations.get(end.id) : net.streetStops.get(end.id);
+      return p ? [p.lon, p.lat] : null;
+    };
+    const features: GeoJSON.Feature[] = [];
+    const all: [number, number][] = [];
+    for (const l of j.legs) {
+      if (l.kind === 'ride') {
+        const rid = j.routeIds[l.route];
+        const path = net.paths.get(rid), pat = net.pattern(rid), r = net.routes.get(rid);
+        if (!path || !pat) continue;
+        const coords = path.slice(pat.s[l.fromPos], pat.s[l.toPos]);
+        all.push(...coords);
+        features.push({ type: 'Feature', properties: { kind: 'ride', color: r?.color ?? '#eceff2' }, geometry: { type: 'LineString', coordinates: coords } });
+      } else {
+        const a = where(l.from, from), b = where(l.to, to);
+        if (!a || !b) continue;
+        all.push(a, b);
+        features.push({ type: 'Feature', properties: { kind: 'walk' }, geometry: { type: 'LineString', coordinates: [a, b] } });
+      }
+    }
+    const o = where(null, from), d = where(null, to);
+    if (o) features.push({ type: 'Feature', properties: { kind: 'end', dest: false }, geometry: { type: 'Point', coordinates: o } });
+    if (d) features.push({ type: 'Feature', properties: { kind: 'end', dest: true }, geometry: { type: 'Point', coordinates: d } });
+    this.layers.setPlan({ type: 'FeatureCollection', features });
+    // Los buses de las rutas del viaje quedan encima y claros; el resto, atenuado bajo el trazo.
+    this.fleet.focusRoutes = new Set(Object.values(j.routeIds));
+    this.map.triggerRepaint();
+    if (all.length) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [x, y] of all) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+      this.map.fitBounds([[x0, y0], [x1, y1]], { padding: this.padding(48), duration: 900, maxZoom: 16 });
+    }
   }
 
   // ── Seguimiento ────────────────────────────────────────────────────────────────────────────

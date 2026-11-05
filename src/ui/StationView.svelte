@@ -9,6 +9,7 @@
   import Back from './Back.svelte';
   import Star from './Star.svelte';
   import AlertList from './AlertList.svelte';
+  import { encodePlan } from '../planner/places';
 
   let { id, kind }: { id: string; kind: 'station' | 'stop' } = $props();
   const net = $derived(app.net!);
@@ -54,6 +55,11 @@
     </header>
 
     <AlertList {alerts} />
+
+    <div class="go">
+      <button class="btn" onclick={() => go({ kind: 'plan', id: encodePlan({ kind, id }, null, null) })}>Ir desde aquí</button>
+      <button class="btn" onclick={() => go({ kind: 'plan', id: encodePlan(null, { kind, id }, null) })}>Ir hasta aquí</button>
+    </div>
 
     {#if station?.closed}
       <p class="notice">Sin servicio programado en el horario vigente. Varias estaciones de la Caracas están cerradas por las obras del metro.</p>
@@ -114,6 +120,9 @@
 
 <style>
   .view { padding: var(--sp-4); display: grid; gap: var(--sp-5); }
+  .go { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin-top: calc(-1 * var(--sp-2)); }
+  .btn { height: 32px; border: 1px solid var(--line-2); font-size: var(--fs-small); color: var(--fg-1); }
+  .btn:hover { color: var(--fg-0); border-color: var(--fg-3); }
   .head1 { display: flex; gap: var(--sp-3); align-items: flex-start; }
   .names { flex: 1; min-width: 0; }
   h1 { margin: 2px 0 0; font-size: var(--fs-title); font-weight: 500; line-height: 1.2; letter-spacing: -0.01em; }

@@ -46,6 +46,7 @@ export class NetworkLayers {
     m.addSource('stations', { type: 'geojson', data: this.stationsFC(), promoteId: 'id' });
     m.addSource('selected-place', { type: 'geojson', data: empty() });
     m.addSource('user', { type: 'geojson', data: empty() });
+    m.addSource('plan', { type: 'geojson', data: empty(), lineMetrics: true });
     m.addSource('street-stops', { type: 'geojson', data: empty() });
 
     m.addLayer({
@@ -72,6 +73,29 @@ export class NetworkLayers {
       id: 'route-focus', type: 'line', source: 'route-focus',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: { 'line-width': W([[10, 2.6], [13, 3.6], [16, 6], [19, 10]]), 'line-gradient': gradient('#ffffff', 1) },
+    });
+    // Viaje planeado: tramos en bus del color de su ruta, caminatas punteadas, extremos.
+    m.addLayer({
+      id: 'plan-casing', type: 'line', source: 'plan', filter: ['==', ['get', 'kind'], 'ride'],
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': BG, 'line-width': W([[10, 6], [14, 9], [18, 15]]) },
+    });
+    m.addLayer({
+      id: 'plan-ride', type: 'line', source: 'plan', filter: ['==', ['get', 'kind'], 'ride'],
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': ['get', 'color'], 'line-width': W([[10, 3.4], [14, 5], [18, 9]]) },
+    });
+    m.addLayer({
+      id: 'plan-walk', type: 'line', source: 'plan', filter: ['==', ['get', 'kind'], 'walk'],
+      layout: { 'line-join': 'round', 'line-cap': 'butt' },
+      paint: { 'line-color': '#eceff2', 'line-width': W([[10, 1.6], [16, 2.6]]), 'line-dasharray': [1.2, 1.6] },
+    });
+    m.addLayer({
+      id: 'plan-ends', type: 'circle', source: 'plan', filter: ['==', ['get', 'kind'], 'end'],
+      paint: {
+        'circle-radius': 5, 'circle-color': ['case', ['get', 'dest'], '#eceff2', BG],
+        'circle-stroke-color': '#eceff2', 'circle-stroke-width': 2,
+      },
     });
     m.addLayer({
       id: 'street-stops', type: 'circle', source: 'street-stops', minzoom: 15,
@@ -162,6 +186,14 @@ export class NetworkLayers {
     });
   }
 
+  private planOn = false;
+  /** Dibuja un viaje (o lo quita con `null`); con viaje, la red se atenúa como con una ruta en foco. */
+  setPlan(fc: FC | null) {
+    (this.map.getSource('plan') as GeoJSONSource).setData(fc ?? empty());
+    this.planOn = !!fc;
+    this.applyFilters();
+  }
+
   /** Sistemas ocultos por el filtro. */
   setHidden(hidden: Set<SystemKey>) {
     this.hidden = hidden;
@@ -214,7 +246,7 @@ export class NetworkLayers {
     m.setFilter('routes-core', visible);
     m.setFilter('routes-core-casing', visible);
     m.setFilter('routes-zonal', visible);
-    const f = this.focusId;
+    const f = this.focusId || this.planOn;
     m.setPaintProperty('routes-core', 'line-color', f ? '#252c34' : CORE_COLOR);
     m.setPaintProperty('routes-zonal', 'line-color', zonalColor(f ? 0.12 : 0.3));
   }

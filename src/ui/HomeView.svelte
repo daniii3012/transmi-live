@@ -96,6 +96,11 @@
     {#if !app.narrow}<kbd>/</kbd>{/if}
   </button>
 
+  <button class="locate" onclick={() => go({ kind: 'plan', id: '' })}>
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="3" cy="3" r="2" /><rect x="11" y="11" width="4" height="4" /><path d="M3 5v4a3 3 0 0 0 3 3h5" /></svg>
+    Planear un viaje
+  </button>
+
   {#if near}
     <section class="block">
       <div class="head"><span class="label">Cerca de ti</span><span class="label hint">próxima llegada</span></div>

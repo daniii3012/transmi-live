@@ -81,6 +81,8 @@ export class Fleet {
   interval = 20_000;
   hidden = new Set<SystemKey>();
   focusRoute: string | null = null;
+  /** Varias rutas en foco a la vez (las de un viaje planeado); manda sobre `focusRoute`. */
+  focusRoutes: Set<string> | null = null;
   selectedId: string | null = null;
   hoverId: string | null = null;
   /** Estelas para toda la flota (si no, solo la ruta en foco y el seleccionado). */
@@ -293,6 +295,9 @@ export class Fleet {
     const m = this.tmp;
     let n = 0;
     const focus = this.focusRoute;
+    const set = this.focusRoutes;
+    const inFocus = (b: Bus) => (set ? set.has(b.routeId) : !focus || b.routeId === focus);
+    const anyFocus = !!set || !!focus;
     let selected: Bus | null = null;
     const write = (b: Bus, flags: number) => {
       mercator(b.x, b.y, m);
@@ -314,10 +319,10 @@ export class Fleet {
         if (b.age > DROP_AGE) continue;
         if (b.sys && this.hidden.has(b.sys)) continue;
         if (b.id === this.selectedId) { selected = b; continue; }
-        const dim = !!focus && b.routeId !== focus;
+        const dim = anyFocus && !inFocus(b);
         if ((pass === 0) !== dim) continue;
-        const trail = !dim && (this.trails || b.routeId === focus) && this.moving(b, now);
-        write(b, (dim ? 1 : 0) | (b.age > STALE_AGE ? 2 : 0) | (b.id === this.hoverId ? 8 : 0) | (trail ? 16 : 0) | (focus && !dim ? 32 : 0));
+        const trail = !dim && (this.trails || (anyFocus && inFocus(b))) && this.moving(b, now);
+        write(b, (dim ? 1 : 0) | (b.age > STALE_AGE ? 2 : 0) | (b.id === this.hoverId ? 8 : 0) | (trail ? 16 : 0) | (anyFocus && !dim ? 32 : 0));
       }
     }
     if (selected && only !== 'dim') write(selected, 4 | (selected.age > STALE_AGE ? 2 : 0) | (this.moving(selected, now) ? 16 : 0));

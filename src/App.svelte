@@ -16,6 +16,7 @@
   import RouteView from './ui/RouteView.svelte';
   import BusView from './ui/BusView.svelte';
   import StationView from './ui/StationView.svelte';
+  import PlanView from './ui/PlanView.svelte';
   import Search from './ui/Search.svelte';
   import MapControls from './ui/MapControls.svelte';
 
@@ -80,7 +81,7 @@
 
 {#if app.net}
   <Panel>
-    {#key app.view.kind === 'home' ? 'home' : `${app.view.kind}:${app.view.id}`}
+    {#key app.view.kind === 'home' ? 'home' : app.view.kind === 'plan' ? 'plan' : `${app.view.kind}:${app.view.id}`}
       <div class="viewwrap" in:fly={{ y: reduced ? 0 : 8, duration: reduced ? 1 : 200, easing: cubicOut }}>
         {#if app.view.kind === 'home'}
           <HomeView />
@@ -92,6 +93,8 @@
           <StationView id={app.view.id} kind="station" />
         {:else if app.view.kind === 'stop'}
           <StationView id={app.view.id} kind="stop" />
+        {:else if app.view.kind === 'plan'}
+          <PlanView id={app.view.id} />
         {/if}
       </div>
     {/key}
