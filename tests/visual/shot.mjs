@@ -1,5 +1,5 @@
 // Capturas de referencia con el Chrome instalado (puppeteer-core, sin descargar navegadores).
-// Uso: node tests/visual/shot.mjs <url> <nombre> [desktop|mobile|both] [--wait=ms] [--eval=js]
+// Uso: node tests/visual/shot.mjs <url> <nombre> [desktop|mobile|both] [--wait=ms] [--eval=js] [--geo=lon,lat]
 import puppeteer from 'puppeteer-core';
 import { mkdirSync } from 'node:fs';
 
@@ -25,6 +25,11 @@ try {
     page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
     page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
     await page.setViewport(VIEWPORTS[kind]);
+    if (opt.geo) {
+      const [lon, lat] = String(opt.geo).split(',').map(Number);
+      await browser.defaultBrowserContext().overridePermissions(new URL(url).origin, ['geolocation']);
+      await page.setGeolocation({ longitude: lon, latitude: lat, accuracy: 25 });
+    }
     if (kind === 'mobile') await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1');
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
     await page.waitForFunction(() => window.__map?.loaded?.() && window.__map?.areTilesLoaded?.(), { timeout: 45000 }).catch(() => logs.push('[shot] mapa sin terminar'));

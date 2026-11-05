@@ -4,7 +4,11 @@
   import { ctl } from '../app/instance';
   import { SYSTEM_ORDER, type SystemKey } from '../domain/types';
   import { fmtNum } from '../domain/time';
-  import { busesByRoute } from './derive';
+  import { busesByRoute, arrivals } from './derive';
+  import { favorites } from '../app/favorites.svelte';
+  import { lonLatDist } from '../domain/geo';
+  import { etaText } from '../domain/eta';
+  import { meters } from '../domain/time';
   import RouteBadge from './RouteBadge.svelte';
 
   const net = $derived(app.net);
@@ -28,6 +32,35 @@
       else { cur.n += list.length; }
     }
     return [...byCode.values()].sort((a, b) => b.n - a.n).slice(0, 8).map((x) => ({ route: net.routes.get(x.id)!, n: x.n }));
+  });
+
+  /** Favoritos: rutas con su número de buses; lugares con su próxima llegada. */
+  const favs = $derived.by(() => {
+    void app.version;
+    if (!net) return [];
+    return favorites.list.map((f) => {
+      if (f.kind === 'route') { const r = net.routes.get(f.id); return r ? { f, title: r.dest, route: r } : null; }
+      const p = f.kind === 'station' ? net.stations.get(f.id) : net.streetStops.get(f.id);
+      return p ? { f, title: 'short' in p ? p.short : p.name, route: undefined } : null;
+    }).filter((x): x is NonNullable<typeof x> => !!x);
+  });
+
+  /** Cerca de ti: estaciones a menos de 1 km y paraderos a menos de 450 m, con su próxima llegada. */
+  const near = $derived.by(() => {
+    void app.now;
+    const pos = app.userPos;
+    if (!pos || !net || !app.fleet) return null;
+    const places: { kind: 'station' | 'stop'; id: string; name: string; d: number; stopIds: Set<string>; routes: string[] }[] = [];
+    for (const s of net.stations.values()) {
+      const d = lonLatDist(pos[0], pos[1], s.lon, s.lat);
+      if (d < 1000 && !s.closed) places.push({ kind: 'station', id: s.id, name: s.short, d, stopIds: new Set([s.id, ...s.platforms.map((p) => p.id)]), routes: s.routes });
+    }
+    for (const s of net.streetStops.values()) {
+      const d = lonLatDist(pos[0], pos[1], s.lon, s.lat);
+      if (d < 450) places.push({ kind: 'stop', id: s.id, name: s.name, d, stopIds: new Set([s.id]), routes: s.routes });
+    }
+    places.sort((a, b) => a.d - b.d);
+    return places.slice(0, 6).map((p) => ({ ...p, next: app.patternsReady ? arrivals(net, app.fleet!, app.version, p.stopIds, p.routes, app.now)[0] : undefined }));
   });
 
   function toggle(k: SystemKey) {
@@ -59,6 +92,49 @@
     <span>Ruta, estación, paradero o bus</span>
     {#if !app.narrow}<kbd>/</kbd>{/if}
   </button>
+
+  {#if near}
+    <section class="block">
+      <div class="head"><span class="label">Cerca de ti</span><span class="label hint">próxima llegada</span></div>
+      {#if near.length === 0}
+        <p class="empty faint">Ninguna estación ni paradero cerca.</p>
+      {:else}
+        <ul class="routes">
+          {#each near as p (p.kind + p.id)}
+            <li>
+              <button class="row near" onclick={() => go({ kind: p.kind, id: p.id })}>
+                <span class="place" class:stop={p.kind === 'stop'}></span>
+                <span class="dest">{p.name}<span class="faint">&nbsp;· {meters(p.d)}</span></span>
+                {#if p.next}<span class="nx"><RouteBadge route={p.next.route} size="sm" /><span class="num">{etaText(p.next.seconds)}</span></span>{:else}<span class="faint num">—</span>{/if}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+  {:else}
+    <button class="locate" onclick={() => ctl?.locate()} disabled={app.locating}>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="8" cy="8" r="4" /><path d="M8 0v3M8 13v3M0 8h3M13 8h3" /></svg>
+      {app.locating ? 'Buscando tu ubicación…' : 'Estaciones y paraderos cerca de mí'}
+    </button>
+  {/if}
+
+  {#if favs.length}
+    <section class="block">
+      <div class="head"><span class="label">Favoritos</span></div>
+      <ul class="routes">
+        {#each favs as x (x.f.kind + x.f.id)}
+          <li>
+            <button class="row" onclick={() => go({ kind: x.f.kind, id: x.f.id })}>
+              {#if x.route}<RouteBadge route={x.route} />{:else}<span class="place" class:stop={x.f.kind === 'stop'}></span>{/if}
+              <span class="dest">{x.title}</span>
+              <span></span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 
   <section class="block">
     <div class="head"><span class="label">Sistemas</span><span class="label hint">toca para ocultar</span></div>
@@ -152,4 +228,13 @@
   }
   .row:hover { background: var(--bg-2); }
   .dest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dest .faint { font-size: var(--fs-small); }
+  .locate { height: var(--row); display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); border: 1px solid var(--line-1); color: var(--fg-1); font-size: var(--fs-small); text-align: left; }
+  .locate:hover { color: var(--fg-0); border-color: var(--line-2); }
+  .locate:disabled { color: var(--fg-2); }
+  .place { width: 38px; height: 22px; display: inline-flex; align-items: center; justify-content: center; }
+  .place::before { content: ''; width: 9px; height: 9px; background: #dfe3e8; }
+  .place.stop::before { border-radius: 50%; background: var(--bg-1); border: 1.5px solid #6b8fc7; }
+  .nx { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); }
+  .empty { margin: 0; font-size: var(--fs-small); }
 </style>

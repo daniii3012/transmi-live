@@ -2,6 +2,7 @@ import type { Network } from '../data/network';
 import type { Fleet } from '../live/fleet';
 import type { PollState } from '../live/poller';
 import type { SystemKey } from '../domain/types';
+import type { Alert } from '../live/alerts';
 import { parse, type View } from './router';
 
 /**
@@ -26,6 +27,9 @@ class AppState {
   /** Altura de la hoja inferior (móvil) en px, para el relleno de la cámara. */
   sheetHeight = $state(0);
   locating = $state(false);
+  /** Ubicación propia (lon, lat), si la persona la pidió. */
+  userPos = $state<[number, number] | null>(null);
+  alerts = $state.raw<Alert[]>([]);
 }
 
 export const app = new AppState();
