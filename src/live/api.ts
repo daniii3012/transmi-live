@@ -23,7 +23,12 @@ export const LAT0 = 4.6, LON0 = -74.1, Q = 1e5;
 export function apiBase(): string {
   const q = new URLSearchParams(location.search).get('api');
   if (q) return q.replace(/\/$/, '');
-  return (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') || 'http://127.0.0.1:8787';
+  const env = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '');
+  if (env) return env;
+  // En desarrollo, el Worker local en la misma máquina que sirvió la página: así funciona también
+  // abriendo la página desde otro equipo de la red (por la IP).
+  const h = location.hostname;
+  return h === 'localhost' || h === '127.0.0.1' ? 'http://127.0.0.1:8787' : `http://${h}:8787`;
 }
 
 export type FetchResult =
