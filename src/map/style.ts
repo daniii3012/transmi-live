@@ -90,6 +90,19 @@ export function darkStyle(): StyleSpecification {
         },
       },
       {
+        // Edificios en 3D: solo con la vista inclinada (se encienden desde el controlador). Tono del
+        // mapa base, apenas más claro arriba, para dar volumen sin competir con la red.
+        id: 'building-3d', type: 'fill-extrusion', source: 'omt', 'source-layer': 'building', minzoom: 14.5,
+        layout: { visibility: 'none' },
+        paint: {
+          'fill-extrusion-color': ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 6], 0, '#11161b', 60, '#1a2129'],
+          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14.5, 0, 15.5, ['coalesce', ['get', 'render_height'], 6]],
+          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+          'fill-extrusion-opacity': 0.92,
+          'fill-extrusion-vertical-gradient': true,
+        },
+      },
+      {
         id: 'road-path', type: 'line', source: 'omt', 'source-layer': 'transportation', minzoom: 15,
         filter: ['all', isLine, cls('path', 'track')],
         paint: { 'line-color': C.road0, 'line-width': line([[15, 0.5], [19, 2]]), 'line-dasharray': [2, 2] },

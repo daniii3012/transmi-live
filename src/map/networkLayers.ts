@@ -97,6 +97,9 @@ export class NetworkLayers {
         'circle-stroke-color': '#eceff2', 'circle-stroke-width': 2,
       },
     });
+    // En 3D, los edificios tapan las líneas que quedan detrás de ellos: van encima de los trazados y
+    // del viaje, debajo de paraderos, estaciones y nombres (orden de capas en DISENO.md).
+    m.moveLayer('building-3d');
     m.addLayer({
       id: 'street-stops', type: 'circle', source: 'street-stops', minzoom: 15,
       paint: {

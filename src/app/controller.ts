@@ -268,8 +268,17 @@ export class Controller {
   }
 
   // ── Cámara general ─────────────────────────────────────────────────────────────────────────
+  /** Vista 3D: cámara inclinada y edificios extruidos (hito 7). */
+  set3d(on: boolean) {
+    app.threeD = on;
+    // Los edificios van debajo de la red: la tapan donde corresponde, pero nunca a los buses.
+    this.map.setLayoutProperty('building-3d', 'visibility', on ? 'visible' : 'none');
+    this.map.setLayoutProperty('building', 'visibility', on ? 'none' : 'visible');
+    this.map.easeTo({ pitch: on ? 58 : 0, bearing: on ? (this.map.getBearing() || -18) : this.map.getBearing(), zoom: on ? Math.max(this.map.getZoom(), 15.2) : this.map.getZoom(), duration: 900, padding: this.padding() });
+  }
+
   zoom(d: number) { this.map.easeTo({ zoom: this.map.getZoom() + d, duration: 220 }); }
-  north() { this.map.easeTo({ bearing: 0, pitch: 0, duration: 400 }); }
+  north() { this.map.easeTo({ bearing: 0, pitch: app.threeD ? this.map.getPitch() : 0, duration: 400 }); }
   overview() {
     this.map.fitBounds([[-74.23, 4.47], [-74.02, 4.83]], { padding: this.padding(24), duration: 900 });
   }

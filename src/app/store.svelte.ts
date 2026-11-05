@@ -27,6 +27,7 @@ class AppState {
   /** Altura de la hoja inferior (móvil) en px, para el relleno de la cámara. */
   sheetHeight = $state(0);
   locating = $state(false);
+  threeD = $state(false);
   /** Ubicación propia (lon, lat), si la persona la pidió. */
   userPos = $state<[number, number] | null>(null);
   alerts = $state.raw<Alert[]>([]);

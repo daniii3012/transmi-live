@@ -10,6 +10,7 @@
     <button onclick={() => ctl?.zoom(-1)} aria-label="Alejar"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 7h12" stroke="currentColor" stroke-width="1.5" /></svg></button>
   </div>
   <div class="group">
+    <button class="d3" class:on={app.threeD} onclick={() => ctl?.set3d(!app.threeD)} aria-pressed={app.threeD} aria-label="Vista 3D" title="Vista 3D">3D</button>
     <button onclick={() => ctl?.north()} aria-label="Norte arriba" title="Norte arriba">
       <svg width="16" height="16" viewBox="0 0 16 16" style:transform="rotate({-bearing}deg)"><path d="M8 1 L11 8 H5 Z" fill="#e5483b" /><path d="M8 15 L5 8 H11 Z" fill="currentColor" /></svg>
     </button>
@@ -30,6 +31,8 @@
   button { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; color: var(--fg-1); transition: color var(--t-out), background var(--t-out); }
   button:hover { color: var(--fg-0); background: var(--bg-2); }
   svg { transition: transform 200ms var(--ease-out); }
+  .d3 { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
+  .d3.on { background: var(--fg-0); color: var(--bg-0); }
   .busy svg { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (pointer: coarse) { button { width: 44px; height: 44px; } .zoom { display: none; } }

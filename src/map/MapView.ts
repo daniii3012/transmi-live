@@ -24,6 +24,7 @@ export class MapView {
       maxBounds: BOUNDS,
       attributionControl: false,
       pitchWithRotate: true,
+      maxPitch: 70,
       dragRotate: true,
       fadeDuration: 150,
       canvasContextAttributes: { antialias: true, powerPreference: 'high-performance' },
