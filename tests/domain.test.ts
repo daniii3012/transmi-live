@@ -4,6 +4,7 @@ import { etas, timeAt, pace, bandIndex, nextStopIndex, etaText, setSchedScale } 
 import { beforeEach } from 'vitest';
 import { textOn, ago, meters } from '../src/domain/time';
 import type { Pattern } from '../src/domain/types';
+import { undeltaPatterns } from '../src/domain/patterns';
 
 // Recorrido recto hacia el este de 1.000 m, en lon/lat alrededor de Bogotá.
 const lon0 = -74.1, lat0 = 4.65;
@@ -88,5 +89,19 @@ describe('llegadas', () => {
     expect(meters(420)).toBe('420 m');
     expect(textOn('#f2b705')).toBe('#07090b');
     expect(textOn('#4f6bed')).toBe('#ffffff');
+  });
+});
+
+describe('patrones v2', () => {
+  it('reconstruye abscisas y tiempos acumulados desde las diferencias', () => {
+    const f = { v: 2, patterns: { r: { stops: ['a', 'b', 'c'], s: [0, 500, 700], t: [[0, 60, 30], null, [0, 90, 45], null, null], trips: 3 } as unknown as Pattern } };
+    const p = undeltaPatterns(f).r;
+    expect(p.s).toEqual([0, 500, 1200]);
+    expect(p.t[0]).toEqual([0, 60, 90]);
+    expect(p.t[1]).toBeNull();
+    expect(p.t[2]).toEqual([0, 90, 135]);
+    expect(f.v).toBe(1);
+    // Una segunda llamada no vuelve a sumar.
+    expect(undeltaPatterns(f).r.s).toEqual([0, 500, 1200]);
   });
 });
