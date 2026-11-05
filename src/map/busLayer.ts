@@ -1,6 +1,7 @@
 import type { CustomLayerInterface, CustomRenderMethodInput, Map as MLMap } from 'maplibre-gl';
 import { Fleet, ORIGIN } from '../live/fleet';
 import { KX, KY } from '../domain/geo';
+import { BusBodies } from './busBodies';
 
 /**
  * Buses en una capa WebGL propia (decisiones/005), revisión R2:
@@ -99,6 +100,7 @@ uniform float u_ar;      // flecha de rumbo (aparece a escala de barrio)
 uniform float u_time;
 uniform float u_motion;  // 0 con prefers-reduced-motion
 uniform float u_shadow;  // intensidad de la sombra según el tema
+uniform float u_bodies;  // 1: los cuerpos 3D van encima; aquí solo sombra, anillo y ondas
 uniform vec3 u_rim;      // halo: color del fondo del mapa
 uniform vec3 u_light;    // anillo de selección
 uniform vec3 u_mute;     // hacia dónde se apagan atenuados y zonal lejano
@@ -163,6 +165,12 @@ void main() {
     col = mix(col, u_rim, j * det * 0.9);
   }
 
+  // Con cuerpos 3D, la huella es su sombra en el suelo.
+  if (u_bodies > 0.5) {
+    float s = (1.0 - smoothstep(-1.5, 2.0, d)) * 0.34 * (dim ? 0.5 : 1.0);
+    col = vec3(0.0);
+    body = s;
+  }
   // Premultiplicado: cuerpo y halo; debajo, anillo, ondas, sombra y estela.
   vec4 acc = vec4(col * body, body);
   if (selected || focused) {
@@ -188,7 +196,7 @@ void main() {
     acc += vec4(wc * w, w) * (1.0 - acc.a);
   }
   // Sombra corta solo con la huella (de cerca, sobre la línea de su ruta); como punto basta el halo.
-  float sh = (1.0 - smoothstep(halo, halo + 3.0, d)) * u_shadow * (dim ? 0.35 : 1.0) * u_el;
+  float sh = (1.0 - smoothstep(halo, halo + 3.0, d)) * u_shadow * (dim ? 0.35 : 1.0) * u_el * (1.0 - u_bodies);
   acc += vec4(0.0, 0.0, 0.0, sh) * (1.0 - acc.a);
   if (v_tail > 0.0 && acc.a < 0.5) {
     float back = -v_local.x - max(v_foot.x * u_el + v_r * (1.0 - u_el), 0.0);
@@ -230,6 +238,7 @@ export class BusLayer implements CustomLayerInterface {
   }
   private fleet: Fleet;
   private only: 'all' | 'dim' | 'main';
+  private bodies = new BusBodies();
 
   /** `main`: todos salvo los atenuados; `dim`: solo los atenuados (van debajo de la ruta en foco). */
   constructor(fleet: Fleet, only: 'all' | 'dim' | 'main' = 'all') {
@@ -255,7 +264,8 @@ export class BusLayer implements CustomLayerInterface {
     g.linkProgram(p);
     if (!g.getProgramParameter(p, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(p) ?? 'link');
     this.prog = p;
-    for (const n of ['u_matrix', 'u_mpp', 'u_ppm', 'u_zf', 'u_el', 'u_ar', 'u_time', 'u_motion', 'u_shadow', 'u_rim', 'u_light', 'u_mute']) this.u[n] = g.getUniformLocation(p, n);
+    for (const n of ['u_matrix', 'u_mpp', 'u_ppm', 'u_zf', 'u_el', 'u_ar', 'u_time', 'u_motion', 'u_shadow', 'u_bodies', 'u_rim', 'u_light', 'u_mute']) this.u[n] = g.getUniformLocation(p, n);
+    this.bodies.init(g);
 
     this.vao = g.createVertexArray()!;
     g.bindVertexArray(this.vao);
@@ -315,6 +325,9 @@ export class BusLayer implements CustomLayerInterface {
       g.uniform1f(this.u.u_time, (performance.now() - this.t0) / 1000);
       g.uniform1f(this.u.u_motion, this.motion ? 1 : 0);
       g.uniform1f(this.u.u_shadow, this.shadow);
+      // Cuerpos 3D: con la vista inclinada y de cerca (desde z16,3 el ancho real ya pasa de 2 px).
+      const bodies = this.map.getPitch() > 15 && zoom >= 16.3;
+      g.uniform1f(this.u.u_bodies, bodies ? 1 : 0);
       g.uniform3fv(this.u.u_rim, this.rim);
       g.uniform3fv(this.u.u_light, this.light);
       g.uniform3fv(this.u.u_mute, this.mute);
@@ -328,6 +341,10 @@ export class BusLayer implements CustomLayerInterface {
       g.depthMask(false);
       g.drawArraysInstanced(g.TRIANGLE_STRIP, 0, 4, count);
       g.bindVertexArray(null);
+      if (bodies) {
+        const ppm = worldPx / (40_075_016.686 * Math.cos(lat));
+        this.bodies.draw(g, mm, data, count, ppm, ppm / worldPx, this.mute);
+      }
     }
     this.frames.push(performance.now());
     if (this.frames.length > 120) this.frames.shift();
