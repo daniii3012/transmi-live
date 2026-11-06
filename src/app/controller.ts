@@ -600,7 +600,7 @@ export class Controller {
       const pieces = this.net.pieces;
       if (!pieces?.length) return;
       this.elevation ??= new Elevation(pieces);
-      this.structs?.set('tm', (solid, glass) => { buildStations(this.net, solid, glass); buildBridges(pieces, solid); });
+      this.structs?.set('tm', (solid, glass) => { buildStations(this.net, solid, glass); buildBridges(pieces, solid, glass); });
       this.structures();
       this.map.triggerRepaint();
     });

@@ -212,7 +212,7 @@ def smooth01(u: float) -> float:
     return u * u * (3 - 2 * u)
 
 
-def bridge_structures(busway):
+def bridge_structures(busway, roads=None):
     """Puentes de la calzada exclusiva para el 3D, como piezas con su altura por vértice.
 
     La regla del simulador (traffic.mjs, `elevate`), que ya había corregido este error: «antes [las
@@ -352,6 +352,8 @@ def bridge_structures(busway):
                     rc.append(rc[-1] + math.hypot(bx - ax, by - ay))
                 pieces.append({'pts': rd, 'z': [H * smooth01(1 - s / R) for s in rc], 'w': it['w']})
     log(f'puentes: {len(items)} tramos ({filled} huecos cerrados); rampas dentro en {inside}, fuera en {outside}')
+    if roads:
+        pieces += road_companions(pieces, roads)
     out = []
     for pc in pieces:
         pts = pc['pts']
@@ -364,7 +366,133 @@ def bridge_structures(busway):
             X, Y = round(pts[k][0] / KX * E6), round(pts[k][1] / KY * E6)
             enc.extend((X - px, Y - py))
             px, py = X, Y
-        out.append({'w': round(pc['w'], 1), 'z': [round(pc['z'][k], 2) for k in keep], 'd': enc})
+        o = {'w': round(pc['w'], 1), 'z': [round(pc['z'][k], 2) for k in keep], 'd': enc}
+        if pc.get('k'):
+            o['k'] = pc['k']
+        out.append(o)
+    return out
+
+
+ROAD_LANE_M = 3.4  # ancho de un carril de la vía de carros
+ROAD_EDGE_M = 1.0  # bordes y barrera
+COMPANION_GAP_M = 6.0  # a lo sumo, entre el borde del tablero de la troncal y el de la vía
+
+
+def road_companions(pieces, roads):
+    """Puentes de la vía de carros que son la misma estructura que el de la troncal (H7).
+
+    En la Calle 80, la NQS, la Calle 6 o la Autopista Norte el carril de TransMilenio va en el mismo
+    puente que los carriles mixtos: dibujar solo el de la troncal dejaba una franja angosta en el aire.
+    Un puente vial de OSM (data/curated/road_bridges.json) va con la troncal si corre a su lado, en su
+    sentido (|cos| ≥ 0,95) y con a lo sumo 6 m entre los bordes de los dos tableros, en al menos el 60 %
+    de su largo. Entonces se dibuja entero:
+
+    - a la altura del tablero de la troncal en cada punto (sube y baja con sus rampas);
+    - de borde a borde: el interior contra el tablero de la troncal (el hueco entre los dos se cierra) y
+      el exterior donde va la vía (ancho por carriles, 3,4 m cada uno, más 1 m de bordes);
+    - el tramo continuo que acompaña al de la troncal y, más allá del puente de OSM (la vía sigue en
+      terraplén), junto a las rampas de la troncal hasta el suelo; si no baja, un estribo.
+
+    Las barandas de los dos tableros quedan juntas: la barrera entre el carril exclusivo y los mixtos.
+    """
+    G = 50
+    grid = defaultdict(list)
+    for pi, pc in enumerate(pieces):
+        P, Z = pc['pts'], pc['z']
+        for j in range(1, len(P)):
+            if Z[j - 1] < 0.5 and Z[j] < 0.5:
+                continue
+            (ax, ay), (bx, by) = P[j - 1], P[j]
+            for gx in range(int((min(ax, bx) - 30) // G), int((max(ax, bx) + 30) // G) + 1):
+                for gy in range(int((min(ay, by) - 30) // G), int((max(ay, by) + 30) // G) + 1):
+                    grid[(gx, gy)].append((pi, j))
+
+    def near(p, h):
+        best = None
+        for pi, j in grid.get((int(p[0] // G), int(p[1] // G)), ()):
+            P, Z = pieces[pi]['pts'], pieces[pi]['z']
+            (ax, ay), (bx, by) = P[j - 1], P[j]
+            dx, dy = bx - ax, by - ay
+            l2 = dx * dx + dy * dy
+            if l2 < 1e-6 or abs((dx * h[0] + dy * h[1]) / math.sqrt(l2)) < 0.95:
+                continue
+            f = max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / l2))
+            qx, qy = ax + f * dx, ay + f * dy
+            d = math.hypot(p[0] - qx, p[1] - qy)
+            if d <= 30 and (best is None or d < best[0]):
+                best = (d, (qx, qy), Z[j - 1] + (Z[j] - Z[j - 1]) * f, pieces[pi]['w'])
+        return best
+
+    out, names = [], Counter()
+    for r in roads:
+        P = densify([xy(lo, la) for lo, la in r['points']], 4.0)
+        if len(P) < 3:
+            continue
+        W = r['lanes'] * ROAD_LANE_M + ROAD_EDGE_M
+        hits = []
+        for k, p in enumerate(P):
+            a, b = P[max(0, k - 1)], P[min(len(P) - 1, k + 1)]
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            l = math.hypot(dx, dy) or 1
+            x = near(p, (dx / l, dy / l))
+            # Al lado (no encima: eso sería el mismo carril) y con poco hueco entre los bordes.
+            ok = x and x[0] >= x[3] / 2 + 1.5 and x[0] - W / 2 - x[3] / 2 <= COMPANION_GAP_M
+            hits.append(x if ok else None)
+        if sum(1 for x in hits if x) < 0.6 * len(P):
+            continue
+        # El tramo continuo más largo que acompaña al de la troncal.
+        best, cur = (0, 0), None
+        for k, x in enumerate(hits + [None]):
+            if x and cur is None:
+                cur = k
+            elif not x and cur is not None:
+                if k - cur > best[1] - best[0]:
+                    best = (cur, k)
+                cur = None
+        run = list(range(*best))
+        if len(run) < 3:
+            continue
+        # Ancho: del borde del tablero de la troncal al borde exterior de la vía (mediana del tramo).
+        wt = hits[run[0]][3]
+        outer = sorted(hits[k][0] + W / 2 for k in run)[len(run) // 2]
+        Wc = min(20.0, outer - wt / 2)
+        if Wc < 3:
+            continue
+        off = wt / 2 + Wc / 2
+        pts, zs = [], []
+        for k in run:
+            d, (qx, qy), z, _ = hits[k]
+            ux, uy = (P[k][0] - qx) / d, (P[k][1] - qy) / d
+            pts.append((qx + ux * off, qy + uy * off))
+            zs.append(z)
+
+        def extend(p, prev, d_end):
+            # Más allá del puente de OSM la vía sigue en terraplén junto a la rampa de la troncal: se
+            # prolonga en línea recta, al lado del tablero de la troncal y a su altura, hasta el suelo
+            # (o 150 m como mucho).
+            hx, hy = p[0] - prev[0], p[1] - prev[1]
+            l = math.hypot(hx, hy) or 1
+            hx, hy = hx / l, hy / l
+            more, cur = [], p
+            for _ in range(int(150 // 4)):
+                cur = (cur[0] + hx * 4, cur[1] + hy * 4)
+                x = near(cur, (hx, hy))
+                # Se corta si la troncal se aparta de la recta (una rampa que entra a la estación): la vía
+                # ya no va al lado y el tablero se torcía en cuña.
+                if not x or x[2] < 0.3 or abs(x[0] - d_end) > 1.5:
+                    break
+                (qx, qy) = x[1]
+                ux, uy = (cur[0] - qx) / x[0], (cur[1] - qy) / x[0]
+                more.append(((qx + ux * off, qy + uy * off), x[2]))
+            return more
+
+        head = extend(P[run[0]], P[run[1]], hits[run[0]][0])[::-1]
+        tail = extend(P[run[-1]], P[run[-2]], hits[run[-1]][0])
+        pts = [q for q, _ in head] + pts + [q for q, _ in tail]
+        zs = [z for _, z in head] + zs + [z for _, z in tail]
+        out.append({'pts': pts, 'z': zs, 'w': Wc, 'k': 'via'})
+        names[r.get('name') or str(r['id'])] += 1
+    log(f'puentes viales con la troncal: {len(out)} ({", ".join(f"{n} {c}" for n, c in names.most_common())})')
     return out
 
 
@@ -1209,7 +1337,15 @@ def main():
         write('lanes.json', {'v': 1, 'hash': digest, 'scale': E6, 'license': busway.get('license'), 'lanes': lanes_out})
     if busway:
         # Puentes de la troncal para el 3D (estructura y altura de los buses): solo con la vista 3D.
-        pieces = bridge_structures(busway)
+        rb_p = ROOT / 'data' / 'curated' / 'road_bridges.json'
+        roads = json.loads(rb_p.read_text())['ways'] if rb_p.exists() else []
+        # Excepciones: puentes viales que van aparte aunque corran junto al de la troncal.
+        so_p = ROOT / 'data' / 'curated' / 'structure_overrides.json'
+        apart = {i for e in (json.loads(so_p.read_text()).get('puentes_viales_aparte', []) if so_p.exists() else []) for i in e['osm']}
+        if apart:
+            log(f'puentes viales aparte (curado): {len(apart)}')
+        roads = [r for r in roads if r['id'] not in apart]
+        pieces = bridge_structures(busway, roads)
         # Un tramo elevado no pasa sobre un andén (el error de la Calle 6 que el simulador ya había
         # corregido): se mide y, si pasa, va a la revisión.
         over = Counter()

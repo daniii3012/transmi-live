@@ -1,0 +1,10 @@
+{
+  "nota": "Excepciones a la regla de tools/build_data.py (road_companions): puentes viales de OSM que corren junto al de la troncal pero son una estructura aparte; ahí se dibuja solo el puente de TransMilenio.",
+  "puentes_viales_aparte": [
+    {
+      "lugar": "Glorieta de la Calle 6 con NQS (Av. Carrera 30)",
+      "osm": [77326621, 77326622],
+      "motivo": "El puente de TransMilenio va separado de los carriles mixtos (revisión del 05/11/2026). Juntarlos cruzaba los tableros de la glorieta."
+    }
+  ]
+}

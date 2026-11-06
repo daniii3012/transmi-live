@@ -110,15 +110,17 @@ in vec4 v_color;
 out vec4 frag;
 void main() { frag = vec4(v_color.rgb * v_color.a, v_color.a); }`;
 
-export interface Piece { w: number; z: number[]; c: Float64Array }
+export interface Piece { w: number; z: number[]; c: Float64Array; k?: string }
 
 /**
- * Puentes de la troncal. En los cruces varias piezas se encuentran (la glorieta de la Calle 6 y sus
+ * Puentes de la troncal y, donde van en la misma estructura, los de la vía de carros (`k: 'via'`,
+ * tools/build_data.py). En los cruces varias piezas se encuentran (la glorieta de la Calle 6 y sus
  * accesos): la baranda de una pieza que cae dentro del tablero de otra a la misma altura no se dibuja
  * (cruzaba sobre el tablero vecino), y cada pieza va unos centímetros desfasada en altura para que dos
- * tableros que se superponen no parpadeen.
+ * tableros que se superponen no parpadeen. Los viales van translúcidos y sin cara de abajo: el énfasis
+ * queda en el de la troncal, y su baranda (la barrera con los carriles mixtos) no la tapa un vial.
  */
-export function buildBridges(pieces: Piece[], solid: Mesh) {
+export function buildBridges(pieces: Piece[], solid: Mesh, glass: Mesh) {
   // Índice de los ejes de todas las piezas (metros), para saber si un borde cae sobre otro tablero.
   const G = 40;
   const grid = new Map<string, number[]>();
@@ -147,7 +149,7 @@ export function buildBridges(pieces: Piece[], solid: Mesh) {
     if (!a) return false;
     for (let i = 0; i < a.length; i += 2) {
       const pi = a[i], j = a[i + 1];
-      if (pi === self) continue;
+      if (pi === self || (pieces[pi].k === 'via' && pieces[self].k !== 'via')) continue;
       const P = geo[pi], pc = pieces[pi];
       const [ax, ay] = P[j - 1], [bx, by] = P[j];
       const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1e-9;
@@ -162,6 +164,9 @@ export function buildBridges(pieces: Piece[], solid: Mesh) {
     const P = geo[pi];
     const n = P.length;
     if (n < 2) return;
+    const via = pc.k === 'via';
+    const mesh = via ? glass : solid;
+    const TOP = via ? M.ViaTop : M.DeckTop, SIDE = via ? M.ViaSide : M.DeckSide, RAIL = via ? M.ViaSide : M.Parapet, PIER = via ? M.ViaSide : M.Pier;
     const bias = (pi % 3) * 0.03;
     const Z = pc.z.map((z) => (z > 0.05 ? z + bias : z));
     const hw = pc.w / 2;
@@ -172,6 +177,11 @@ export function buildBridges(pieces: Piece[], solid: Mesh) {
       return [-dy / l, dx / l];
     });
     const L = (j: number, o: number): P2 => [P[j][0] + N[j][0] * o, P[j][1] + N[j][1] * o];
+    // Estribo donde la pieza termina en alto sin que siga otro tablero (los puentes viales que van con la
+    // troncal terminan donde termina el puente de OSM; la vía sigue en terraplén).
+    for (const j of [0, n - 1]) {
+      if (Z[j] > 0.3 && !onOther(P[j][0], P[j][1], Z[j], pi)) mesh.wall(L(j, hw), L(j, -hw), 0, Z[j], SIDE);
+    }
     let since = PIER_STEP / 2;
     for (let j = 1; j < n; j++) {
       const za = Z[j - 1], zb = Z[j];
@@ -179,22 +189,22 @@ export function buildBridges(pieces: Piece[], solid: Mesh) {
       const al = L(j - 1, hw), bl = L(j, hw), ar = L(j - 1, -hw), br = L(j, -hw);
       const bot = (z: number) => Math.max(0, z - DECK);
       // Tablero: cara superior y la de abajo.
-      solid.quad([ar[0], ar[1], za], [br[0], br[1], zb], [bl[0], bl[1], zb], [al[0], al[1], za], M.DeckTop);
-      solid.quad([al[0], al[1], bot(za)], [bl[0], bl[1], bot(zb)], [br[0], br[1], bot(zb)], [ar[0], ar[1], bot(za)], M.DeckSide);
+      mesh.quad([ar[0], ar[1], za], [br[0], br[1], zb], [bl[0], bl[1], zb], [al[0], al[1], za], TOP);
+      if (!via) solid.quad([al[0], al[1], bot(za)], [bl[0], bl[1], bot(zb)], [br[0], br[1], bot(zb)], [ar[0], ar[1], bot(za)], M.DeckSide);
       const zm = (za + zb) / 2;
       const leftFree = !onOther((al[0] + bl[0]) / 2, (al[1] + bl[1]) / 2, zm, pi);
       const rightFree = !onOther((ar[0] + br[0]) / 2, (ar[1] + br[1]) / 2, zm, pi);
       const ail = L(j - 1, hw - PARAPET_T), bil = L(j, hw - PARAPET_T), air = L(j - 1, -hw + PARAPET_T), bir = L(j, -hw + PARAPET_T);
       // Costado y baranda: solo donde el borde no cae sobre otro tablero.
       if (leftFree) {
-        solid.wall(bl, al, bot(zb), zb + PARAPET, M.DeckSide, bot(za), za + PARAPET);
-        solid.wall(ail, bil, za, za + PARAPET, M.Parapet, zb, zb + PARAPET);
-        solid.quad([ail[0], ail[1], za + PARAPET], [bil[0], bil[1], zb + PARAPET], [bl[0], bl[1], zb + PARAPET], [al[0], al[1], za + PARAPET], M.Parapet);
+        mesh.wall(bl, al, bot(zb), zb + PARAPET, SIDE, bot(za), za + PARAPET);
+        if (!via) solid.wall(ail, bil, za, za + PARAPET, M.Parapet, zb, zb + PARAPET);
+        mesh.quad([ail[0], ail[1], za + PARAPET], [bil[0], bil[1], zb + PARAPET], [bl[0], bl[1], zb + PARAPET], [al[0], al[1], za + PARAPET], RAIL);
       }
       if (rightFree) {
-        solid.wall(ar, br, bot(za), za + PARAPET, M.DeckSide, bot(zb), zb + PARAPET);
-        solid.wall(bir, air, zb, zb + PARAPET, M.Parapet, za, za + PARAPET);
-        solid.quad([ar[0], ar[1], za + PARAPET], [br[0], br[1], zb + PARAPET], [bir[0], bir[1], zb + PARAPET], [air[0], air[1], za + PARAPET], M.Parapet);
+        mesh.wall(ar, br, bot(za), za + PARAPET, SIDE, bot(zb), zb + PARAPET);
+        if (!via) solid.wall(bir, air, zb, zb + PARAPET, M.Parapet, za, za + PARAPET);
+        mesh.quad([ar[0], ar[1], za + PARAPET], [br[0], br[1], zb + PARAPET], [bir[0], bir[1], zb + PARAPET], [air[0], air[1], za + PARAPET], RAIL);
       }
       // Pilas bajo el tablero, cada ~24 m donde ya va alto.
       const seg = Math.hypot(P[j][0] - P[j - 1][0], P[j][1] - P[j - 1][1]);
@@ -202,7 +212,7 @@ export function buildBridges(pieces: Piece[], solid: Mesh) {
       if (since >= PIER_STEP && zb > 2.5) {
         since = 0;
         const u: P2 = [N[j][1], -N[j][0]];
-        solid.box(P[j], u, 0.6, Math.min(hw * 0.7, 1.6), 0, zb - DECK, M.Pier, M.Pier);
+        mesh.box(P[j], u, 0.6, Math.min(hw * 0.7, 1.6), 0, zb - DECK, PIER, PIER);
       }
     }
   });
