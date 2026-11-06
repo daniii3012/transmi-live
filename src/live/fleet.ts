@@ -154,7 +154,7 @@ export class Fleet {
   /** Estelas para toda la flota (si no, solo la ruta en foco y el seleccionado). */
   trails = false;
   /** Buffer intercalado para la capa WebGL. */
-  static readonly STRIDE = 14;
+  static readonly STRIDE = 15;
   /** Altura (m) sobre los puentes de la troncal, con la vista 3D (ver map/structures.ts). */
   elevation: ((x: number, y: number, hx: number, hy: number) => number) | null = null;
   /** Calcular el rumbo del tramo trasero (cuerpos 3D que se doblan en las curvas). */
@@ -509,7 +509,7 @@ export class Fleet {
 
   /**
    * Llena el buffer de la capa: [mx, my, hx, hy, r, g, b, alfa, tamaño, banderas, onda, rumbo trasero
-   * (2), altura] por bus, con los
+   * (2), altura, pendiente] por bus, con los
    * atenuados primero y el seleccionado al final (se dibuja encima). Devuelve cuántos hay.
    * Banderas: 1 atenuado, 2 lectura vieja, 4 seleccionado, 8 bajo el cursor, 16 estela, 32 de la ruta en foco.
    */
@@ -544,7 +544,16 @@ export class Fleet {
       out[o + 10] = b.pingAt && flags & (4 | 32 | 64) && ping >= 0 && ping < 1.6 ? ping / 1.6 : -1;
       // Rumbo del tramo trasero: el recorrido entre 0,53 y 0,14 del largo por detrás del centro.
       out[o + 11] = b.hx; out[o + 12] = -b.hy;
-      out[o + 13] = this.elevation && b.onPath ? this.elevation(b.x, b.y, b.hx, b.hy) : 0;
+      // Altura sobre un puente y pendiente (de 6 m atrás a 6 m adelante): el cuerpo sube inclinado.
+      if (this.elevation && b.onPath) {
+        const E = this.elevation;
+        out[o + 13] = E(b.x, b.y, b.hx, b.hy);
+        const g = (E(b.x + b.hx * 6, b.y + b.hy * 6, b.hx, b.hy) - E(b.x - b.hx * 6, b.y - b.hy * 6, b.hx, b.hy)) / 12;
+        out[o + 14] = Math.max(-0.15, Math.min(0.15, g));
+      } else {
+        out[o + 13] = 0;
+        out[o + 14] = 0;
+      }
       if (this.rearDirs && b.onPath && b.path && b.path.size > 1) {
         const L = 18 * out[o + 8];
         const a = b.path.pointAt(b.s - 0.53 * L, this.rp0), c = b.path.pointAt(b.s - 0.14 * L, this.rp1);

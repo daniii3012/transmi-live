@@ -175,13 +175,58 @@ export function buildStations(net: Network, solid: Mesh, glass: Mesh) {
 
 export interface Piece { w: number; z: number[]; c: Float64Array }
 
+/**
+ * Puentes de la troncal. En los cruces varias piezas se encuentran (la glorieta de la Calle 6 y sus
+ * accesos): la baranda de una pieza que cae dentro del tablero de otra a la misma altura no se dibuja
+ * (cruzaba sobre el tablero vecino), y cada pieza va unos centímetros desfasada en altura para que dos
+ * tableros que se superponen no parpadeen.
+ */
 export function buildBridges(pieces: Piece[], solid: Mesh) {
-  for (const pc of pieces) {
+  // Índice de los ejes de todas las piezas (metros), para saber si un borde cae sobre otro tablero.
+  const G = 40;
+  const grid = new Map<string, number[]>();
+  const geo = pieces.map((pc) => {
     const n = pc.c.length / 2;
-    if (n < 2) continue;
     const P: P2[] = [];
     for (let i = 0; i < n; i++) P.push([pc.c[2 * i] * KX, pc.c[2 * i + 1] * KY]);
-    const Z = pc.z;
+    return P;
+  });
+  geo.forEach((P, pi) => {
+    for (let j = 1; j < P.length; j++) {
+      const [ax, ay] = P[j - 1], [bx, by] = P[j];
+      for (let gx = Math.floor(Math.min(ax, bx) / G) - 1; gx <= Math.floor(Math.max(ax, bx) / G) + 1; gx++) {
+        for (let gy = Math.floor(Math.min(ay, by) / G) - 1; gy <= Math.floor(Math.max(ay, by) / G) + 1; gy++) {
+          const k = `${gx}:${gy}`;
+          let a = grid.get(k);
+          if (!a) grid.set(k, (a = []));
+          a.push(pi, j);
+        }
+      }
+    }
+  });
+  /** ¿El punto (x, y, z) cae sobre el tablero de otra pieza a la misma altura? */
+  const onOther = (x: number, y: number, z: number, self: number) => {
+    const a = grid.get(`${Math.floor(x / G)}:${Math.floor(y / G)}`);
+    if (!a) return false;
+    for (let i = 0; i < a.length; i += 2) {
+      const pi = a[i], j = a[i + 1];
+      if (pi === self) continue;
+      const P = geo[pi], pc = pieces[pi];
+      const [ax, ay] = P[j - 1], [bx, by] = P[j];
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1e-9;
+      const f = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2));
+      if (Math.hypot(x - ax - f * dx, y - ay - f * dy) > pc.w / 2 - 0.2) continue;
+      const zo = pc.z[j - 1] + (pc.z[j] - pc.z[j - 1]) * f;
+      if (Math.abs(zo - z) < 1.2) return true;
+    }
+    return false;
+  };
+  pieces.forEach((pc, pi) => {
+    const P = geo[pi];
+    const n = P.length;
+    if (n < 2) return;
+    const bias = (pi % 3) * 0.03;
+    const Z = pc.z.map((z) => (z > 0.05 ? z + bias : z));
     const hw = pc.w / 2;
     // Normales por vértice (promedio de los tramos vecinos) para que las juntas no se abran.
     const N: P2[] = P.map((p, j) => {
@@ -199,15 +244,21 @@ export function buildBridges(pieces: Piece[], solid: Mesh) {
       // Tablero: cara superior y la de abajo.
       solid.quad([ar[0], ar[1], za], [br[0], br[1], zb], [bl[0], bl[1], zb], [al[0], al[1], za], M.DeckTop);
       solid.quad([al[0], al[1], bot(za)], [bl[0], bl[1], bot(zb)], [br[0], br[1], bot(zb)], [ar[0], ar[1], bot(za)], M.DeckSide);
-      // Costados del tablero con la baranda (cara de afuera hasta lo alto de la baranda).
-      solid.wall(bl, al, bot(zb), zb + PARAPET, M.DeckSide, bot(za), za + PARAPET);
-      solid.wall(ar, br, bot(za), za + PARAPET, M.DeckSide, bot(zb), zb + PARAPET);
-      // Cara de adentro y borde de la baranda.
+      const zm = (za + zb) / 2;
+      const leftFree = !onOther((al[0] + bl[0]) / 2, (al[1] + bl[1]) / 2, zm, pi);
+      const rightFree = !onOther((ar[0] + br[0]) / 2, (ar[1] + br[1]) / 2, zm, pi);
       const ail = L(j - 1, hw - PARAPET_T), bil = L(j, hw - PARAPET_T), air = L(j - 1, -hw + PARAPET_T), bir = L(j, -hw + PARAPET_T);
-      solid.wall(ail, bil, za, za + PARAPET, M.Parapet, zb, zb + PARAPET);
-      solid.wall(bir, air, zb, zb + PARAPET, M.Parapet, za, za + PARAPET);
-      solid.quad([ail[0], ail[1], za + PARAPET], [bil[0], bil[1], zb + PARAPET], [bl[0], bl[1], zb + PARAPET], [al[0], al[1], za + PARAPET], M.Parapet);
-      solid.quad([ar[0], ar[1], za + PARAPET], [br[0], br[1], zb + PARAPET], [bir[0], bir[1], zb + PARAPET], [air[0], air[1], za + PARAPET], M.Parapet);
+      // Costado y baranda: solo donde el borde no cae sobre otro tablero.
+      if (leftFree) {
+        solid.wall(bl, al, bot(zb), zb + PARAPET, M.DeckSide, bot(za), za + PARAPET);
+        solid.wall(ail, bil, za, za + PARAPET, M.Parapet, zb, zb + PARAPET);
+        solid.quad([ail[0], ail[1], za + PARAPET], [bil[0], bil[1], zb + PARAPET], [bl[0], bl[1], zb + PARAPET], [al[0], al[1], za + PARAPET], M.Parapet);
+      }
+      if (rightFree) {
+        solid.wall(ar, br, bot(za), za + PARAPET, M.DeckSide, bot(zb), zb + PARAPET);
+        solid.wall(bir, air, zb, zb + PARAPET, M.Parapet, za, za + PARAPET);
+        solid.quad([ar[0], ar[1], za + PARAPET], [br[0], br[1], zb + PARAPET], [bir[0], bir[1], zb + PARAPET], [air[0], air[1], za + PARAPET], M.Parapet);
+      }
       // Pilas bajo el tablero, cada ~24 m donde ya va alto.
       const seg = Math.hypot(P[j][0] - P[j - 1][0], P[j][1] - P[j - 1][1]);
       since += seg;
@@ -217,7 +268,7 @@ export function buildBridges(pieces: Piece[], solid: Mesh) {
         solid.box(P[j], u, 0.6, Math.min(hw * 0.7, 1.6), 0, zb - DECK, M.Pier, M.Pier);
       }
     }
-  }
+  });
 }
 
 export class StructuresLayer implements CustomLayerInterface {

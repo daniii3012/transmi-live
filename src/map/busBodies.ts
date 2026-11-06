@@ -27,6 +27,7 @@ layout(location=6) in float a_size;
 layout(location=7) in float a_flags;
 layout(location=8) in vec2 a_dir2;   // rumbo del tramo trasero
 layout(location=9) in float a_elev;   // altura sobre un puente (m)
+layout(location=10) in float a_grade; // pendiente (m por m, hacia el frente)
 uniform mat4 u_matrix;
 uniform float u_j1;    // centro del primer fuelle (x del modelo, m); −1000 si es rígido
 uniform float u_j2;    // centro del segundo fuelle (biarticulado); −1000 si no hay
@@ -84,7 +85,8 @@ void main() {
   }
   vec2 side = vec2(-d.y, d.x);
   vec2 w = a_pos + (base + d * x + side * p.y) * u_mpm;
-  gl_Position = u_matrix * vec4(w, (p.z + a_elev) * u_mpm, 1.0);
+  // En una rampa el cuerpo se inclina: cada punto sube según su posición a lo largo del bus.
+  gl_Position = u_matrix * vec4(w, (p.z + a_elev + x * a_grade) * u_mpm, 1.0);
   vec3 n = normalize(vec3(d * a_vnorm.x + side * a_vnorm.y, a_vnorm.z));
   vec3 L = normalize(vec3(-0.35, -0.45, 0.82));
   v_shade = 0.6 + 0.4 * max(dot(n, L), 0.0);
@@ -210,7 +212,7 @@ export class BusBodies {
         g.vertexAttribPointer(loc, size, g.FLOAT, false, S, offset * 4);
         g.vertexAttribDivisor(loc, 1);
       };
-      attr(3, 2, 0); attr(4, 2, 2); attr(5, 4, 4); attr(6, 1, 8); attr(7, 1, 9); attr(8, 2, 11); attr(9, 1, 13);
+      attr(3, 2, 0); attr(4, 2, 2); attr(5, 4, 4); attr(6, 1, 8); attr(7, 1, 9); attr(8, 2, 11); attr(9, 1, 13); attr(10, 1, 14);
       g.bindVertexArray(null);
       this.vaos[k] = vao;
       this.counts[k] = data.length / 7;
