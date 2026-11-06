@@ -278,15 +278,24 @@ class Depth {
     }
     return z;
   }
-  /** Cota de una estación: la de su centro, si queda dentro de un deprimido a lo largo de sus andenes. */
+  /**
+   * Cota de una estación bajo tierra: solo si cada andén queda dentro del deprimido a todo su largo (cinco
+   * puntos por su eje, la cota del menos hondo). Una estación a nivel junto a un paso deprimido (Bicentenario,
+   * junto al de dos niveles de la Av. Comuneros) no baja.
+   */
   station(rings: P2[][]): number {
     if (!this.segs.length || !rings.length) return 0;
-    let best = 0;
+    let deepest = 0;
     for (const r of rings) {
       const f = frame(r);
-      best = Math.min(best, this.at(f.c, f.u));
+      let shallow = -Infinity;
+      for (const t of [-0.45, -0.22, 0, 0.22, 0.45]) {
+        const p: P2 = [f.c[0] + f.u[0] * f.L * t, f.c[1] + f.u[1] * f.L * t];
+        shallow = Math.max(shallow, this.at(p, f.u, 14));
+      }
+      deepest = Math.min(deepest, shallow);
     }
-    return best;
+    return deepest;
   }
 }
 

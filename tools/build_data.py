@@ -1291,8 +1291,32 @@ def main():
         if fp:
             # El punto del GTFS a veces queda lejos de la plataforma (Calle 57: ~250 m al sur); la huella
             # sale de los vagones y de la calzada, así que el nombre y el punto van a su centro.
-            pts = [p for ring in (fp['fp'] or fp.get('roof') or []) for p in ring[:-1]]
+            rings_ll = fp['fp'] or fp.get('roof') or []
+            pts = [p for ring in rings_ll for p in ring[:-1]]
             clon, clat = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+            # Una estación partida (Calle 85: dos mitades; Ricaurte: NQS y Calle 13) tiene el centro en la
+            # manzana: el nombre va al punto de andén más cercano a ese centro.
+            cx, cy = xy(clon, clat)
+            rings_m = [[xy(lo, la) for lo, la in r] for r in rings_ll]
+            def in_ring(q, r):
+                c = False
+                for i in range(len(r)):
+                    (xi, yi), (xj, yj) = r[i], r[i - 1]
+                    if (yi > q[1]) != (yj > q[1]) and q[0] < (xj - xi) * (q[1] - yi) / (yj - yi) + xi:
+                        c = not c
+                return c
+            if not any(in_ring((cx, cy), r) for r in rings_m):
+                best = None
+                for r in rings_m:
+                    for (ax, ay), (bx, by) in zip(r, r[1:]):
+                        dx, dy = bx - ax, by - ay
+                        f = max(0.0, min(1.0, ((cx - ax) * dx + (cy - ay) * dy) / (dx * dx + dy * dy or 1e-9)))
+                        q = (ax + f * dx, ay + f * dy)
+                        d = math.hypot(q[0] - cx, q[1] - cy)
+                        if best is None or d < best[0]:
+                            best = (d, q)
+                if best and best[0] > 15:
+                    clon, clat = best[1][0] / KX, best[1][1] / KY
             shifts.append((math.hypot((clon - lon) * KX, (clat - lat) * KY), name))
             lon, lat = clon, clat
         stations.append({
