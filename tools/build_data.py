@@ -244,6 +244,44 @@ def bridge_structures(busway, roads=None):
     return out
 
 
+def drop_zones(pieces, zones):
+    """Quita las piezas (ya codificadas) de las zonas curadas sin 3D (`zonas_sin_3d` de
+    structure_overrides.json): las que tienen un vértice en el círculo y, por sus empalmes en alto
+    (extremos a ≤ 2 m con z > 0,3), el resto de la misma estructura (rampas que siguen fuera del
+    círculo y quedarían colgando). Devuelve las piezas que quedan y cuántas se quitaron por zona."""
+    def verts(pc):
+        X = Y = 0
+        out = []
+        for k in range(0, len(pc['d']), 2):
+            X += pc['d'][k]
+            Y += pc['d'][k + 1]
+            out.append((X / E6 * KX, Y / E6 * KY))
+        return out
+    V = [verts(pc) for pc in pieces]
+    gone, count = set(), {}
+    for zn in zones:
+        cx, cy = xy(*zn['centro'])
+        hit = {i for i, vs in enumerate(V) if any(math.hypot(x - cx, y - cy) <= zn['radio_m'] for x, y in vs)}
+        todo = list(hit)
+        while todo:
+            i = todo.pop()
+            ends_i = [(V[i][0], pieces[i]['z'][0]), (V[i][-1], pieces[i]['z'][-1])]
+            for j, vs in enumerate(V):
+                if j in hit:
+                    continue
+                for (p, zi) in ends_i:
+                    for q, zj in ((vs[0], pieces[j]['z'][0]), (vs[-1], pieces[j]['z'][-1])):
+                        if math.hypot(p[0] - q[0], p[1] - q[1]) <= 2 and max(zi, zj) > 0.3:
+                            hit.add(j)
+                            todo.append(j)
+                            break
+                    if j in hit:
+                        break
+        count[zn['lugar']] = len(hit - gone)
+        gone |= hit
+    return [pc for i, pc in enumerate(pieces) if i not in gone], count
+
+
 def _elevate(busway, sign):
     """Tramos elevados (`sign` = 1) o deprimidos (−1) de la calzada exclusiva, con su altura por vértice.
 
@@ -1453,11 +1491,16 @@ def main():
         roads = json.loads(rb_p.read_text())['ways'] if rb_p.exists() else []
         # Excepciones: puentes viales que van aparte aunque corran junto al de la troncal.
         so_p = ROOT / 'data' / 'curated' / 'structure_overrides.json'
-        apart = {i for e in (json.loads(so_p.read_text()).get('puentes_viales_aparte', []) if so_p.exists() else []) for i in e['osm']}
+        so = json.loads(so_p.read_text()) if so_p.exists() else {}
+        apart = {i for e in so.get('puentes_viales_aparte', []) for i in e['osm']}
         if apart:
             log(f'puentes viales aparte (curado): {len(apart)}')
         roads = [r for r in roads if r['id'] not in apart]
         pieces = bridge_structures(busway, roads)
+        # Zonas sin 3D (curado): ni puentes ni deprimidos de la troncal; los buses van a nivel.
+        if so.get('zonas_sin_3d'):
+            pieces, dropped = drop_zones(pieces, so['zonas_sin_3d'])
+            log('zonas sin 3D (curado): ' + ', '.join(f'{k} ({n} piezas)' for k, n in dropped.items()))
         # Un tramo elevado no pasa sobre un andén (el error de la Calle 6 que el simulador ya había
         # corregido): se mide y, si pasa, va a la revisión.
         over = Counter()

@@ -1,10 +1,24 @@
 {
-  "nota": "Excepciones a la regla de tools/build_data.py (road_companions): puentes viales de OSM que corren junto al de la troncal pero son una estructura aparte; ahí se dibuja solo el puente de TransMilenio.",
+  "nota": "Excepciones a las reglas del 3D de tools/build_data.py: puentes viales de OSM que corren junto al de la troncal pero son una estructura aparte (ahí se dibuja solo el puente de TransMilenio), y zonas donde por ahora no se levanta ningún puente ni deprimido de la troncal (los buses van a nivel; estaciones y metro siguen en 3D).",
   "puentes_viales_aparte": [
     {
       "lugar": "Glorieta de la Calle 6 con NQS (Av. Carrera 30)",
-      "osm": [77326621, 77326622],
+      "osm": [
+        77326621,
+        77326622
+      ],
       "motivo": "El puente de TransMilenio va separado de los carriles mixtos (revisión del 05/11/2026). Juntarlos cruzaba los tableros de la glorieta."
+    }
+  ],
+  "zonas_sin_3d": [
+    {
+      "lugar": "Intersección de la Av. Caracas con la Calle 26",
+      "centro": [
+        -74.0728,
+        4.61533
+      ],
+      "radio_m": 120,
+      "motivo": "Los puentes y la conexión de OSM no casan entre sí ni con el viaducto del metro (tableros cruzados y un empalme de 0,95 a 5,5 m). Retirados por ahora (revisión del 06/11/2026): quedan la estación Calle 26 – Atrio y el metro."
     }
   ]
 }
