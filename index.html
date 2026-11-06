@@ -40,9 +40,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="TransMi Live" />
     <meta name="format-detection" content="telephone=no" />
-    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <!-- Ícono de la pantalla de inicio de iOS primero y sin favicon SVG: con un SVG entre los íconos, iOS
+         puede no tomar ninguno y poner la inicial del nombre (WebKit 256429). -->
+    <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png" />
     <link rel="icon" href="./icons/favicon-32.png" sizes="32x32" type="image/png" />
-    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
   </head>
   <body>
     <div id="app"></div>

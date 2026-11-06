@@ -24,7 +24,11 @@
   let dragY = $state<number | null>(null);
   let vh = $state(typeof window !== 'undefined' ? window.innerHeight : 800);
   const PEEK = 196;
-  const heights = $derived({ peek: PEEK, half: Math.round(vh * 0.5), full: vh - 64 });
+  // Margen de la barra de inicio del iPhone (`--safe-bottom`): en Safari vale 0 (abajo está la barra del
+  // navegador) y en la app instalada ~34 px. La hoja asomada lo suma a su altura; antes salía del
+  // contenido y el buscador quedaba recortado en la app instalada.
+  let sb = $state(0);
+  const heights = $derived({ peek: PEEK + sb, half: Math.round(vh * 0.5), full: vh - 64 });
   const height = $derived(dragY !== null ? dragY : heights[snap]);
 
   $effect(() => {
@@ -51,7 +55,7 @@
   function move(e: PointerEvent) {
     if (dragY === null) return;
     const h = start.h + (start.y - e.clientY);
-    dragY = Math.max(PEEK - 40, Math.min(heights.full, h));
+    dragY = Math.max(heights.peek - 40, Math.min(heights.full, h));
     samples.push({ y: e.clientY, t: performance.now() });
     if (samples.length > 5) samples.shift();
   }
@@ -70,9 +74,13 @@
   }
 
   onMount(() => {
-    const r = () => (vh = window.innerHeight);
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:var(--safe-bottom);visibility:hidden;pointer-events:none';
+    document.body.appendChild(probe);
+    const r = () => { vh = window.innerHeight; sb = probe.offsetHeight; };
+    r();
     addEventListener('resize', r);
-    return () => removeEventListener('resize', r);
+    return () => { removeEventListener('resize', r); probe.remove(); };
   });
 </script>
 
