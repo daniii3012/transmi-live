@@ -119,11 +119,18 @@ export function buildStations(net: Network, solid: Mesh, glass: Mesh, pieces: Pi
       // aristas de los triángulos).
       if (ri < 0) (open ? glass : solid).prism(grow(r, open ? 0.6 : ROOF_PAD), z, z + ROOF_T, M.Roof, M.Roof, !open);
     }
-    // Cubiertas de OSM: translúcidas sobre andenes abiertos (o en un portal); si no, opacas.
+    // Cubiertas de OSM: translúcidas sobre andenes abiertos (o en un portal); si no, opacas. Una cubierta
+    // sin andén modelado debajo (en Ricaurte, sobre un vagón que OSM no trae) no queda flotando: lleva su
+    // andén con paredes, un poco más angosto que ella.
     roofs.forEach((q, i) => {
       const big = portal || plats.some((p) => p.ri === i && p.open);
       const z = z0 + (big ? CANOPY_Z : ROOF_Z);
       (big ? glass : solid).prism(q, z, z + ROOF_T, M.Roof, M.Roof, !big);
+      if (!portal && !plats.some((p) => p.ri === i)) {
+        const r = grow(q, -ROOF_PAD);
+        solid.prism(r, z0, z0 + PLATFORM_H, M.PlatTop, M.PlatSide);
+        walls(r, solid, glass, z0);
+      }
     });
   }
 }
