@@ -1,10 +1,12 @@
 <script lang="ts">
   import Back from './Back.svelte';
   import { backup } from '../live/backup.svelte';
+  import { app } from '../app/store.svelte';
+  import { ctl } from '../app/instance';
   import { fmtHMS } from '../domain/time';
 
   /**
-   * Configuración. Por ahora, el respaldo por ruta: cada persona pone sus propias credenciales del
+   * Configuración: el movimiento de los buses entre lecturas (decisión 013) y el respaldo por ruta: cada persona pone sus propias credenciales del
    * servicio por ruta (appid y UUID del dispositivo, las mismas de la app móvil). Se guardan solo en
    * este navegador; el Worker las reenvía en cada consulta y no las guarda.
    */
@@ -44,6 +46,24 @@
     <div class="label">Ajustes</div>
     <h1>Configuración</h1>
   </header>
+
+  <section>
+    <div class="label">Movimiento de los buses</div>
+    <label class="check">
+      <input type="checkbox" checked={app.motion === 'continuo'} onchange={(e) => ctl?.setMotion(e.currentTarget.checked ? 'continuo' : 'directo')} aria-describedby="movimiento-nota" />
+      <span class="small">Movimiento continuo entre lecturas</span>
+    </label>
+    <p id="movimiento-nota" class="small faint">
+      {#if app.motion === 'continuo'}
+        Activado: cada bus avanza sin pausas por su recorrido entre una lectura y la siguiente, unos 40 s
+        detrás del dato más reciente.
+      {:else}
+        Desactivado: con cada lectura (cada ~20 s), el bus va en un instante a su última posición conocida
+        y espera ahí la siguiente.
+      {/if}
+      Las llegadas y la velocidad no cambian.
+    </p>
+  </section>
 
   <section>
     <div class="label">Respaldo por ruta</div>

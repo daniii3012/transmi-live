@@ -111,6 +111,10 @@ export class Controller {
     onSystemChange(() => { if (app.themePref === 'system') this.setTheme('system'); });
     this.applyLayers();
     this.setHidden(app.hidden);
+    // Movimiento entre lecturas (Configuración). Con «reducir movimiento» del sistema, el modo directo
+    // va de una vez, sin deslizamiento.
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) this.fleet.glide = 0;
+    this.fleet.setMotion(app.motion);
     if (loadPrefs().threeD) this.set3d(true, true);
     const alerts = async () => { if (!document.hidden) { const a = await fetchAlerts(apiBase()); if (a) { app.alerts = a; this.layers.setAlerts(a); } } };
     void alerts();
@@ -538,7 +542,15 @@ export class Controller {
   dimBuses?: BusLayer;
   speed?: import('../map/speedLayer').SpeedLayer;
 
-  /** Capas opcionales: rutas zonales, paraderos, metro L1, estelas de toda la flota. */
+  /** Movimiento de los buses entre lecturas: continuo (por defecto) o directo a la última lectura. */
+  setMotion(m: 'continuo' | 'directo') {
+    app.motion = m;
+    savePrefs({ motion: m });
+    this.fleet.setMotion(m);
+    this.map.triggerRepaint();
+  }
+
+    /** Capas opcionales: rutas zonales, paraderos, metro L1, estelas de toda la flota. */
   setLayer(key: keyof typeof app.layersOn, on: boolean) {
     app.layersOn = { ...app.layersOn, [key]: on };
     saveLayers(app.layersOn);

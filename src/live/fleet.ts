@@ -14,6 +14,13 @@ const EXTRA = 5000;
 const CATCH = 0.2;
 /** Puntos recientes que se guardan por bus para la curva (lecturas y nudos de anclaje). */
 const TRACK = 10;
+/**
+ * Movimiento entre lecturas (Configuración, decisión 013): `continuo` (por defecto) reproduce cada bus
+ * con retraso sobre una curva continua; `directo` lo lleva en `GLIDE` ms por su recorrido a la última
+ * lectura aceptada y lo deja ahí hasta la siguiente.
+ */
+export type Motion = 'continuo' | 'directo';
+export const GLIDE = 400;
 /** Más viejo que esto, el bus se atenúa; más que `DROP_AGE`, no se dibuja. */
 export const STALE_AGE = 180;
 export const DROP_AGE = 600;
@@ -54,6 +61,9 @@ export interface Bus {
    * siguiente la confirme; si no, era un error del GPS y se descarta. El retraso de reproducción
    * permite esperar sin que se note. */
   suspect: { s: number; at: number } | null;
+  /** Modo directo: desde dónde y cuándo empezó el deslizamiento a la última lectura. */
+  glideFrom: number;
+  glideAt: number;
   /** Último cuadro calculado y velocidad dibujada (m/s). */
   drawnAt: number;
   v: number;
@@ -182,8 +192,25 @@ export class Fleet {
    */
   lag = 40_000;
   private lagTarget = 40_000;
+  /** Movimiento entre lecturas (ver `Motion`) y duración del deslizamiento del modo directo (0 con
+   * «reducir movimiento» del sistema: va de una vez). */
+  motion: Motion = 'continuo';
+  glide = GLIDE;
   private delays: number[] = [];
   private gaps: number[] = [];
+
+  /**
+   * Cambia el movimiento. A `directo`: cada bus va de donde se ve a su última lectura. A `continuo`:
+   * vuelve una vez a la hora de reproducción (unos segundos atrás) y sigue sin pausas desde ahí.
+   */
+  setMotion(m: Motion, now = Date.now()) {
+    if (m === this.motion) return;
+    this.motion = m;
+    for (const b of this.buses.values()) {
+      if (m === 'directo') { b.glideFrom = b.s; b.glideAt = now; } else b.snap = true;
+    }
+    for (const f of this.listeners) f();
+  }
 
   /** Incorpora una instantánea. `now` en ms (reloj de pared). */
   ingest(d: VehiclesV1, now = Date.now()) {
@@ -255,7 +282,7 @@ export class Fleet {
       const fresh: Bus = {
         id, label: d.label[i], plate: d.plate[i], routeId, route, path: this.net.paths.get(routeId), sys: route?.sys, kind: busKind(d.label[i], route?.code, route?.sys),
         fixX: x, fixY: y, fixAt, age, stopId: d.stop[i], seq: d.seq[i], start: d.start[i],
-        onPath: false, offPath: Infinity, sFix: 0, tt: [], ts: [], tm: [], off: 0, offAt: now, snap: true, suspect: null, drawnAt: 0, v: 0, x0: x, y0: y, x1: x, y1: y, t0: now, t1: now,
+        onPath: false, offPath: Infinity, sFix: 0, tt: [], ts: [], tm: [], off: 0, offAt: now, snap: true, suspect: null, glideFrom: 0, glideAt: 0, drawnAt: 0, v: 0, x0: x, y0: y, x1: x, y1: y, t0: now, t1: now,
         speed: null, hist: [], bornAt: b ? b.bornAt : now, pingAt: 0, seed: seedOf(id), x, y, hx: 1, hy: 0, s: 0,
       };
       if (b) { fresh.x = b.x; fresh.y = b.y; fresh.hx = b.hx; fresh.hy = b.hy; }
@@ -277,7 +304,7 @@ export class Fleet {
   /** Ubica una lectura y programa el movimiento hasta ella. */
   private place(b: Bus, x: number, y: number, fixAt: number, now: number, first: boolean) {
     const path = b.path;
-    const end = now + this.interval;
+    const end = now + (this.motion === 'directo' ? this.glide : this.interval);
     if (path && path.size > 1) {
       const hit = path.nearest(x, y, first ? undefined : b.sFix, 250, 3500, MAX_OFF);
       if (hit && hit.d <= MAX_OFF) {
@@ -294,6 +321,9 @@ export class Fleet {
           if (!sus || Math.abs(hit.s - sus.s) > 300) { b.suspect = { s: hit.s, at: fixAt }; return; }
         }
         b.suspect = null;
+        // Modo directo: desde donde se ve hacia esta lectura.
+        b.glideFrom = b.s;
+        b.glideAt = now;
         const reset = !wasOn || odd;
         b.onPath = true;
         b.offPath = hit.d;
@@ -381,6 +411,19 @@ export class Fleet {
   }
 
   /**
+   * Modo directo: abscisa en `now` del deslizamiento hacia la última lectura (aceleración y frenado
+   * suaves, por el recorrido: no corta esquinas). Nunca hacia atrás: una lectura apenas detrás de lo
+   * dibujado es ruido del GPS.
+   */
+  directAt(b: Bus, now: number): number {
+    const end = b.ts.length ? b.ts[b.ts.length - 1] : b.sFix;
+    if (b.snap || this.glide <= 0) return end;
+    const u = Math.min(1, Math.max(0, (now - b.glideAt) / this.glide));
+    const e = u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2;
+    return b.glideFrom + Math.max(0, end - b.glideFrom) * e;
+  }
+
+  /**
    * Abscisa en la hora de reproducción `t`: curva cúbica monótona (Fritsch–Butland) por los puntos
    * recientes. Velocidad continua, nunca hacia atrás, sin pasarse de una lectura; después de la
    * última sigue con su velocidad y se detiene suavemente.
@@ -432,11 +475,13 @@ export class Fleet {
       // Fuera de la vista no se calcula (se pone al día cuando entra; su posición solo depende del tiempo).
       if (box && (b.fixX < box[0] || b.fixX > box[2] || b.fixY < box[1] || b.fixY > box[3]) && b.id !== this.selectedId) continue;
       if (b.onPath && b.path) {
-        const target = this.sAt(b, now);
-        // Adelante, se sigue la curva (con un suavizado de 150 ms que absorbe lecturas reiniciadas);
-        // atrás nunca: si la inercia lo llevó más lejos que la lectura nueva, espera ahí.
+        const direct = this.motion === 'directo';
+        const target = direct ? this.directAt(b, now) : this.sAt(b, now);
+        // Adelante, se sigue la curva (con un suavizado de 150 ms que absorbe lecturas reiniciadas; el
+        // deslizamiento del modo directo ya es suave); atrás nunca: si la inercia lo llevó más lejos que
+        // la lectura nueva, espera ahí.
         const fresh = b.snap || now - b.drawnAt > 500;
-        const s = fresh ? target : target >= b.s ? b.s + (target - b.s) * ks : b.s;
+        const s = fresh ? target : target >= b.s ? (direct ? target : b.s + (target - b.s) * ks) : b.s;
         b.v = fresh || now === b.drawnAt ? 0 : ((s - b.s) / (now - b.drawnAt)) * 1000;
         b.drawnAt = now;
         b.snap = false;

@@ -18,7 +18,7 @@ function loadLayers() {
   try { return { ...base, ...JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '{}') }; } catch { return base; }
 }
 const PREFS_KEY = 'transmi-live:preferencias:v1';
-export interface Prefs { hidden: SystemKey[]; threeD: boolean; camera?: { center: [number, number]; zoom: number; bearing: number; pitch: number; hash: string; at: number } }
+export interface Prefs { hidden: SystemKey[]; threeD: boolean; motion?: 'continuo' | 'directo'; camera?: { center: [number, number]; zoom: number; bearing: number; pitch: number; hash: string; at: number } }
 export function loadPrefs(): Prefs {
   try { return { hidden: [], threeD: false, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') }; } catch { return { hidden: [], threeD: false }; }
 }
@@ -33,6 +33,8 @@ class AppState {
   fleet = $state.raw<Fleet | null>(null);
   view = $state<View>(parse());
   hidden = $state<SystemKey[]>(typeof localStorage !== 'undefined' ? loadPrefs().hidden : []);
+  /** Movimiento de los buses entre lecturas (Configuración); por defecto, continuo. */
+  motion = $state<'continuo' | 'directo'>(typeof localStorage !== 'undefined' ? loadPrefs().motion ?? 'continuo' : 'continuo');
   poll = $state<PollState>({ status: 'connecting', feedTime: null, receivedAt: null, error: null, vehicles: 0 });
   counts = $state<Record<SystemKey, number>>({ troncal: 0, dual: 0, alimentador: 0, zonal: 0, cable: 0 });
   /** Cambia con cada instantánea nueva: las vistas que dependen de la flota se recalculan. */

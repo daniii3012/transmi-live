@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Fleet, HOLD_BACK, windowSpeed } from '../src/live/fleet';
+import { Fleet, GLIDE, HOLD_BACK, windowSpeed } from '../src/live/fleet';
 import { MetricPath, KX, KY } from '../src/domain/geo';
 import { LAT0, LON0, Q, type VehiclesV1 } from '../src/live/api';
 import type { Network } from '../src/data/network';
@@ -166,5 +166,78 @@ describe('flota', () => {
     expect(count).toBe(2);
     expect(data[Fleet.STRIDE * 0 + 9]).toBe(1); // el de otra ruta, atenuado y primero
     expect(data[Fleet.STRIDE * 1 + 9] & 4).toBe(4); // el seleccionado, al final
+  });
+
+  describe('movimiento directo (a la última lectura)', () => {
+    const T0 = 1_000_000;
+    function run(f: Fleet, from: number, to: number, step = 16) {
+      let moving = false;
+      for (let now = from; now <= to; now += step) moving = f.update(now);
+      return moving;
+    }
+
+    it('va en ~0,4 s por el recorrido a la última lectura, suave, y se queda ahí', () => {
+      const f = new Fleet(net);
+      f.motion = 'directo';
+      f.ingest(snap(T0, 1000), T0 * 1000 + 10_000);
+      const b = f.buses.get('1')!;
+      run(f, T0 * 1000 + 10_000, T0 * 1000 + 10_500);
+      expect(b.s).toBeCloseTo(1000, -1); // la primera lectura: directo, sin retraso
+      f.ingest(snap(T0 + 20, 1200), T0 * 1000 + 30_000);
+      const t = T0 * 1000 + 30_000;
+      f.update(t);
+      f.update(t + GLIDE / 4);
+      const q1 = b.s;
+      f.update(t + GLIDE / 2);
+      const half = b.s;
+      expect(q1).toBeGreaterThan(1000);
+      expect(half - 1000).toBeGreaterThan(q1 - 1000); // acelera al principio…
+      expect(half).toBeCloseTo(1100, -1); // …y va por la mitad a mitad de tiempo
+      run(f, t + GLIDE / 2, t + GLIDE + 50);
+      const last = b.ts[b.ts.length - 1];
+      expect(Math.abs(last - 1200)).toBeLessThan(1.5); // (la lectura viene redondeada a ~1 m)
+      expect(b.s).toBeCloseTo(last, 6); // llega exacto a la lectura
+      expect(run(f, t + GLIDE + 50, t + 15_000, 100)).toBe(false); // y espera quieta: no pide cuadros
+      expect(b.s).toBeCloseTo(last, 6);
+    });
+
+    it('no retrocede por ruido del GPS', () => {
+      const f = new Fleet(net);
+      f.motion = 'directo';
+      f.ingest(snap(T0, 1000), T0 * 1000);
+      run(f, T0 * 1000, T0 * 1000 + 600);
+      const s1 = f.buses.get('1')!.s;
+      f.ingest(snap(T0 + 20, 990), T0 * 1000 + 20_000); // 10 m atrás
+      run(f, T0 * 1000 + 20_000, T0 * 1000 + 21_000);
+      expect(f.buses.get('1')!.s).toBeGreaterThanOrEqual(s1 - 0.01);
+    });
+
+    it('al cambiar de modo: a directo va a la última lectura; a continuo vuelve a la reproducción con retraso', () => {
+      const f = new Fleet(net);
+      f.ingest(snap(T0, 1000), T0 * 1000 + 10_000);
+      f.ingest(snap(T0 + 20, 1200), T0 * 1000 + 30_000);
+      run(f, T0 * 1000 + 30_000, T0 * 1000 + 31_000);
+      const b = f.buses.get('1')!;
+      expect(b.s).toBeLessThan(1100); // continuo: ~40 s atrás
+      f.setMotion('directo', T0 * 1000 + 31_000);
+      run(f, T0 * 1000 + 31_000, T0 * 1000 + 31_000 + GLIDE + 50);
+      expect(b.s).toBeCloseTo(b.ts[b.ts.length - 1], 6);
+      f.setMotion('continuo', T0 * 1000 + 32_000);
+      f.update(T0 * 1000 + 32_000);
+      expect(b.s).toBeLessThan(1150); // de una vez a la hora de reproducción
+    });
+
+    it('con «reducir movimiento» (sin deslizamiento) va de una vez', () => {
+      const f = new Fleet(net);
+      f.motion = 'directo';
+      f.glide = 0;
+      f.ingest(snap(T0, 1000), T0 * 1000);
+      f.update(T0 * 1000);
+      f.ingest(snap(T0 + 20, 1200), T0 * 1000 + 20_000);
+      f.update(T0 * 1000 + 20_000);
+      f.update(T0 * 1000 + 20_016);
+      const b = f.buses.get('1')!;
+      expect(b.s).toBeCloseTo(b.ts[b.ts.length - 1], 6);
+    });
   });
 });
