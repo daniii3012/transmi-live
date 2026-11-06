@@ -116,6 +116,11 @@ export class Mesh {
     const v: P2 = [-u[1], u[0]];
     return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sa, sb]) => [c[0] + u[0] * along * sa + v[0] * across * sb, c[1] + u[1] * along * sa + v[1] * across * sb] as P2);
   }
+  /** Paral delgado: dos paneles cruzados (12 vértices; una caja son 30). De lejos se ve igual. */
+  post(c: P2, u: P2, r: number, z0: number, z1: number, mat: number) {
+    const v: P2 = [-u[1], u[0]];
+    for (const d of [u, v]) this.wall([c[0] - d[0] * r, c[1] - d[1] * r], [c[0] + d[0] * r, c[1] + d[1] * r], z0, z1, mat);
+  }
   /** Cilindro (pila redonda) de radio `r`, de z0 a z1. */
   cyl(c: P2, r: number, z0: number, z1: number, mat: number, sides = 12) {
     const ring: P2[] = [];

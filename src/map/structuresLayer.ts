@@ -45,7 +45,7 @@ function walls(ring: P2[], solid: Mesh, glass: Mesh, z0 = 0) {
   const r = ccw(ring), n = r.length;
   const post = (p: P2, u: P2) => {
     const c: P2 = [p[0] - u[1] * POST / 2, p[1] + u[0] * POST / 2]; // hacia adentro (izquierda del avance)
-    solid.box(c, u, POST / 2, POST / 2, z0 + PLATFORM_H, z0 + ROOF_Z, M.Column, M.Column);
+    solid.post(c, u, POST / 2, z0 + PLATFORM_H, z0 + ROOF_Z, M.Column);
   };
   let acc = 0; // metros desde el último paral
   for (let i = 0; i < n; i++) {
@@ -388,7 +388,7 @@ export function buildFootbridges(foot: { k: string; z: number[]; c: Float64Array
       run += seg;
       if (run >= STEP && zb - EDGE > 1) {
         run = 0;
-        solid.box(P[j], [N[j][1], -N[j][0]], 0.25, 0.25, 0, zb - EDGE, M.FSide, M.FSide);
+        solid.post(P[j], [N[j][1], -N[j][0]], 0.25, 0, zb - EDGE, M.FSide);
       }
     }
   }
