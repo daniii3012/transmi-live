@@ -359,10 +359,46 @@ def _elevate(busway, sign):
             acc += l
         return out
 
+    # Uniones entre tramos de distinto nivel (un acceso de nivel 1 que llega a una glorieta de nivel 2, una
+    # trinchera de 3 m que entra a un túnel de 5,5 m): la cota en la unión es la del más bajo, y el más alto
+    # sube (o baja) desde ahí con la misma rampa. Sin esto, cada tramo iba a su propia altura y en la unión
+    # quedaba un escalón (fondos y muros en cuña a la salida de Museo Nacional, revisión del 6 nov.).
+    levels_at = defaultdict(set)
+    for it in items:
+        levels_at[it['a']].add(abs(it['H']))
+        levels_at[it['b']].add(abs(it['H']))
+    anchors = defaultdict(list)  # cota de la unión → nodos
+    for n, hs in levels_at.items():
+        if len(hs) > 1:
+            anchors[min(hs)].append(n)
+    dist_h = {}
+    for h, nodes in anchors.items():
+        dh, heap = {}, [(0.0, n) for n in nodes]
+        while heap:
+            d, n = heapq.heappop(heap)
+            if n in dh:
+                continue
+            dh[n] = d
+            for m, w, _ in adj[n]:
+                if m not in dh:
+                    heapq.heappush(heap, (d + w, m))
+        dist_h[h] = dh
+
+    def joints(it, s, L, za):
+        """Cota (en valor absoluto) limitada por las uniones con tramos más bajos."""
+        Ha = abs(it['H'])
+        for h, dh in dist_h.items():
+            if h >= Ha:
+                continue
+            d = min(dh.get(it['a'], 1e6) + s, dh.get(it['b'], 1e6) + L - s)
+            za = min(za, h + (Ha - h) * smooth01(d / (R_PER_M * (Ha - h))))
+        return za
+
     pieces = []
     inside = outside = 0
     for it in items:
         H, R = it['H'], R_PER_M * abs(it['H'])
+        sg = 1 if H > 0 else -1
         dense = densify(it['pts'], 4.0)
         cum = [0.0]
         for (ax, ay), (bx, by) in zip(dense, dense[1:]):
@@ -371,11 +407,11 @@ def _elevate(busway, sign):
         d0, d1 = dist.get(it['a'], 1e6), dist.get(it['b'], 1e6)
         if good[comp[it['a']]]:
             inside += 1
-            z = [H * smooth01(min(d0 + s, d1 + L - s) / R) for s in cum]
+            z = [sg * joints(it, s, L, abs(H) * smooth01(min(d0 + s, d1 + L - s) / R)) for s in cum]
             pieces.append({'pts': dense, 'z': z, 'w': it['w'], 'cov': it.get('cov', False)})
             continue
         outside += 1
-        pieces.append({'pts': dense, 'z': [H] * len(dense), 'w': it['w'], 'cov': it.get('cov', False)})
+        pieces.append({'pts': dense, 'z': [sg * joints(it, s, L, abs(H)) for s in cum], 'w': it['w'], 'cov': it.get('cov', False)})
         for end, dd in ((0, d0), (-1, d1)):
             if dd > 0.5:
                 continue  # sigue otro tramo del conjunto

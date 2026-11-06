@@ -291,13 +291,16 @@ class Depth {
 }
 
 /**
- * Deprimidos de la troncal (pasos bajo una calle, trincheras): fondo a su cota, muros con la cara hacia
- * adentro y, donde OSM dice que pasan bajo una calle y hay altura para un bus, la losa de la calle encima
- * (translúcida). La trinchera solo se ve por su boca: alrededor, una máscara de profundidad invisible a
- * nivel del suelo (`mask`) tapa lo que queda bajo tierra, que si no se vería «a través» del mapa (el mapa
- * base no escribe profundidad). La máscara llega hasta otra boca o una estación bajo tierra (`deep`).
+ * Deprimidos de la troncal (pasos bajo una calle, trincheras): fondo a su cota, muros hasta el suelo y,
+ * donde OSM dice que pasan bajo una calle y hay altura para un bus, la losa de la calle encima
+ * (translúcida, para ver los buses). Los muros no se dibujan donde el borde da a otra boca o a una
+ * estación bajo tierra (`deep`): ahí sigue la calzada o el andén.
+ *
+ * (Se probó una máscara de profundidad invisible a nivel del suelo para ver la trinchera solo por su boca:
+ * en las uniones en curva, como a la salida de Museo Nacional, tapaba parte de la boca vecina y dejaba
+ * manchas. Sin ella los muros cierran la vista y se ve limpio; revisión del 6 nov.)
  */
-export function buildTrenches(pieces: Piece[], deep: P2[][], solid: Mesh, glass: Mesh, mask: Mesh) {
+export function buildTrenches(pieces: Piece[], deep: P2[][], solid: Mesh, glass: Mesh) {
   const tun = pieces.filter((pc) => pc.k === 'tunel' && pc.c.length >= 4);
   const geo = tun.map((pc) => {
     const P: P2[] = [];
@@ -318,7 +321,6 @@ export function buildTrenches(pieces: Piece[], deep: P2[][], solid: Mesh, glass:
     }
     return deep.some((r) => inside([x, y], grow(r, 1.2)));
   };
-  const BAND = 30;
   tun.forEach((pc, pi) => {
     const P = geo[pi], n = P.length, hw = pc.w / 2;
     const N: P2[] = P.map((_, j) => {
@@ -327,38 +329,17 @@ export function buildTrenches(pieces: Piece[], deep: P2[][], solid: Mesh, glass:
       return [-dy / l, dx / l];
     });
     const L = (j: number, o: number): P2 => [P[j][0] + N[j][0] * o, P[j][1] + N[j][1] * o];
-    /** Hasta dónde llega la máscara por un lado: hasta otra boca o `BAND` m. */
-    const reach = (j: number, side: number) => {
-      for (let o = hw + 1; o <= hw + BAND; o += 1.5) {
-        const q = L(j, side * o);
-        if (inOpening(q[0], q[1], pi)) return o - hw - 0.8;
-      }
-      return BAND;
-    };
-    const R = P.map((_, j) => [reach(j, 1), reach(j, -1)]);
     for (let j = 1; j < n; j++) {
       const za = pc.z[j - 1], zb = pc.z[j];
       if (za > -0.05 && zb > -0.05) continue;
       const al = L(j - 1, hw), bl = L(j, hw), ar = L(j - 1, -hw), br = L(j, -hw);
-      // Fondo.
       solid.quad([ar[0], ar[1], za], [br[0], br[1], zb], [bl[0], bl[1], zb], [al[0], al[1], za], M.TFloor);
-      // Muros: donde el borde no da a otra boca ni a una estación bajo tierra.
       const ml = [(al[0] + bl[0]) / 2, (al[1] + bl[1]) / 2], mr = [(ar[0] + br[0]) / 2, (ar[1] + br[1]) / 2];
       const nl = L(j, hw + 0.6), nr = L(j, -hw - 0.6);
       if (!inOpening((ml[0] + nl[0]) / 2, (ml[1] + nl[1]) / 2, pi)) solid.wall(al, bl, za, 0, M.TWall, zb, 0);
       if (!inOpening((mr[0] + nr[0]) / 2, (mr[1] + nr[1]) / 2, pi)) solid.wall(br, ar, zb, 0, M.TWall, za, 0);
-      // Máscara a nivel del suelo a los dos lados (invisible: solo profundidad).
-      for (const side of [1, -1]) {
-        const ra = R[j - 1][side > 0 ? 0 : 1], rb = R[j][side > 0 ? 0 : 1];
-        if (ra <= 0.1 && rb <= 0.1) continue;
-        const ia = L(j - 1, side * hw), ib = L(j, side * hw), oa = L(j - 1, side * (hw + Math.max(0, ra))), ob = L(j, side * (hw + Math.max(0, rb)));
-        mask.quad([ia[0], ia[1], -0.04], [ib[0], ib[1], -0.04], [ob[0], ob[1], -0.04], [oa[0], oa[1], -0.04], M.TFloor);
-      }
-      // Losa de la calle encima, donde hay altura para un bus.
       if (pc.cov && za < -4 && zb < -4) glass.quad([ar[0], ar[1], 0.02], [br[0], br[1], 0.02], [bl[0], bl[1], 0.02], [al[0], al[1], 0.02], M.Lid);
     }
-    // Máscara en las puntas que siguen hondas (el deprimido sigue en otro tramo: no; termina en el suelo:
-    // la rampa ya llega a 0).
   });
 }
 
@@ -404,7 +385,7 @@ export function buildFootbridges(foot: { k: string; z: number[]; c: Float64Array
   }
 }
 
-interface Group { data: Float32Array; vao: WebGLVertexArrayObject | null; buf: WebGLBuffer | null; count: number; on: boolean; minZoom: number; dirty: boolean; depthOnly: boolean }
+interface Group { data: Float32Array; vao: WebGLVertexArrayObject | null; buf: WebGLBuffer | null; count: number; on: boolean; minZoom: number; dirty: boolean }
 
 /** Una pasada (opaca o translúcida) de todos los grupos. Se arma desde `Structures`. */
 export class StructuresLayer implements CustomLayerInterface {
@@ -430,12 +411,11 @@ export class StructuresLayer implements CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
-  /** `depthOnly`: solo escribe profundidad (máscaras del suelo); se dibuja antes que los demás grupos. */
-  setGroup(name: string, v: number[], minZoom: number, depthOnly = false) {
+  setGroup(name: string, v: number[], minZoom: number) {
     const g = this.groups.get(name);
     const data = new Float32Array(v);
-    if (g) Object.assign(g, { data, minZoom, dirty: true, depthOnly });
-    else this.groups.set(name, { data, vao: null, buf: null, count: 0, on: false, minZoom, dirty: true, depthOnly });
+    if (g) Object.assign(g, { data, minZoom, dirty: true });
+    else this.groups.set(name, { data, vao: null, buf: null, count: 0, on: false, minZoom, dirty: true });
     this.map?.triggerRepaint();
   }
 
@@ -486,7 +466,7 @@ export class StructuresLayer implements CustomLayerInterface {
 
   render(gl: WebGLRenderingContext | WebGL2RenderingContext, opts: CustomRenderMethodInput) {
     const zoom = this.map.getZoom();
-    const live = [...this.groups.values()].filter((gr) => gr.on && zoom >= gr.minZoom && (gr.dirty || gr.count)).sort((a, b) => Number(b.depthOnly) - Number(a.depthOnly));
+    const live = [...this.groups.values()].filter((gr) => gr.on && zoom >= gr.minZoom && (gr.dirty || gr.count));
     if (!live.length) return;
     const g = gl as WebGL2RenderingContext;
     for (const gr of live) if (gr.dirty) this.upload(gr);
@@ -510,10 +490,8 @@ export class StructuresLayer implements CustomLayerInterface {
     }
     for (const gr of live) {
       if (!gr.count) continue;
-      if (gr.depthOnly) g.colorMask(false, false, false, false);
       g.bindVertexArray(gr.vao);
       g.drawArrays(g.TRIANGLES, 0, gr.count);
-      if (gr.depthOnly) g.colorMask(true, true, true, true);
     }
     g.bindVertexArray(null);
   }
@@ -532,17 +510,15 @@ export class Structures {
   readonly solid = new StructuresLayer('solid');
   readonly glass = new StructuresLayer('glass');
 
-  set(name: string, build: (solid: Mesh, glass: Mesh, mask: Mesh) => void, minZoom = 14.8) {
-    const s = new Mesh(), g = new Mesh(), m = new Mesh();
-    build(s, g, m);
+  set(name: string, build: (solid: Mesh, glass: Mesh) => void, minZoom = 14.8) {
+    const s = new Mesh(), g = new Mesh();
+    build(s, g);
     this.solid.setGroup(name, s.v, minZoom);
-    this.solid.setGroup(`${name}:mascara`, m.v, minZoom, true);
     this.glass.setGroup(name, g.v, minZoom);
   }
 
   show(name: string, on: boolean) {
     this.solid.show(name, on);
-    this.solid.show(`${name}:mascara`, on);
     this.glass.show(name, on);
   }
 

@@ -616,7 +616,7 @@ export class Controller {
       const pieces = this.net.pieces;
       if (!pieces?.length) return;
       this.elevation ??= new Elevation(pieces);
-      this.structs?.set('tm', (solid, glass, mask) => { const deep: [number, number][][] = []; buildStations(this.net, solid, glass, pieces, deep); buildBridges(pieces, solid, glass); buildTrenches(pieces, deep, solid, glass, mask); buildFootbridges(this.net.foot, solid, glass); });
+      this.structs?.set('tm', (solid, glass) => { const deep: [number, number][][] = []; buildStations(this.net, solid, glass, pieces, deep); buildBridges(pieces, solid, glass); buildTrenches(pieces, deep, solid, glass); buildFootbridges(this.net.foot, solid, glass); });
       this.structures();
       this.map.triggerRepaint();
     });
