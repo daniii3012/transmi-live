@@ -25,6 +25,9 @@ from pathlib import Path
 
 KEEP_DAYS = 60
 ALIAS_DAYS = 120
+# Un día con al menos tantas estaciones «nuevas» no son cambios: es una compilación que no tuvo con qué
+# comparar (la primera publicación lo registró así: toda la red nueva el 6 nov. 2026).
+NO_BASE_STATIONS = 25
 MATCH_MIN = 0.5
 
 
@@ -192,8 +195,18 @@ def run(prev: Path, new: Path, day: str | None = None, summary: Path | None = No
     meta = read(new, 'meta.json') or {}
     day = day or (meta.get('built') or date.today().isoformat())[:10]
     hist = read(prev, 'changes.json') or {'v': 1, 'entries': [], 'aliases': {}}
+    # Fuera del historial los días sin base (la red entera como nueva).
+    per_day: dict[str, int] = {}
+    for e in hist.get('entries', []):
+        if e['kind'] == 'station-new':
+            per_day[e['date']] = per_day.get(e['date'], 0) + 1
+    bogus = {d for d, n in per_day.items() if n >= NO_BASE_STATIONS}
+    hist['entries'] = [e for e in hist.get('entries', []) if e['date'] not in bogus]
     same_data = (read(prev, 'meta.json') or {}).get('hash') == meta.get('hash') and meta.get('hash')
-    entries, aliases = ([], {}) if same_data else diff(Net(prev), Net(new), day)
+    # Sin red anterior (la primera publicación, o si no se pudo bajar lo publicado) no hay cambios que
+    # contar: comparar contra nada daría la red entera como nueva.
+    no_base = read(prev, 'network.json') is None
+    entries, aliases = ([], {}) if same_data or no_base else diff(Net(prev), Net(new), day)
     entries.sort(key=lambda e: (SYS_ORDER.get(e.get('sys', ''), -1), e['kind'], e.get('code', ''), e['text']))
 
     cut = (date.fromisoformat(day) - timedelta(days=KEEP_DAYS)).isoformat()
@@ -219,6 +232,8 @@ def run(prev: Path, new: Path, day: str | None = None, summary: Path | None = No
         lines = [f'## Cambios en la red · {day}', '']
         if same_data:
             lines.append('Sin cambios: el paquete es el mismo que el publicado.')
+        elif no_base:
+            lines.append('Sin red anterior con qué comparar (primera publicación o descarga fallida): no se registran cambios.')
         elif not entries:
             lines.append('Sin cambios visibles (horarios o geometría solamente).')
         else:

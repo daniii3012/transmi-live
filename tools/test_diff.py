@@ -30,6 +30,24 @@ class DiffTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
 
+    def test_sin_red_anterior_no_hay_cambios(self):
+        # Primera publicación: nada con qué comparar; antes salía la red entera como nueva.
+        build(self.tmp / 'b', {'1': ('B74', 'Norte', ['a', 'b', 'c'])}, ST, '2026-11-06', 'h1')
+        (self.tmp / 'a').mkdir()
+        out = dn.run(self.tmp / 'a', self.tmp / 'b')
+        self.assertEqual(out['entries'], [])
+
+    def test_dia_sin_base_sale_del_historial(self):
+        # Lo que ya quedó publicado así (toda la red nueva un día) se descarta en la siguiente compilación;
+        # los días con cambios reales se conservan.
+        build(self.tmp / 'a', {'1': ('B74', 'Norte', ['a', 'b', 'c'])}, ST, '2026-11-06', 'h1')
+        bogus = [{'date': '2026-11-06', 'kind': 'station-new', 'station': str(i), 'text': f'Nueva estación {i}'} for i in range(30)]
+        real = [{'date': '2026-11-05', 'kind': 'station-new', 'station': 'x', 'text': 'Nueva estación Calle 53'}]
+        (self.tmp / 'a' / 'changes.json').write_text(json.dumps({'v': 1, 'updated': '2026-11-06', 'entries': bogus + real, 'aliases': {}}))
+        build(self.tmp / 'b', {'1': ('B74', 'Norte', ['a', 'b', 'c'])}, ST, '2026-11-07', 'h1')
+        out = dn.run(self.tmp / 'a', self.tmp / 'b')
+        self.assertEqual([e['text'] for e in out['entries']], ['Nueva estación Calle 53'])
+
     def test_id_reemitido_sin_cambios_es_solo_alias(self):
         build(self.tmp / 'a', {'1': ('B74', 'Norte', ['a', 'b', 'c'])}, ST, '2026-11-01', 'h1')
         build(self.tmp / 'b', {'9': ('B74', 'Norte', ['a', 'b', 'c'])}, ST, '2026-11-02', 'h2')
