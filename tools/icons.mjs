@@ -24,4 +24,22 @@ for (const [name, size, pad] of [['icon-192.png', 192, 0.12], ['icon-512.png', 5
   console.log(name);
 }
 writeFileSync(OUT + 'mark.svg', mark(0.12).trim());
+// favicon.ico con PNG adentro (16, 32 y 48 px): el formato que todo navegador acepta como favicon.
+const ico = [];
+for (const size of [16, 32, 48]) {
+  await page.setViewport({ width: size, height: size, deviceScaleFactor: 1 });
+  await page.setContent(`<html><body style="margin:0;background:#07090b">${mark(0.06).replace('<svg ', `<svg width="${size}" height="${size}" `)}</body></html>`);
+  ico.push([size, Buffer.from(await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: size, height: size } }))]);
+}
+const head = Buffer.alloc(6 + 16 * ico.length);
+head.writeUInt16LE(0, 0); head.writeUInt16LE(1, 2); head.writeUInt16LE(ico.length, 4);
+let offset = head.length;
+ico.forEach(([size, png], i) => {
+  const e = 6 + 16 * i;
+  head.writeUInt8(size, e); head.writeUInt8(size, e + 1); head.writeUInt8(0, e + 2); head.writeUInt8(0, e + 3);
+  head.writeUInt16LE(1, e + 4); head.writeUInt16LE(32, e + 6); head.writeUInt32LE(png.length, e + 8); head.writeUInt32LE(offset, e + 12);
+  offset += png.length;
+});
+writeFileSync(new URL('../public/favicon.ico', import.meta.url).pathname, Buffer.concat([head, ...ico.map(([, png]) => png)]));
+console.log('favicon.ico');
 await browser.close();

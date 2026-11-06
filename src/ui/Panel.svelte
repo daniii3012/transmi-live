@@ -18,7 +18,8 @@
   });
 
   // ── Hoja inferior (móvil) ──────────────────────────────────────────────────────────────────
-  // Tres alturas: asomada (lo esencial de la vista), media y completa. Arrastre con inercia.
+  // Tres alturas: asomada (lo esencial de la vista), media y completa. Arrastre con inercia, desde la
+  // manija o desde cualquier parte del contenido, como la hoja de Mapas de iOS (ver `touchDrag`).
   type Snap = 'peek' | 'half' | 'full';
   let snap = $state<Snap>('peek');
   let dragY = $state<number | null>(null);
@@ -28,7 +29,9 @@
   // navegador) y en la app instalada ~34 px. La hoja asomada lo suma a su altura; antes salía del
   // contenido y el buscador quedaba recortado en la app instalada.
   let sb = $state(0);
-  const heights = $derived({ peek: PEEK + sb, half: Math.round(vh * 0.5), full: vh - 64 });
+  // La completa llega hasta debajo de la barra superior (en la app instalada es más alta: la isla).
+  let topbarH = $state(0);
+  const heights = $derived({ peek: PEEK + sb, half: Math.round(vh * 0.5), full: vh - Math.max(64, topbarH + 8) });
   const height = $derived(dragY !== null ? dragY : heights[snap]);
 
   $effect(() => {
@@ -45,20 +48,24 @@
 
   let start = { y: 0, h: 0, t: 0 };
   let samples: { y: number; t: number }[] = [];
-  function down(e: PointerEvent) {
-    if (!app.narrow) return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    start = { y: e.clientY, h: height, t: performance.now() };
-    samples = [{ y: e.clientY, t: start.t }];
-    dragY = height;
+  function begin(y: number, h: number) {
+    start = { y, h, t: performance.now() };
+    samples = [{ y, t: start.t }];
+    dragY = h;
   }
-  function move(e: PointerEvent) {
+  function follow(y: number) {
     if (dragY === null) return;
-    const h = start.h + (start.y - e.clientY);
-    dragY = Math.max(heights.peek - 40, Math.min(heights.full, h));
-    samples.push({ y: e.clientY, t: performance.now() });
+    dragY = Math.max(heights.peek - 40, Math.min(heights.full, start.h + (start.y - y)));
+    samples.push({ y, t: performance.now() });
     if (samples.length > 5) samples.shift();
   }
+  function down(e: PointerEvent) {
+    if (!app.narrow) return;
+    // Si el navegador no deja capturar el puntero, el arrastre sigue igual (antes se cortaba ahí).
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* sin captura */ }
+    begin(e.clientY, height);
+  }
+  function move(e: PointerEvent) { follow(e.clientY); }
   function up() {
     if (dragY === null) return;
     const a = samples[0], b = samples[samples.length - 1];
@@ -73,6 +80,59 @@
     dragY = null;
   }
 
+  /**
+   * Arrastre desde el contenido (toques). Se decide con el primer movimiento (si se espera, el
+   * navegador ya empezó a desplazar el contenido y no deja impedirlo): asomada, siempre mueve la hoja;
+   * media, hacia arriba la expande y hacia abajo la recoge si el contenido está al principio; completa,
+   * el contenido se desplaza y hacia abajo, al principio, la recoge. Menos de 6 px no cuenta: un toque
+   * sigue siendo un toque y la hoja no cambia. `passive: false` para poder impedir el desplazamiento.
+   */
+  function touchDrag(el: HTMLElement) {
+    let t0: { x: number; y: number; h: number } | null = null;
+    let active = false, decided = false, lastY = 0;
+    const content = () => scrollers[0];
+    const onStart = (e: TouchEvent) => {
+      if (!app.narrow || e.touches.length !== 1 || (e.target as Element).closest('.grip')) { t0 = null; return; }
+      const p = e.touches[0];
+      t0 = { x: p.clientX, y: p.clientY, h: height };
+      active = decided = false;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!t0) return;
+      const p = e.touches[0];
+      const dx = p.clientX - t0.x, dy = p.clientY - t0.y; // dy > 0: hacia abajo
+      lastY = p.clientY;
+      if (!decided) {
+        if (dx === 0 && dy === 0) return;
+        decided = true;
+        if (Math.abs(dx) > Math.abs(dy)) return; // horizontal: para el contenido
+        const atTop = (content()?.scrollTop ?? 0) <= 0;
+        active = snap === 'peek' || (snap === 'half' && (dy < 0 || atTop)) || (snap === 'full' && dy > 0 && atTop);
+        if (active) begin(t0.y, t0.h);
+      }
+      if (!active) return;
+      e.preventDefault();
+      if (Math.abs(dy) >= 6) follow(p.clientY);
+    };
+    const onEnd = () => {
+      if (active && t0) {
+        if (Math.abs(lastY - t0.y) < 6) dragY = null; // un toque: la hoja queda como estaba
+        else up();
+      }
+      t0 = null; active = decided = false;
+    };
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd);
+    el.addEventListener('touchcancel', onEnd);
+    return { destroy() {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    } };
+  }
+
   onMount(() => {
     const probe = document.createElement('div');
     probe.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:var(--safe-bottom);visibility:hidden;pointer-events:none';
@@ -85,7 +145,7 @@
 </script>
 
 {#if app.narrow}
-  <header class="topbar">
+  <header class="topbar" bind:clientHeight={topbarH}>
     <Brand onclick={() => go({ kind: 'home' })} />
     <StatusLine compact />
   </header>
@@ -94,6 +154,7 @@
     class:dragging={dragY !== null}
     style:height="{height}px"
     aria-label="Panel"
+    use:touchDrag
   >
     <div class="grip" role="slider" aria-label="Altura del panel" aria-valuenow={height} tabindex="0"
       onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={up}
@@ -215,5 +276,5 @@
   .grip span { width: 36px; height: 3px; background: var(--line-2); }
   .grip:focus-visible { outline-offset: -2px; }
   .sheet .content { touch-action: pan-y; }
-  .sheet .content.locked { overflow: hidden; }
+  .sheet .content.locked { overflow: hidden; touch-action: none; }
 </style>

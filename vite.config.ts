@@ -9,7 +9,7 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: false,
-      includeAssets: ['icons/apple-touch-icon.png', 'icons/favicon-32.png'],
+      includeAssets: ['favicon.ico', 'icons/apple-touch-icon.png', 'icons/favicon-32.png'],
       manifest: {
         name: 'TransMi Live',
         short_name: 'TransMi Live',
@@ -36,10 +36,13 @@ export default defineConfig({
       },
       workbox: {
         // Armazón y fuentes en la precarga; los datos de la red y las teselas, en caché de uso.
-        globPatterns: ['**/*.{js,css,html,woff2,svg,png}'],
+        globPatterns: ['**/*.{js,css,html,woff2,svg,png,ico}'],
         // Subconjuntos de letra que el español no usa: el navegador los pide solo si hacen falta.
         globIgnores: ['data/**', '**/*-{cyrillic,cyrillic-ext,greek,vietnamese,symbols2}-*'],
         navigateFallback: 'index.html',
+        // Los íconos, imágenes, el manifiesto y el sitemap nunca reciben la página: si el navegador los
+        // pide como navegación (iOS al tomar el ícono de inicio), van a la red o a la precarga.
+        navigateFallbackDenylist: [/\/icons\//, /\.(?:png|jpg|ico|svg|webmanifest|xml|json)$/],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         cleanupOutdatedCaches: true,
         runtimeCaching: [
