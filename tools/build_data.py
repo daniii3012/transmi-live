@@ -680,7 +680,7 @@ def main():
         def near(rings_m) -> bool:
             pts = [p for r in rings_m for p in r[:-1]]
             cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
-            return math.hypot(cx - ref[0], cy - ref[1]) <= 120
+            return math.hypot(cx - ref[0], cy - ref[1]) <= (300 if kind == 'portal' else 120)  # un portal ocupa una manzana
 
         if sid in fp_osm:
             rings = fp_osm[sid]['polys']

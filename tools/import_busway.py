@@ -20,6 +20,7 @@ el origen (Vincenty: distancia y azimut), y se resuelve por Newton. Se comprueba
 from __future__ import annotations
 
 import json
+import re
 import math
 import sys
 from pathlib import Path
@@ -129,9 +130,17 @@ def main():
 
     # Huella de cada estación: el edificio (building=bus_station) más grande con proporción de
     # estación (ancho 3–20 m, ≥ 250 m²); si no hay, las plataformas cerradas. Los recortes de pocos
-    # metros cuadrados (casetas, accesos) se descartan.
+    # metros cuadrados (casetas, accesos) se descartan. Los portales son sus plataformas (troncales y
+    # de alimentación): el edificio grande de un portal es la entrada o un parqueadero, que el mapa
+    # base ya dibuja.
     out_st = []
     for st in layouts['stations']:
+        if re.match(r'(?i)portal', st.get('name') or ''):
+            polys = [p['points'] for p in st.get('platforms') or []
+                     if p.get('closed') and len(p['points']) >= 4 and area(p['points']) >= 300 and p['role'] in ('platform_trunk', 'platform_feeder')]
+            if polys:
+                out_st.append({'id': st['station_id'], 'kind': 'platform', 'polys': [[ll(p) for p in poly] for poly in polys], 'src': None})
+            continue
         best = None
         for ar in st.get('areas') or []:
             pts = ar['points']
