@@ -8,6 +8,12 @@ import { busKind, type BusKind } from '../domain/fleetTypes';
 export const MAX_OFF = 60;
 export const HOLD_BACK = 30;
 export const MAX_JUMP = 3000;
+/** Más allá de la última lectura, el bus sigue con su velocidad y se detiene suavemente en ~`EXTRA` ms. */
+const EXTRA = 5000;
+/** Recuperación del retraso propio de un bus tras una pausa del alimentador: se reproduce a 1,2×. */
+const CATCH = 0.2;
+/** Puntos recientes que se guardan por bus para la curva (lecturas y nudos de anclaje). */
+const TRACK = 10;
 /** Más viejo que esto, el bus se atenúa; más que `DROP_AGE`, no se dibuja. */
 export const STALE_AGE = 180;
 export const DROP_AGE = 600;
@@ -30,12 +36,27 @@ export interface Bus {
   stopId: string;
   seq: number;
   start: number;
-  /** Movimiento sobre el recorrido. */
+  /** Movimiento sobre el recorrido: lecturas recientes (hora en ms, abscisa en m, no decreciente). Se
+   * reproducen con el retraso de la flota (`Fleet.lag`) más uno propio (`off`) que tras una pausa del
+   * alimentador evita el salto y se recupera solo. */
   onPath: boolean;
   offPath: number;
   sFix: number;
-  s0: number;
-  s1: number;
+  tt: number[];
+  ts: number[];
+  /** Velocidad fijada en un punto (m/ms; NaN: la de la curva). Los nudos de anclaje la llevan. */
+  tm: number[];
+  off: number;
+  offAt: number;
+  /** El próximo cuadro va directo a su punto (lectura reiniciada o bus fuera de vista). */
+  snap: boolean;
+  /** Lectura imposible respecto de las anteriores (salto o retroceso grande), en espera de que la
+   * siguiente la confirme; si no, era un error del GPS y se descarta. El retraso de reproducción
+   * permite esperar sin que se note. */
+  suspect: { s: number; at: number } | null;
+  /** Último cuadro calculado y velocidad dibujada (m/s). */
+  drawnAt: number;
+  v: number;
   /** Movimiento en línea recta (fuera del recorrido). */
   x0: number; y0: number; x1: number; y1: number;
   t0: number;
@@ -129,8 +150,40 @@ export class Fleet {
 
   constructor(private net: Network) {}
 
+  /**
+   * Retraso de reproducción (ms): los buses se dibujan donde estaban hace `lag`, entre lecturas
+   * reales, para moverse sin paradas ni cambios bruscos aunque las instantáneas lleguen a destiempo
+   * (el alimentador se regenera cada ~21 s y se consulta cada 15 s; a veces se detiene un minuto).
+   * Para no quedarse sin lecturas justo antes de que llegue la siguiente, cubre el intervalo entre
+   * lecturas (mediana de `gaps`) más lo que tardan en llegar (máximo de `delays`): ~43 s con el
+   * alimentador de hoy, lo mismo que el modelo anterior al final de cada tramo. Cambia despacio (±10 %).
+   * Una pausa más larga la absorbe el retraso propio de cada bus (`off`).
+   */
+  lag = 40_000;
+  private lagTarget = 40_000;
+  private delays: number[] = [];
+  private gaps: number[] = [];
+
   /** Incorpora una instantánea. `now` en ms (reloj de pared). */
   ingest(d: VehiclesV1, now = Date.now()) {
+    // Lo que tarda en llegar una lectura nueva (todas las de una instantánea traen la misma hora) y el
+    // intervalo entre instantáneas del alimentador.
+    if (d.t !== this.feedTime && d.n) {
+      const delay = now - d.t * 1000;
+      if (delay > -30_000 && delay < 120_000) {
+        this.delays.push(delay);
+        if (this.delays.length > 8) this.delays.shift();
+      }
+      if (this.feedTime && d.t > this.feedTime) {
+        this.gaps.push((d.t - this.feedTime) * 1000);
+        if (this.gaps.length > 8) this.gaps.shift();
+      }
+      if (this.delays.length) {
+        const g = this.gaps.length ? [...this.gaps].sort((a, b) => a - b)[this.gaps.length >> 1] : 20_000;
+        this.lagTarget = Math.min(60_000, Math.max(8_000, Math.min(g, 40_000) + Math.max(...this.delays) + 1000));
+        if (!this.lastFeedAt) this.lag = this.lagTarget;
+      }
+    }
     if (d.t !== this.feedTime) {
       if (this.lastFeedAt) {
         const gap = now - this.lastFeedAt;
@@ -158,7 +211,7 @@ export class Fleet {
         const fresh: Bus = {
           id, label: d.label[i], plate: d.plate[i], routeId, route, path: this.net.paths.get(routeId), sys: route?.sys, kind: busKind(d.label[i], route?.code, route?.sys),
           fixX: x, fixY: y, fixAt, age, stopId: d.stop[i], seq: d.seq[i], start: d.start[i],
-          onPath: false, offPath: Infinity, sFix: 0, s0: 0, s1: 0, x0: x, y0: y, x1: x, y1: y, t0: now, t1: now,
+          onPath: false, offPath: Infinity, sFix: 0, tt: [], ts: [], tm: [], off: 0, offAt: now, snap: true, suspect: null, drawnAt: 0, v: 0, x0: x, y0: y, x1: x, y1: y, t0: now, t1: now,
           speed: null, hist: [], bornAt: b ? b.bornAt : now, pingAt: 0, seed: seedOf(id), x, y, hx: 1, hy: 0, s: 0,
         };
         if (b) { fresh.x = b.x; fresh.y = b.y; fresh.hx = b.hx; fresh.hy = b.hy; }
@@ -186,9 +239,9 @@ export class Fleet {
     if (path && path.size > 1) {
       const hit = path.nearest(x, y, first ? undefined : b.sFix, 250, 3500, MAX_OFF);
       if (hit && hit.d <= MAX_OFF) {
-        const wasOn = b.onPath && !first;
-        const cur = wasOn ? this.sAt(b, now) : hit.s;
-        let target = hit.s;
+        const n = b.tt.length;
+        const wasOn = b.onPath && !first && n > 0;
+        if (wasOn && fixAt <= b.tt[n - 1]) return; // lectura más vieja que la última: se ignora
         // Velocidad reciente sobre el recorrido.
         if (wasOn && b.fixAt) {
           const dt = (fixAt - b.fixAt) / 1000;
@@ -197,8 +250,17 @@ export class Fleet {
             b.speed = b.speed == null ? v : 0.5 * b.speed + 0.5 * v;
           }
         }
-        if (target < cur && cur - target <= HOLD_BACK) target = cur; // ruido del GPS: no retrocede
-        const teleport = !wasOn || target < cur || target - cur > MAX_JUMP;
+        const last = wasOn ? b.ts[n - 1] : 0;
+        const fwd = hit.s - last;
+        // Retroceso grande, salto imposible (más de 3 km o de ~145 km/h): se reinicia en la lectura.
+        const odd = wasOn && (-fwd > HOLD_BACK || fwd > MAX_JUMP || fwd / Math.max(1, (fixAt - b.tt[n - 1]) / 1000) > 40);
+        if (odd) {
+          // Se acepta solo si la lectura anterior ya apuntaba allí (a menos de 300 m).
+          const sus = b.suspect;
+          if (!sus || Math.abs(hit.s - sus.s) > 300) { b.suspect = { s: hit.s, at: fixAt }; return; }
+        }
+        b.suspect = null;
+        const reset = !wasOn || odd;
         b.onPath = true;
         b.offPath = hit.d;
         if (!wasOn || hit.s < b.sFix - HOLD_BACK) b.hist = [];
@@ -208,20 +270,52 @@ export class Fleet {
         b.fixAt = fixAt;
         b.fixX = x;
         b.fixY = y;
-        if (teleport) {
-          b.s0 = b.s1 = target;
-          b.t0 = b.t1 = now;
+        if (reset) {
+          b.tt = [fixAt];
+          b.ts = [hit.s];
+          b.tm = [NaN];
+          b.off = 0;
+          b.offAt = now;
+          b.snap = true;
           if (!first) {
             // Fundido solo si el salto se ve; un ajuste corto no merece desaparecer.
-            const q = path.pointAt(target, this.tmp);
+            const q = path.pointAt(hit.s, this.tmp);
             if (Math.hypot(q[0] - b.x, q[1] - b.y) > 150) b.bornAt = now;
           }
-        } else {
-          b.s0 = cur;
-          b.s1 = target;
-          b.t0 = now;
-          b.t1 = end;
+          return;
         }
+        // La lectura nueva cambia la curva desde el punto anterior: si lo que se dibuja ya está en ese
+        // tramo (o más allá), se ancla un nudo en el instante dibujado con su posición y su velocidad,
+        // y la curva nueva parte de ahí. Sin el nudo, el tramo en pantalla se deformaría de golpe.
+        const off = this.offOf(b, now);
+        const tr = now - this.lag - off;
+        const T = b.tt, S = b.ts;
+        const anchor = tr > T[Math.max(0, n - 2)] ? { s: this.curve(b, tr), v: Math.max(0, (this.curve(b, tr + 50) - this.curve(b, tr - 50)) / 100) } : null;
+        // Si ya pasó la última lectura (llegó tarde o el alimentador se detuvo), el bus está quieto o
+        // siguió un poco por inercia: su retraso propio crece lo justo para que la curva nueva arranque
+        // donde se ve, al ritmo del bus, y se recupera después a 1,2×.
+        const tau = tr - T[n - 1];
+        if (tau > 0) {
+          const d = Math.max(0, fwd) / Math.max(1, fixAt - T[n - 1]);
+          const ahead = Math.max(0, (anchor?.s ?? b.s) - last);
+          const tauEq = d > 0 ? Math.min(tau, ahead / d) : 0;
+          b.off = off + (tau - tauEq);
+          b.offAt = now;
+          if (b.off > 90_000) { b.tt = [fixAt]; b.ts = [hit.s]; b.tm = [NaN]; b.off = 0; b.snap = true; return; }
+        }
+        const sNew = Math.max(hit.s, last); // ruido del GPS (< 30 m atrás): no retrocede
+        T.push(fixAt);
+        S.push(sNew);
+        b.tm.push(NaN);
+        if (anchor) {
+          const tk = now - this.lag - this.offOf(b, now);
+          let k = T.length - 1;
+          while (k > 0 && T[k - 1] >= tk) k--;
+          const sk = Math.min(Math.max(anchor.s, k > 0 ? S[k - 1] : -Infinity), sNew);
+          if (k > 0 && tk - T[k - 1] < 200) b.tm[k - 1] = anchor.v; // cae sobre un punto: se fija su velocidad
+          else if (k > 0 && T[k] - tk > 200) { T.splice(k, 0, tk); S.splice(k, 0, sk); b.tm.splice(k, 0, anchor.v); }
+        }
+        while (T.length > TRACK) { T.shift(); S.shift(); b.tm.shift(); }
         return;
       }
     }
@@ -241,10 +335,43 @@ export class Fleet {
     }
   }
 
-  private sAt(b: Bus, now: number): number {
-    if (now >= b.t1 || b.t1 <= b.t0) return b.s1;
-    const k = (now - b.t0) / (b.t1 - b.t0);
-    return b.s0 + (b.s1 - b.s0) * k;
+  private offOf(b: Bus, now: number): number {
+    return b.off > 0 ? Math.max(0, b.off - (now - b.offAt) * CATCH) : 0;
+  }
+
+  /** Abscisa del bus en `now` (hora de reproducción: `now − lag − off`). */
+  sAt(b: Bus, now: number): number {
+    return b.tt.length ? this.curve(b, now - this.lag - this.offOf(b, now)) : b.sFix;
+  }
+
+  /**
+   * Abscisa en la hora de reproducción `t`: curva cúbica monótona (Fritsch–Butland) por los puntos
+   * recientes. Velocidad continua, nunca hacia atrás, sin pasarse de una lectura; después de la
+   * última sigue con su velocidad y se detiene suavemente.
+   */
+  private curve(b: Bus, t: number): number {
+    const T = b.tt, S = b.ts, M = b.tm, n = T.length;
+    if (n === 1 || t <= T[0]) return S[0];
+    const sec = (k: number) => (S[k + 1] - S[k]) / (T[k + 1] - T[k]);
+    const tan = (k: number) => {
+      if (!Number.isNaN(M[k])) return M[k];
+      if (k === 0) return sec(0);
+      if (k === n - 1) return sec(n - 2);
+      const a = sec(k - 1), c = sec(k);
+      return a > 0 && c > 0 ? (2 * a * c) / (a + c) : 0;
+    };
+    if (t >= T[n - 1]) {
+      const v = Math.min(tan(n - 1), 3 * Math.max(0, sec(n - 2)));
+      return S[n - 1] + v * EXTRA * (1 - Math.exp(-(t - T[n - 1]) / EXTRA));
+    }
+    let i = n - 1;
+    while (i > 1 && T[i - 1] > t) i--;
+    const h = T[i] - T[i - 1], d = (S[i] - S[i - 1]) / h;
+    // Dentro de la región de Fritsch–Carlson (≤ 3 veces la pendiente del tramo): monótona.
+    const m0 = d > 0 ? Math.min(Math.max(0, tan(i - 1)), 3 * d) : 0;
+    const m1 = d > 0 ? Math.min(Math.max(0, tan(i)), 3 * d) : 0;
+    const u = (t - T[i - 1]) / h, u2 = u * u, u3 = u2 * u;
+    return (2 * u3 - 3 * u2 + 1) * S[i - 1] + (u3 - 2 * u2 + u) * h * m0 + (-2 * u3 + 3 * u2) * S[i] + (u3 - u2) * h * m1;
   }
 
   private lastUpdate = 0;
@@ -261,13 +388,23 @@ export class Fleet {
     const dt = this.lastUpdate ? Math.min(200, now - this.lastUpdate) : 1000;
     this.lastUpdate = now;
     const k = 1 - Math.exp(-dt / 120);
+    // El retraso cambia despacio (reproducción entre 0,9× y 1,1×): un cambio brusco movería a todos.
+    this.lag += Math.max(-0.1 * dt, Math.min(0.1 * dt, this.lagTarget - this.lag));
+    const ks = 1 - Math.exp(-dt / 150);
     let moving = false;
     for (const b of this.buses.values()) {
       // Fuera de la vista no se calcula (se pone al día cuando entra; su posición solo depende del tiempo).
       if (box && (b.fixX < box[0] || b.fixX > box[2] || b.fixY < box[1] || b.fixY > box[3]) && b.id !== this.selectedId) continue;
-      if (now < b.t1) moving = true;
       if (b.onPath && b.path) {
-        const s = this.sAt(b, now);
+        const target = this.sAt(b, now);
+        // Adelante, se sigue la curva (con un suavizado de 150 ms que absorbe lecturas reiniciadas);
+        // atrás nunca: si la inercia lo llevó más lejos que la lectura nueva, espera ahí.
+        const fresh = b.snap || now - b.drawnAt > 500;
+        const s = fresh ? target : target >= b.s ? b.s + (target - b.s) * ks : b.s;
+        b.v = fresh || now === b.drawnAt ? 0 : ((s - b.s) / (now - b.drawnAt)) * 1000;
+        b.drawnAt = now;
+        b.snap = false;
+        if (Math.abs(target - s) > 0.05 || b.v > 0.05) moving = true;
         const P = b.path;
         if (s === b.s && b.x !== 0) continue;
         const i = P.segmentAt(s);
@@ -280,6 +417,7 @@ export class Fleet {
         if (len > 0) this.turn(b, dx / len, dy / len, b.s === 0 && b.hx === 1 && b.hy === 0 ? 1 : k);
         b.s = s;
       } else {
+        if (now < b.t1) moving = true;
         const kk = now >= b.t1 || b.t1 <= b.t0 ? 1 : (now - b.t0) / (b.t1 - b.t0);
         const nx = b.x0 + (b.x1 - b.x0) * kk, ny = b.y0 + (b.y1 - b.y0) * kk;
         const dx = nx - b.x, dy = ny - b.y, l = Math.hypot(dx, dy);
@@ -303,9 +441,9 @@ export class Fleet {
 
   /** ¿Avanza ahora a más de ~2 m/s? */
   private moving(b: Bus, now: number): boolean {
+    if (b.onPath) return b.v > 2;
     if (now >= b.t1 || b.t1 <= b.t0) return false;
-    const dist = b.onPath ? b.s1 - b.s0 : Math.hypot(b.x1 - b.x0, b.y1 - b.y0);
-    return dist / ((b.t1 - b.t0) / 1000) > 2;
+    return Math.hypot(b.x1 - b.x0, b.y1 - b.y0) / ((b.t1 - b.t0) / 1000) > 2;
   }
 
   /** ¿Hay ondas de lectura en curso? (lectura nueva hace menos de 2,4 s y algo en foco) */
