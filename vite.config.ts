@@ -13,7 +13,7 @@ export default defineConfig({
       manifest: {
         name: 'TransMi Live',
         short_name: 'TransMi Live',
-        description: 'Todo TransMilenio en tiempo real sobre el mapa de Bogotá.',
+        description: 'TransMilenio en tiempo real sobre el mapa de Bogotá (no oficial).',
         lang: 'es-CO',
         dir: 'ltr',
         start_url: './',

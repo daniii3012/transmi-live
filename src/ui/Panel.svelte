@@ -111,7 +111,7 @@
       {@render children()}
     </div>
     <footer class="foot">
-      <span class="about">Proyecto independiente</span>
+      <span class="about">Proyecto no oficial</span>
       <span class="links"><a href="#/configuracion">Configuración</a><a href="https://github.com/daniii3012/transmi-live/blob/main/FUENTES.md" target="_blank" rel="noopener">Fuentes</a></span>
     </footer>
   </aside>

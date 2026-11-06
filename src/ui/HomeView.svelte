@@ -208,6 +208,7 @@
   {#if app.narrow}
     <!-- En el teléfono el panel no tiene pie: los enlaces del pie van al final del inicio. -->
     <nav class="links" aria-label="Más">
+      <span class="about">No oficial</span>
       <a href="#/configuracion">Configuración</a>
       <a href="https://github.com/daniii3012/transmi-live/blob/main/FUENTES.md" target="_blank" rel="noopener">Fuentes</a>
     </nav>
@@ -217,6 +218,7 @@
 <style>
   .links { display: flex; gap: var(--sp-4); padding: var(--sp-2) 0 var(--sp-5); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; }
   .links a { color: var(--fg-2); text-decoration: none; }
+  .links .about { color: var(--fg-2); margin-right: auto; }
   .links a:hover { color: var(--fg-0); }
   .home { padding: var(--sp-4); display: grid; gap: var(--sp-5); }
   .hero { display: grid; gap: 2px; }

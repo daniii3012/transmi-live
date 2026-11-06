@@ -5,7 +5,36 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#07090b" />
     <meta name="color-scheme" content="dark" />
-    <meta name="description" content="Todo TransMilenio en tiempo real sobre el mapa de Bogotá: buses, rutas, estaciones y llegadas estimadas." />
+    <title>TransMi Live · TransMilenio en tiempo real (no oficial)</title>
+    <meta name="description" content="Mapa no oficial de TransMilenio en tiempo real: buses en vivo de la troncal, duales, alimentadores, zonal y TransMiCable en Bogotá, con rutas, estaciones, llegadas estimadas y planificador de viajes." />
+    <link rel="canonical" href="https://daniii3012.github.io/transmi-live/" />
+    <!-- Vista previa al compartir el enlace (WhatsApp, Telegram, X, Facebook). -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="TransMi Live" />
+    <meta property="og:locale" content="es_CO" />
+    <meta property="og:url" content="https://daniii3012.github.io/transmi-live/" />
+    <meta property="og:title" content="TransMi Live · TransMilenio en tiempo real (no oficial)" />
+    <meta property="og:description" content="Todos los buses de TransMilenio en vivo sobre el mapa de Bogotá: rutas, estaciones, llegadas estimadas y planificador. Proyecto independiente." />
+    <meta property="og:image" content="https://daniii3012.github.io/transmi-live/og.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Mapa oscuro de Bogotá con las troncales de TransMilenio y sus buses en color" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "TransMi Live",
+        "url": "https://daniii3012.github.io/transmi-live/",
+        "description": "Mapa no oficial de TransMilenio en tiempo real: buses en vivo, rutas, estaciones, llegadas estimadas y planificador de viajes en Bogotá.",
+        "applicationCategory": "TravelApplication",
+        "operatingSystem": "Web",
+        "inLanguage": "es-CO",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "COP" },
+        "areaServed": { "@type": "City", "name": "Bogotá" }
+      }
+    </script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -14,10 +43,21 @@
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="./icons/favicon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-    <title>TransMi Live</title>
   </head>
   <body>
     <div id="app"></div>
+    <noscript>
+      <main style="max-width: 40rem; margin: 3rem auto; padding: 0 1.5rem; font: 15px/1.6 system-ui, sans-serif; color: #c4c9d0">
+        <h1>TransMi Live · TransMilenio en tiempo real</h1>
+        <p>
+          Mapa no oficial de TransMilenio en Bogotá: los buses de la troncal, los duales, los alimentadores,
+          el zonal y TransMiCable moviéndose en vivo, con sus rutas, estaciones y vagones, llegadas estimadas
+          a cada estación y paradero, y un planificador de viajes.
+        </p>
+        <p>La página necesita JavaScript para dibujar el mapa.</p>
+        <p>Proyecto independiente; no está afiliado a TRANSMILENIO S.A.</p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -1,7 +1,9 @@
 # TransMi Live
 
-Todo TransMilenio en tiempo real sobre el mapa de Bogotá: troncal, duales, alimentadores, zonal y
-TransMiCable, con sus rutas, estaciones, vagones y llegadas estimadas. Web instalable (PWA).
+TransMilenio en tiempo real sobre el mapa de Bogotá (no oficial): troncal, duales, alimentadores, zonal
+y TransMiCable, con sus rutas, estaciones, vagones y llegadas estimadas. Web instalable (PWA).
+
+**En línea:** <https://daniii3012.github.io/transmi-live/>
 
 - Buses moviéndose por su carril, con el color de su ruta; en 3D, con volumen (articulados y
   biarticulados que se doblan en las curvas) y estaciones con su planta real.

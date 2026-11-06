@@ -109,6 +109,9 @@
 
 <svelte:window onkeydown={onKey} />
 
+<!-- Título de la página para lectores de pantalla y buscadores (la marca visible es un botón). -->
+<h1 class="sr">TransMi Live: TransMilenio en tiempo real (no oficial)</h1>
+
 {#if app.net}
   <Panel>
     {#key app.view.kind === 'home' ? 'home' : app.view.kind === 'plan' ? 'plan' : `${app.view.kind}:${app.view.id}`}
