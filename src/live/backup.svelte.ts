@@ -2,6 +2,7 @@ import type { Network } from '../data/network';
 import type { Fleet } from './fleet';
 import { apiBase, type VehiclesV1 } from './api';
 import { KX, KY } from '../domain/geo';
+import { resolveReading } from './backupResolve';
 
 /**
  * Respaldo por ruta (ver transmi-live-worker/docs/WORKER.md): cuando el alimentador en vivo deja de
@@ -43,6 +44,8 @@ class Backup {
   /** Rutas consultadas en la última vuelta y su hora. */
   codes = $state<string[]>([]);
   at = $state<number | null>(null);
+  /** Tras incorporar lecturas (la app actualiza conteos y listas, como con el alimentador). */
+  onChange: (() => void) | null = null;
   private lastRun = 0;
   private pauseUntil = 0;
   private running = false;
@@ -96,12 +99,15 @@ class Backup {
         if (res.status === 404) { this.status = 'unavailable'; this.pauseUntil = Date.now() + 10 * 60_000; return; } // respaldo apagado en el Worker
         if (!res.ok) { this.fail(); return; }
         const data = (await res.json()) as RouteResponse;
-        fleet.merge(this.toSnapshot(net, fleet, data));
+        // Reemplaza: los buses del GTFS de este código que no vinieron en el respaldo salen (son de
+        // antes de que el alimentador se detuviera).
+        fleet.merge(this.toSnapshot(net, fleet, data), Date.now(), [code]);
         got.push(code);
       }
       this.status = 'active';
       this.codes = got;
       this.at = Date.now();
+      this.onChange?.();
     } finally {
       this.running = false;
     }
@@ -119,10 +125,12 @@ class Backup {
     const out: VehiclesV1 = { v: 1, t: r.t, n: 0, id: [], label: [], plate: [], route: [], lat: [], lon: [], age: [], stop: [], seq: [], start: [] };
     for (let i = 0; i < r.n; i++) {
       const lon = -74.1 + r.lon[i] / 1e5, lat = 4.6 + r.lat[i] / 1e5;
-      const routeId = this.resolve(net, r.route[i], r.rcode[i] || r.code, r.dest[i], r.sys[i], lon * KX, lat * KY);
-      if (!routeId) continue; // ninguna variante de nuestra red le corresponde: no se inventa
       const id = (r.label[i] && byLabel.get(r.label[i])) || `ruta:${r.label[i] || r.id[i]}`;
       const prev = fleet.buses.get(id);
+      // Variante y sentido por destino, rumbo y cercanía (la Ruta Fácil 5 no mezcla Portal Américas con
+      // Av. Jiménez). Sin variante que corresponda, no se dibuja.
+      const routeId = resolveReading(net, { routeId: r.route[i], code: r.rcode[i] || r.code, dest: r.dest[i], sys: r.sys[i], x: lon * KX, y: lat * KY, bearing: r.bearing[i] }, prev?.routeId);
+      if (!routeId) continue;
       out.id.push(id);
       out.label.push(r.label[i]);
       out.plate.push(prev?.plate ?? '');
@@ -136,28 +144,6 @@ class Backup {
       out.n++;
     }
     return out;
-  }
-
-  /**
-   * Ruta de nuestra red para una lectura: su `route_id` si existe (o el vigente, si el GTFS lo
-   * re-emitió); si no, entre las variantes con ese código y del mismo sistema, la de recorrido más
-   * cercano (a menos de 120 m), y a igual distancia la de destino parecido.
-   */
-  private resolve(net: Network, routeId: string, code: string, dest: string, sys: 'troncal' | 'zonal', x: number, y: number): string | null {
-    const direct = routeId ? net.resolveRoute(routeId) : null;
-    if (direct) return direct;
-    const d = norm(dest);
-    let best: { id: string; dist: number; score: number } | null = null;
-    for (const r of net.routes.values()) {
-      if (r.code.toUpperCase() !== code.toUpperCase()) continue;
-      if ((sys === 'zonal') !== (r.sys === 'zonal')) continue;
-      const path = net.paths.get(r.id);
-      const hit = path?.nearest(x, y, undefined, 0, Infinity, 120);
-      if (!hit || hit.d > 120) continue;
-      const score = d && (norm(r.dest).includes(d) || d.includes(norm(r.dest))) ? 1 : 0;
-      if (!best || hit.d - score * 30 < best.dist - best.score * 30) best = { id: r.id, dist: hit.d, score };
-    }
-    return best?.id ?? null;
   }
 }
 

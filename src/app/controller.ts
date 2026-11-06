@@ -97,6 +97,8 @@ export class Controller {
       if (document.hidden) this.wake = null;
       else { if (app.following) void this.keepAwake(true); void this.checkData(); }
     });
+    // El respaldo por ruta también cambia la flota: conteos y listas al día (como en onData).
+    backup.onChange = () => { app.counts = this.fleet.counts(); app.version++; this.map.triggerRepaint(); };
     this.clock = window.setInterval(() => {
       app.now = Date.now();
       watch.check(this.net, this.fleet, app.now);

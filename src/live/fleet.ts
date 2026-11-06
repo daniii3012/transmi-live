@@ -168,6 +168,9 @@ export class Fleet {
 
   /** Incorpora una instantánea. `now` en ms (reloj de pared). */
   ingest(d: VehiclesV1, now = Date.now()) {
+    // La misma instantánea otra vez (alimentador detenido): nada nuevo. Sin esto, volverían los buses
+    // que el respaldo por ruta reemplazó y se irían los suyos.
+    if (d.t === this.feedTime && this.buses.size) return;
     // Lo que tarda en llegar una lectura nueva (todas las de una instantánea traen la misma hora) y el
     // intervalo entre instantáneas del alimentador.
     if (d.t !== this.feedTime && d.n) {
@@ -204,8 +207,14 @@ export class Fleet {
    * Lecturas de UNA ruta (respaldo por ruta, ver live/backup.svelte.ts): se incorporan como las del
    * alimentador, pero sin quitar los demás buses ni tocar el ritmo del alimentador (retraso, intervalo).
    */
-  merge(d: VehiclesV1, now = Date.now()) {
-    for (let i = 0; i < d.n; i++) this.upsert(d, i, now);
+  merge(d: VehiclesV1, now = Date.now(), replaceCodes: string[] = []) {
+    const got = new Set<string>();
+    for (let i = 0; i < d.n; i++) got.add(this.upsert(d, i, now));
+    // Con `replaceCodes`, el respaldo reemplaza a esas rutas: sus buses que no vinieron en él salen.
+    if (replaceCodes.length) {
+      const codes = new Set(replaceCodes.map((c) => c.toUpperCase()));
+      for (const [id, b] of this.buses) if (!got.has(id) && b.route && codes.has(b.route.code.toUpperCase())) this.buses.delete(id);
+    }
     for (const f of this.listeners) f();
   }
 
