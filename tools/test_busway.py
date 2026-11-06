@@ -73,6 +73,20 @@ class FootprintTests(unittest.TestCase):
         self.assertIsNotNone(ring)
         self.assertLess(max(p[0] for p in ring), 225)
 
+    def test_isla_ancha_una_fila_por_carril(self):
+        # Carriles a 26 m (y = 0 e y = 26): dos filas de 5 m, cada una a 2 m de su carril; nada en el medio.
+        idx = bw.LaneIndex([lane([[0, 0], [400, 0]]), lane([[400, 26], [0, 26]])], XY)
+        rings = bw.estimate_footprints((200, 13), [(170, 13), (230, 13)], idx)
+        self.assertEqual(len(rings), 2)
+        spans = sorted((min(p[1] for p in r), max(p[1] for p in r)) for r in rings)
+        self.assertAlmostEqual(spans[0][0], 2, places=3)
+        self.assertAlmostEqual(spans[0][1], 7, places=3)
+        self.assertAlmostEqual(spans[1][0], 19, places=3)
+        self.assertAlmostEqual(spans[1][1], 24, places=3)
+        # Con 14 m sigue siendo un solo andén centrado.
+        idx = bw.LaneIndex([lane([[0, 0], [400, 0]]), lane([[400, 14], [0, 14]])], XY)
+        self.assertEqual(len(bw.estimate_footprints((200, 7), [(200, 7)], idx)), 1)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)

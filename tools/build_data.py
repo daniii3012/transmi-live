@@ -1181,8 +1181,7 @@ def main():
         rings = []
         for g in groups:
             cx, cy = sum(p[0] for p in g) / len(g), sum(p[1] for p in g) / len(g)
-            ring = bw.estimate_footprint((cx, cy), g, lane_idx)
-            if ring:
+            for ring in bw.estimate_footprints((cx, cy), g, lane_idx):
                 rings += modules(ring, g)
         if not rings or not near(rings):
             n_fp['none'] += 1

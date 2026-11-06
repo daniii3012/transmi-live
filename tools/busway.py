@@ -8,7 +8,7 @@ OpenStreetMap, ver `tools/import_busway.py`). Si no está, la compilación sigue
   está a menos de 4 m del eje y el 88 % a menos de 8 m; el resto son tramos dual por calle, portales y
   calzadas sin trazar en OSM, que se dejan como vienen. Las transiciones se suavizan (sin quiebres) y
   los huecos cortos (cruces donde la vía de OSM se corta) se rellenan.
-- `estimate_footprint`: huella de una estación sin edificio en OSM, entre los carriles de los dos
+- `estimate_footprints` (y `estimate_footprint`, un solo andén): huella de una estación sin edificio en OSM, entre los carriles de los dos
   sentidos, a lo largo del eje y con el largo de sus vagones. Se marca como estimada.
 
 Todo en la proyección local de la página (metros, equirectangular en 4,65° N).
@@ -167,8 +167,8 @@ def snap_path(m: list[tuple[float, float]], idx: LaneIndex, R: float = 8.0, step
     return out, sum(hit) / N
 
 
-def estimate_footprint(center, wagons, idx: LaneIndex):
-    """Rectángulo de plataforma entre los carriles de los dos sentidos; None si no hay con qué."""
+def _lane_pair(center, idx: LaneIndex):
+    """Eje (u), normal (n) y desfases (a < b) del par de carriles paralelos entre los que va la estación."""
     near = idx.around(center, 30.0)
     if not near:
         return None
@@ -198,11 +198,13 @@ def estimate_footprint(center, wagons, idx: LaneIndex):
             best = (dist, a, b)
     if best is None or best[0] > 12:
         return None
-    _, a, b = best
-    gap = b - a
-    width = max(3.0, min(6.0, gap - 7.0))
-    mid = (a + b) / 2
-    cx, cy = center[0] + nx * mid, center[1] + ny * mid
+    return (ux, uy), (nx, ny), best[1], best[2]
+
+
+def _platform(center, u, n, off, width, wagons, idx: LaneIndex):
+    """Andén de ancho `width` a `off` m del centro (sobre la normal), tan largo como los vagones."""
+    (ux, uy), (nx, ny) = u, n
+    cx, cy = center[0] + nx * off, center[1] + ny * off
     # Largo: lo que abarcan los vagones a lo largo del eje, con 12 m a cada lado.
     proj = [(wx - cx) * ux + (wy - cy) * uy for wx, wy in wagons] or [0.0]
     s0, s1 = min(proj) - 12, max(proj) + 12
@@ -239,4 +241,39 @@ def estimate_footprint(center, wagons, idx: LaneIndex):
             s0 = max(v for v in inside if v < mid) + 2
         if s1 - s0 < 30:
             return None
+    return None
+
+
+def estimate_footprint(center, wagons, idx: LaneIndex):
+    """Rectángulo de plataforma entre los carriles de los dos sentidos; None si no hay con qué."""
+    pair = _lane_pair(center, idx)
+    if not pair:
+        return None
+    u, n, a, b = pair
+    return _platform(center, u, n, (a + b) / 2, max(3.0, min(6.0, b - a - 7.0)), wagons, idx)
+
+
+WIDE_GAP = 18.0  # m entre ejes de carril: desde ahí la isla es ancha y lleva una fila de vagones por carril
+ROW_W = 5.0  # ancho de cada fila
+ROW_CLEAR = 2.0  # del eje del carril al borde del andén (el bus para pegado)
+
+
+def estimate_footprints(center, wagons, idx: LaneIndex):
+    """Andenes estimados entre los carriles de los dos sentidos.
+
+    Si los dos carriles están a 18 m o más, un andén en el medio quedaría lejos de los dos: los buses
+    paran pegados al andén. Ahí la estación es una isla ancha con una fila de vagones contra cada carril
+    y un corredor en el medio (las de la Calle 26, Av. Américas – Av. Boyacá; revisión satelital del
+    05/11/2026). Si no, un solo andén centrado.
+    """
+    pair = _lane_pair(center, idx)
+    if not pair:
+        return []
+    u, n, a, b = pair
+    if b - a >= WIDE_GAP:
+        rows = [_platform(center, u, n, a + ROW_CLEAR + ROW_W / 2, ROW_W, wagons, idx),
+                _platform(center, u, n, b - ROW_CLEAR - ROW_W / 2, ROW_W, wagons, idx)]
+        return [r for r in rows if r]
+    r = _platform(center, u, n, (a + b) / 2, max(3.0, min(6.0, b - a - 7.0)), wagons, idx)
+    return [r] if r else []
     return None
