@@ -887,12 +887,13 @@ def main():
 
     def modules(ring, wagons):
         """La huella estimada (un rectángulo entre los carriles) partida en vagones: las paradas del GTFS
-        a lo largo del eje se agrupan (más de 25 m entre grupos) y cada grupo es un módulo."""
+        a lo largo del eje se agrupan (más de 60 m entre grupos: en la Calle 80 los vagones a 40–50 m van
+        bajo una cubierta continua) y cada grupo es un módulo."""
         (cx, cy), (ux, uy), _, L, _ = frame(ring)
         proj = sorted((wx - cx) * ux + (wy - cy) * uy for wx, wy in wagons)
         groups = []
         for v in proj:
-            if groups and v - groups[-1][1] <= 25:
+            if groups and v - groups[-1][1] <= 60:
                 groups[-1][1] = v
             else:
                 groups.append([v, v])

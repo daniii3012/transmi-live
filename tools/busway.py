@@ -181,17 +181,27 @@ def estimate_footprint(center, wagons, idx: LaneIndex):
         if abs(dx * ux + dy * uy) < 0.9:
             continue
         offs.append((qx - center[0]) * nx + (qy - center[1]) * ny)
-    left = [o for o in offs if o < -0.5]
-    right = [o for o in offs if o > 0.5]
-    if left and right:
-        a, b = max(left), min(right)
-        gap = b - a
-        if gap < 7:
-            return None
-        width = max(3.0, min(6.0, gap - 7.0))
-        mid = (a + b) / 2
-    else:
+    # El par de carriles paralelos consecutivos (7–30 m entre sí) más cercano al punto: el andén va entre
+    # ellos. El punto de la estación a veces cae sobre uno de los dos carriles (Calle 80: desfase ~0).
+    offs = sorted(offs)
+    merged = []
+    for o in offs:
+        if merged and o - merged[-1] < 1.0:
+            continue
+        merged.append(o)
+    best = None
+    for a, b in zip(merged, merged[1:]):
+        if not 7 <= b - a <= 30:
+            continue
+        dist = 0.0 if a <= 0 <= b else min(abs(a), abs(b))
+        if best is None or dist < best[0]:
+            best = (dist, a, b)
+    if best is None or best[0] > 12:
         return None
+    _, a, b = best
+    gap = b - a
+    width = max(3.0, min(6.0, gap - 7.0))
+    mid = (a + b) / 2
     cx, cy = center[0] + nx * mid, center[1] + ny * mid
     # Largo: lo que abarcan los vagones a lo largo del eje, con 12 m a cada lado.
     proj = [(wx - cx) * ux + (wy - cy) * uy for wx, wy in wagons] or [0.0]
