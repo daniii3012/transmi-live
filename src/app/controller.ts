@@ -16,6 +16,7 @@ import { buildObras, loadObras, setObras } from '../map/obras';
 import { Elevation } from '../map/structures';
 import { buildBridges, buildFootbridges, buildStations, buildTrenches, type Structures } from '../map/structuresLayer';
 import { buildMetro, type MetroStats } from '../map/metro3d';
+import { buildCable, loadCable } from '../map/cable3d';
 import { applyBaseTheme } from '../map/style';
 import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
 import { go, parse, type View } from './router';
@@ -608,7 +609,7 @@ export class Controller {
   /** Estructuras en WebGL (troncal, metro, obras), en dos pasadas: opaca y translúcida. */
   structs?: Structures;
   private structures = () => {
-    if (this.structs) { this.structs.show('tm', app.threeD); this.map.triggerRepaint(); }
+    if (this.structs) { this.structs.show('tm', app.threeD); this.cable3d(); this.map.triggerRepaint(); }
     if (!app.threeD) { this.fleet.elevation = null; return; }
     if (this.elevation) { this.fleet.elevation = (x, y, hx, hy) => this.elevation!.at(x, y, hx, hy); return; }
     if (this.map.getZoom() < 14.5) return;
@@ -644,6 +645,17 @@ export class Controller {
     }
     if (!this.metroBuilt) return;
     void this.metroBuilt.then(() => { this.structs?.show('metro', app.layersOn.metro && app.threeD); this.map.triggerRepaint(); });
+  }
+
+  /** TransMiCable en 3D (torres, cables y estaciones): con la vista 3D, siempre. */
+  private cableBuilt: Promise<void> | null = null;
+  private cable3d() {
+    if (!this.structs) return;
+    if (app.threeD && !this.cableBuilt) {
+      this.cableBuilt = loadCable().then((d) => { this.structs!.set('cable', (solid, glass) => buildCable(d, solid, glass), 0); }).catch(() => { this.cableBuilt = null; });
+    }
+    if (!this.cableBuilt) return;
+    void this.cableBuilt.then(() => { this.structs?.show('cable', app.threeD); this.map.triggerRepaint(); });
   }
 
   /** Troncales en obra en 3D (puentes y deprimidos con el diseño terminado): con el modo de obras y la

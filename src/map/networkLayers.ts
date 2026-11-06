@@ -543,6 +543,10 @@ export class NetworkLayers {
   set3d(on: boolean) {
     const m = this.map;
     for (const id of ['station-fp', 'station-fp-line']) m.setLayoutProperty(id, 'visibility', on ? 'none' : 'visible');
+    // En 3D el cable va en el aire (cable3d.ts): su trazo en el suelo se desvanece entre z14 y z15, donde
+    // el cable ya se lee; a escala de ciudad se queda.
+    const fade = on ? (['interpolate', ['linear'], ['zoom'], 14, 1, 15, ['case', ['==', ['get', 'sys'], 'cable'], 0, 1]] as unknown as number) : 1;
+    for (const id of ['routes-core', 'routes-core-casing']) m.setPaintProperty(id, 'line-opacity', fade);
   }
 
   /** Marcas de estación dibujadas en lienzo: cuadrado claro con borde oscuro; portal más grande;

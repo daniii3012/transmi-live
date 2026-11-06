@@ -20,8 +20,10 @@ export const M = {
   ViaTop: 22, ViaSide: 23,
   TWall: 24, TFloor: 25, Lid: 26,
   FDeck: 27, FSide: 28, FRail: 29,
+  /** Cables del TransMiCable, del color de su ruta (en 3D reemplazan su trazo en el suelo). */
+  Cable: 30,
 } as const;
-export const MATS = 30;
+export const MATS = 31;
 
 /** Color y opacidad por material (la opacidad solo cuenta en la pasada translúcida). */
 type Mat = [string, number];
@@ -33,6 +35,7 @@ export const STRUCT_THEMES: Record<'dark' | 'light', Mat[]> = {
     ['#66717c', 0.3], ['#4e5862', 0.26],
     ['#3a444e', 1], ['#2a323a', 1], ['#5d6872', 0.5],
     ['#626d78', 1], ['#47515b', 1], ['#a7b8c7', 0.22],
+    ['#e30613', 1],
   ],
   light: [
     ['#dde1e5', 1], ['#b7bec5', 1], ['#c4ccd4', 0.86], ['#9aa3ac', 1], ['#d3d9df', 1], ['#b3bbc3', 1], ['#a2abb4', 1], ['#c6cdd4', 1], ['#7f93a6', 0.16],
@@ -41,6 +44,7 @@ export const STRUCT_THEMES: Record<'dark' | 'light', Mat[]> = {
     ['#c3cad1', 0.42], ['#a7b0b9', 0.36],
     ['#b3bcc5', 1], ['#c9d1d9', 1], ['#c9d0d7', 0.55],
     ['#e1e5e9', 1], ['#bcc4cb', 1], ['#7f93a6', 0.25],
+    ['#e30613', 1],
   ],
 };
 
