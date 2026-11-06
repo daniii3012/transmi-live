@@ -654,6 +654,20 @@ def main():
     # los carriles de los dos sentidos con el largo de sus vagones.
     fp_osm = {s['id']: s for s in (busway or {}).get('stations', [])}
     n_fp = Counter()
+    # Tramos en obra (data/curated/obras.json): sus estaciones son provisionales y no se modelan.
+    obras_p = ROOT / 'data' / 'curated' / 'obras.json'
+    obras = [(z, [xy(lo, la) for lo, la in z['line']]) for z in (json.loads(obras_p.read_text())['zones'] if obras_p.exists() else [])]
+
+    def in_works(lon, lat):
+        p = xy(lon, lat)
+        for z, line in obras:
+            for (ax, ay), (bx, by) in zip(line, line[1:]):
+                dx, dy = bx - ax, by - ay
+                f = max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / (dx * dx + dy * dy)))
+                if math.hypot(p[0] - ax - f * dx, p[1] - ay - f * dy) <= z['buffer_m']:
+                    return z['id']
+        return None
+    provisional = []
 
     def footprint(s, kind: str) -> dict:
         """Huella aceptada solo si su centro queda a ≤ 120 m de los vagones (o del punto de la
@@ -696,8 +710,12 @@ def main():
         name = nice(s['stop_name'])
         kind = 'cable' if s['stop_id'].startswith('cable') else 'portal' if re.match(r'(?i)portal|terminal', name) else 'station'
         rs = sorted({routes[ri]['route_id'] for ri in stop_routes.get(stop_ix[s['stop_id']], ())})
-        fp = footprint(s, kind) if kind != 'cable' else {}
         lon, lat = float(s['stop_lon']), float(s['stop_lat'])
+        # Provisionales (tramo en obra) y cerradas: sin huella ni cuerpo; solo la marca.
+        works = in_works(lon, lat) if kind != 'cable' else None
+        if works:
+            provisional.append(name)
+        fp = footprint(s, kind) if kind != 'cable' and not works and rs else {}
         if fp:
             # El punto del GTFS a veces queda lejos de la plataforma (Calle 57: ~250 m al sur); la huella
             # sale de los vagones y de la calzada, así que el nombre y el punto van a su centro.
@@ -708,7 +726,7 @@ def main():
         stations.append({
             'id': s['stop_id'], 'name': name, 'short': short(name), 'kind': kind,
             'lon': round(lon, 6), 'lat': round(lat, 6),
-            'routes': rs, **({} if rs else {'closed': True}),
+            'routes': rs, **({} if rs else {'closed': True}), **({'prov': works} if works else {}),
             **fp,
             'platforms': [
                 {'id': k['stop_id'], 'name': clean(k['stop_name']), 'code': k['stop_code'],
@@ -765,6 +783,8 @@ def main():
     log(f'tramos de corredor: {len(corridor_segments)}; sin letra {n_before} → {sum(1 for v in corridor_segments.values() if not v["z"])} '
         f'({dropped} expresos duplicados descartados)')
     log(f'huellas de estación: {n_fp["osm"]} de OSM ({n_fp["osm_lejos"]} descartadas por lejanas), {n_fp["est"]} estimadas, {n_fp["none"]} sin huella')
+    if provisional:
+        log(f'provisionales (tramo en obra, sin modelar): {len(provisional)}: ' + ', '.join(provisional))
     shifts.sort(reverse=True)
     if shifts:
         log(f'punto de estación al centro de la huella: mediana {shifts[len(shifts) // 2][0]:.0f} m; mayores: '
@@ -858,8 +878,8 @@ def main():
     log(f"cambios en la red: {len(today)} hoy, {len(changes['entries'])} en 60 días, {len(changes['aliases'])} alias de ids")
     new_st = {e['station'] for e in today if e['kind'] == 'station-new'}
     for s in stations:
-        if s['id'] not in new_st or s['kind'] == 'cable':
-            continue
+        if s['id'] not in new_st or s['kind'] == 'cable' or s.get('prov') or s.get('closed'):
+            continue  # las provisionales y las cerradas no se modelan
         if not s.get('fp'):
             review.append(f"Estación nueva sin huella: {s['name']} (revisar en OSM y `tools/import_busway.py`).")
         if not letters_of.get(s['id']) and s.get('routes'):

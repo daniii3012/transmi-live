@@ -1,0 +1,18 @@
+{
+  "_": "Tramos de troncal en obra. Sus estaciones son provisionales (cierran, se trasladan o se abren temporales) y no se modelan: sin huella ni cuerpo en 3D, solo la marca y su ficha. Una estación nueva que aparezca en el tramo queda incluida sola. Se quita la zona cuando las estaciones definitivas entren en servicio.",
+  "zones": [
+    {
+      "id": "metro-l1-caracas",
+      "name": "Primera línea del metro: troncal Caracas entre la Calle 76 y Hospital",
+      "note": "Estaciones temporales mientras se construye el viaducto; las definitivas quedarán bajo él (TRANSMILENIO y Alcaldía, 2026).",
+      "buffer_m": 90,
+      "line": [
+        [-74.06095, 4.66380], [-74.06122, 4.66322], [-74.06220, 4.65760], [-74.06309, 4.65482],
+        [-74.06499, 4.64771], [-74.06547, 4.64503], [-74.06657, 4.63874], [-74.06675, 4.63772],
+        [-74.06801, 4.63069], [-74.06875, 4.62660], [-74.06973, 4.62162], [-74.07204, 4.61693],
+        [-74.07578, 4.60956], [-74.07687, 4.60786], [-74.08050, 4.60279], [-74.08370, 4.59832],
+        [-74.08623, 4.59507]
+      ]
+    }
+  ]
+}

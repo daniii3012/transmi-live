@@ -29,6 +29,8 @@ export interface Station {
   lat: number;
   routes: string[];
   closed?: boolean;
+  /** Provisional: en un tramo en obra (data/curated/obras.json); no se modela, solo la marca. */
+  prov?: string;
   /** Huella (anillos lon, lat): de OSM o estimada entre los carriles (F7.7). */
   fp?: [number, number][][];
   fpk?: 'osm' | 'est';

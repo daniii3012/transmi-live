@@ -87,7 +87,9 @@
     </div>
 
     {#if station?.closed}
-      <p class="notice">Sin servicio programado en el horario vigente. Varias estaciones de la Caracas están cerradas por las obras del metro.</p>
+      <p class="notice">Sin servicio programado en el horario vigente.{station.prov ? ' Cerrada por las obras de la primera línea del metro.' : ''}</p>
+    {:else if station?.prov}
+      <p class="notice">Estación provisional mientras se construye la primera línea del metro.</p>
     {/if}
 
     <section>
