@@ -48,7 +48,7 @@ export class Network {
   lanes: { z: string | null; c: Float64Array }[] | null = null;
   /** Puentes de la troncal para el 3D (`loadStructures`): tramos elevados y rampas con su altura por
    * vértice (m) y su ancho. */
-  pieces: { w: number; z: number[]; c: Float64Array; k?: string }[] | null = null;
+  pieces: { w: number; z: number[]; c: Float64Array; k?: string; cov?: number }[] | null = null;
   private patterns?: Record<string, Pattern>;
   /** Cambios en la red (60 días) y alias de ids re-emitidos (decisión 011). */
   changes: ChangesFile = { v: 1, updated: '', entries: [], aliases: {} };
@@ -120,8 +120,8 @@ export class Network {
   loadStructures(): Promise<void> {
     return this.once('structures', async () => {
       try {
-        const f = await getJSON<{ v: number; scale: number; pieces: { w: number; z: number[]; d: number[]; k?: string }[] }>('structures.json');
-        this.pieces = (f.pieces ?? []).map((p) => ({ w: p.w, z: p.z, c: decodeShape(p.d, f.scale), k: p.k }));
+        const f = await getJSON<{ v: number; scale: number; pieces: { w: number; z: number[]; d: number[]; k?: string; cov?: number }[] }>('structures.json');
+        this.pieces = (f.pieces ?? []).map((p) => ({ w: p.w, z: p.z, c: decodeShape(p.d, f.scale), k: p.k, cov: p.cov }));
       } catch { this.pieces = []; /* sin puentes: todo a nivel del suelo */ }
     });
   }

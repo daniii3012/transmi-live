@@ -14,7 +14,7 @@ import { app, saveLayers, savePrefs, loadPrefs } from './store.svelte';
 import { loadMetro, setMetro } from '../map/metroLayers';
 import { buildObras, loadObras, setObras } from '../map/obras';
 import { Elevation } from '../map/structures';
-import { buildBridges, buildStations, type Structures } from '../map/structuresLayer';
+import { buildBridges, buildStations, buildTrenches, type Structures } from '../map/structuresLayer';
 import { buildMetro, type MetroStats } from '../map/metro3d';
 import { applyBaseTheme } from '../map/style';
 import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
@@ -616,7 +616,7 @@ export class Controller {
       const pieces = this.net.pieces;
       if (!pieces?.length) return;
       this.elevation ??= new Elevation(pieces);
-      this.structs?.set('tm', (solid, glass) => { buildStations(this.net, solid, glass); buildBridges(pieces, solid, glass); });
+      this.structs?.set('tm', (solid, glass, mask) => { const deep: [number, number][][] = []; buildStations(this.net, solid, glass, pieces, deep); buildBridges(pieces, solid, glass); buildTrenches(pieces, deep, solid, glass, mask); });
       this.structures();
       this.map.triggerRepaint();
     });

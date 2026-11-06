@@ -213,7 +213,39 @@ def smooth01(u: float) -> float:
 
 
 def bridge_structures(busway, roads=None):
-    """Puentes de la calzada exclusiva para el 3D, como piezas con su altura por vértice.
+    """Puentes y deprimidos de la calzada exclusiva para el 3D, como piezas con su altura por vértice
+    (ver `_elevate`), y los puentes viales que van con la troncal (`road_companions`). Los deprimidos
+    llevan `k: 'tunel'` y, donde OSM dice que pasan bajo una calle, `cov`."""
+    pieces = _elevate(busway, 1)
+    tunnels = _elevate(busway, -1)
+    for pc in tunnels:
+        pc['k'] = 'tunel'
+    if roads:
+        pieces += road_companions(pieces, roads)
+    pieces += tunnels
+    out = []
+    for pc in pieces:
+        pts = pc['pts']
+        # Solo se simplifica en planta un tramo de altura constante: en una rampa, cada vértice lleva su
+        # cota (en un tramo recto, la simplificación dejaría solo los extremos y lo aplanaría).
+        flat = max(pc['z']) - min(pc['z']) < 0.05
+        keep = sorted(set(simplify(pts, 0.2)) | {0, len(pts) - 1}) if flat else list(range(len(pts)))
+        enc, px, py = [], 0, 0
+        for k in keep:
+            X, Y = round(pts[k][0] / KX * E6), round(pts[k][1] / KY * E6)
+            enc.extend((X - px, Y - py))
+            px, py = X, Y
+        o = {'w': round(pc['w'], 1), 'z': [round(pc['z'][k], 2) for k in keep], 'd': enc}
+        if pc.get('k'):
+            o['k'] = pc['k']
+        if pc.get('cov'):
+            o['cov'] = 1
+        out.append(o)
+    return out
+
+
+def _elevate(busway, sign):
+    """Tramos elevados (`sign` = 1) o deprimidos (−1) de la calzada exclusiva, con su altura por vértice.
 
     La regla del simulador (traffic.mjs, `elevate`), que ya había corregido este error: «antes [las
     rampas] iban siempre fuera y la de Comuneros empezaba 157 m antes, dentro de la estación».
@@ -234,12 +266,12 @@ def bridge_structures(busway, roads=None):
     R_PER_M = 1.5 / SLOPE  # rampa suavizada (smoothstep) con pendiente máxima del 7 %: largo 1,5·H/0,07
     items = []
     for st in busway['structures']:
-        if st['kind'] != 'bridge' or (st.get('level') or 0) <= 0 or len(st['c']) < 2:
+        if st['kind'] != ('bridge' if sign > 0 else 'tunnel') or (st.get('level') or 0) * sign <= 0 or len(st['c']) < 2:
             continue
         pts = [xy(lo, la) for lo, la in st['c']]
         if sum(math.hypot(bx - ax, by - ay) for (ax, ay), (bx, by) in zip(pts, pts[1:])) < 2:
             continue
-        items.append({'id': st['id'], 'pts': pts, 'lv': st['level'],
+        items.append({'id': st['id'], 'pts': pts, 'lv': st['level'], 'cov': st.get('grade') == 'underpass',
                       'w': 3.4 * ((lane_by_id.get(st['id']) or {}).get('lanes') or 1) + 1.0})
     key = lambda p: (round(p[0]), round(p[1]))
     bridge_ids = {it['id'] for it in items}
@@ -256,7 +288,10 @@ def bridge_structures(busway, roads=None):
         L = sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(c, c[1:]))
         a, b = ends_of.get(key(c[0])), ends_of.get(key(c[-1]))
         if L < 40 and a and b:
-            items.append({'id': l['id'], 'pts': c, 'lv': min(min(a), min(b)), 'w': 3.4 * (l.get('lanes') or 1) + 1.0})
+            # El hueco va al nivel más cercano al suelo de los dos (el más bajo de dos puentes, el menos hondo
+            # de dos deprimidos).
+            lv = min(min(a), min(b)) if sign > 0 else max(max(a), max(b))
+            items.append({'id': l['id'], 'pts': c, 'lv': lv, 'w': 3.4 * (l.get('lanes') or 1) + 1.0})
             filled += 1
     for it in items:
         it['H'] = LEVEL_M * it['lv']
@@ -293,7 +328,7 @@ def bridge_structures(busway, roads=None):
     top, reach = defaultdict(float), defaultdict(float)
     for it in items:
         cid = comp[it['a']]
-        H, R = it['H'], R_PER_M * it['H']
+        H, R = abs(it['H']), R_PER_M * abs(it['H'])
         d0, d1 = dist.get(it['a'], 1e6), dist.get(it['b'], 1e6)
         far = min(max(d0, d1), (d0 + d1 + it['L']) / 2)  # el punto del tramo más lejos de un extremo libre
         top[cid] = max(top[cid], H)
@@ -327,7 +362,7 @@ def bridge_structures(busway, roads=None):
     pieces = []
     inside = outside = 0
     for it in items:
-        H, R = it['H'], R_PER_M * it['H']
+        H, R = it['H'], R_PER_M * abs(it['H'])
         dense = densify(it['pts'], 4.0)
         cum = [0.0]
         for (ax, ay), (bx, by) in zip(dense, dense[1:]):
@@ -337,10 +372,10 @@ def bridge_structures(busway, roads=None):
         if good[comp[it['a']]]:
             inside += 1
             z = [H * smooth01(min(d0 + s, d1 + L - s) / R) for s in cum]
-            pieces.append({'pts': dense, 'z': z, 'w': it['w']})
+            pieces.append({'pts': dense, 'z': z, 'w': it['w'], 'cov': it.get('cov', False)})
             continue
         outside += 1
-        pieces.append({'pts': dense, 'z': [H] * len(dense), 'w': it['w']})
+        pieces.append({'pts': dense, 'z': [H] * len(dense), 'w': it['w'], 'cov': it.get('cov', False)})
         for end, dd in ((0, d0), (-1, d1)):
             if dd > 0.5:
                 continue  # sigue otro tramo del conjunto
@@ -351,26 +386,8 @@ def bridge_structures(busway, roads=None):
                 for (ax, ay), (bx, by) in zip(rd, rd[1:]):
                     rc.append(rc[-1] + math.hypot(bx - ax, by - ay))
                 pieces.append({'pts': rd, 'z': [H * smooth01(1 - s / R) for s in rc], 'w': it['w']})
-    log(f'puentes: {len(items)} tramos ({filled} huecos cerrados); rampas dentro en {inside}, fuera en {outside}')
-    if roads:
-        pieces += road_companions(pieces, roads)
-    out = []
-    for pc in pieces:
-        pts = pc['pts']
-        # Solo se simplifica en planta un tramo de altura constante: en una rampa, cada vértice lleva su
-        # cota (en un tramo recto, la simplificación dejaría solo los extremos y lo aplanaría).
-        flat = max(pc['z']) - min(pc['z']) < 0.05
-        keep = sorted(set(simplify(pts, 0.2)) | {0, len(pts) - 1}) if flat else list(range(len(pts)))
-        enc, px, py = [], 0, 0
-        for k in keep:
-            X, Y = round(pts[k][0] / KX * E6), round(pts[k][1] / KY * E6)
-            enc.extend((X - px, Y - py))
-            px, py = X, Y
-        o = {'w': round(pc['w'], 1), 'z': [round(pc['z'][k], 2) for k in keep], 'd': enc}
-        if pc.get('k'):
-            o['k'] = pc['k']
-        out.append(o)
-    return out
+    log(f"{'puentes' if sign > 0 else 'deprimidos'}: {len(items)} tramos ({filled} huecos cerrados); rampas dentro en {inside}, fuera en {outside}")
+    return pieces
 
 
 ROAD_LANE_M = 3.4  # ancho de un carril de la vía de carros

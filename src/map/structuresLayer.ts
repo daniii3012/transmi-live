@@ -2,7 +2,7 @@ import type { CustomLayerInterface, CustomRenderMethodInput, Map as MLMap } from
 import type { Network } from '../data/network';
 import { KX, KY } from '../domain/geo';
 import { ORIGIN } from '../live/fleet';
-import { M, MATS, Mesh, STRUCT_THEMES, area, ccw, grow, inside, open as openRing, slices, type P2 } from './mesh';
+import { M, MATS, Mesh, STRUCT_THEMES, area, ccw, frame, grow, inside, open as openRing, slices, type P2 } from './mesh';
 
 /**
  * Estructuras en 3D (H7), en WebGL propio como los buses: las extrusiones de MapLibre solo hacen
@@ -41,11 +41,11 @@ const PIER_STEP = 24;
 const toXY = (r: [number, number][]) => openRing(r.map(([lo, la]) => [lo * KX, la * KY] as P2));
 
 /** Paredes de vidrio alrededor del andén, con un paral en cada esquina y cada ~6 m. */
-function walls(ring: P2[], solid: Mesh, glass: Mesh) {
+function walls(ring: P2[], solid: Mesh, glass: Mesh, z0 = 0) {
   const r = ccw(ring), n = r.length;
   const post = (p: P2, u: P2) => {
     const c: P2 = [p[0] - u[1] * POST / 2, p[1] + u[0] * POST / 2]; // hacia adentro (izquierda del avance)
-    solid.box(c, u, POST / 2, POST / 2, PLATFORM_H, ROOF_Z, M.Column, M.Column);
+    solid.box(c, u, POST / 2, POST / 2, z0 + PLATFORM_H, z0 + ROOF_Z, M.Column, M.Column);
   };
   let acc = 0; // metros desde el último paral
   for (let i = 0; i < n; i++) {
@@ -53,7 +53,7 @@ function walls(ring: P2[], solid: Mesh, glass: Mesh) {
     const l = Math.hypot(q[0] - p[0], q[1] - p[1]);
     if (l < 1e-3) continue;
     const u: P2 = [(q[0] - p[0]) / l, (q[1] - p[1]) / l];
-    glass.wall(p, q, PLATFORM_H, ROOF_Z, M.Wall);
+    glass.wall(p, q, z0 + PLATFORM_H, z0 + ROOF_Z, M.Wall);
     const lp = Math.hypot(p[0] - pr[0], p[1] - pr[1]) || 1;
     const corner = ((p[0] - pr[0]) * u[0] + (p[1] - pr[1]) * u[1]) / lp < Math.cos((25 * Math.PI) / 180);
     if (i === 0 || corner) { post(p, u); acc = 0; }
@@ -82,11 +82,16 @@ function covered(plat: P2[], roof: P2[]): number {
  *
  * Las cubiertas de OSM que no cubren ningún andén (pasillos, accesos) también se dibujan.
  */
-export function buildStations(net: Network, solid: Mesh, glass: Mesh) {
+export function buildStations(net: Network, solid: Mesh, glass: Mesh, pieces: Piece[] = [], deep: P2[][] = []) {
+  const depth = new Depth(pieces);
   for (const s of net.stations.values()) {
     if ((!s.fp?.length && !s.roof?.length) || s.prov || s.closed) continue;
     const roofs = (s.roof ?? []).map(toXY);
     const portal = s.kind === 'portal';
+    // Estación bajo tierra (Museo Nacional): a la cota del deprimido que la rodea, con la losa de la
+    // calle encima (translúcida, para ver los buses).
+    const z0 = depth.station((s.fp ?? []).map(toXY));
+    if (z0 < -1.5) for (const r of (s.fp ?? []).map(toXY)) { deep.push(r); glass.prism(grow(r, 1), -0.3, 0.02, M.Lid, M.Lid); }
     const plats = (s.fp ?? []).map(toXY).map((r) => {
       const sl = slices(r, COL_STEP, 2);
       const len = sl.length > 1 ? Math.hypot(sl[sl.length - 1].c[0] - sl[0].c[0], sl[sl.length - 1].c[1] - sl[0].c[1]) + 4 : 4;
@@ -94,17 +99,17 @@ export function buildStations(net: Network, solid: Mesh, glass: Mesh) {
       return { r, sl, ri, open: portal || (ri >= 0 && area(r) / len > 8) };
     });
     for (const { r, sl, ri, open } of plats) {
-      const z = open ? CANOPY_Z : ROOF_Z;
-      solid.prism(r, 0, PLATFORM_H, M.PlatTop, M.PlatSide);
+      const z = z0 + (open ? CANOPY_Z : ROOF_Z);
+      solid.prism(r, z0, z0 + PLATFORM_H, M.PlatTop, M.PlatSide);
       if (open) {
         // Columnas por el eje del andén, bajo la cubierta.
         sl.forEach((k, i) => {
           const a = sl[Math.max(0, i - 1)].c, b = sl[Math.min(sl.length - 1, i + 1)].c;
           const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-          solid.box(k.c, [(b[0] - a[0]) / l, (b[1] - a[1]) / l], COL / 2, COL / 2, PLATFORM_H, z, M.Column, M.Column);
+          solid.box(k.c, [(b[0] - a[0]) / l, (b[1] - a[1]) / l], COL / 2, COL / 2, z0 + PLATFORM_H, z, M.Column, M.Column);
         });
       } else {
-        walls(r, solid, glass);
+        walls(r, solid, glass, z0);
       }
       // Techo propio si ninguna cubierta de OSM lo cubre: el del vagón, de lámina (opaco); el abierto,
       // translúcido (los buses paran debajo) y sin cara de abajo (dos capas casi juntas dejaban ver las
@@ -114,7 +119,7 @@ export function buildStations(net: Network, solid: Mesh, glass: Mesh) {
     // Cubiertas de OSM: translúcidas sobre andenes abiertos (o en un portal); si no, opacas.
     roofs.forEach((q, i) => {
       const big = portal || plats.some((p) => p.ri === i && p.open);
-      const z = big ? CANOPY_Z : ROOF_Z;
+      const z = z0 + (big ? CANOPY_Z : ROOF_Z);
       (big ? glass : solid).prism(q, z, z + ROOF_T, M.Roof, M.Roof, !big);
     });
   }
@@ -141,7 +146,7 @@ in vec4 v_color;
 out vec4 frag;
 void main() { frag = vec4(v_color.rgb * v_color.a, v_color.a); }`;
 
-export interface Piece { w: number; z: number[]; c: Float64Array; k?: string }
+export interface Piece { w: number; z: number[]; c: Float64Array; k?: string; cov?: number }
 
 /**
  * Puentes de la troncal y, donde van en la misma estructura, los de la vía de carros (`k: 'via'`,
@@ -195,6 +200,7 @@ export function buildBridges(pieces: Piece[], solid: Mesh, glass: Mesh) {
     const P = geo[pi];
     const n = P.length;
     if (n < 2) return;
+    if (pc.k === 'tunel') return; // deprimidos: buildTrenches
     const via = pc.k === 'via';
     const mesh = via ? glass : solid;
     const TOP = via ? M.ViaTop : M.DeckTop, SIDE = via ? M.ViaSide : M.DeckSide, RAIL = via ? M.ViaSide : M.Parapet, PIER = via ? M.ViaSide : M.Pier;
@@ -249,7 +255,114 @@ export function buildBridges(pieces: Piece[], solid: Mesh, glass: Mesh) {
   });
 }
 
-interface Group { data: Float32Array; vao: WebGLVertexArrayObject | null; buf: WebGLBuffer | null; count: number; on: boolean; minZoom: number; dirty: boolean }
+/** Tramos deprimidos de la troncal, para saber la cota bajo un punto (estaciones bajo tierra). */
+class Depth {
+  private segs: { ax: number; ay: number; bx: number; by: number; za: number; zb: number }[] = [];
+  constructor(pieces: Piece[]) {
+    for (const pc of pieces) {
+      if (pc.k !== 'tunel') continue;
+      for (let i = 2; i < pc.c.length; i += 2) {
+        this.segs.push({ ax: pc.c[i - 2] * KX, ay: pc.c[i - 1] * KY, bx: pc.c[i] * KX, by: pc.c[i + 1] * KY, za: pc.z[i / 2 - 1], zb: pc.z[i / 2] });
+      }
+    }
+  }
+  /** Cota (m, negativa) del deprimido más hondo a ≤ `r` m del punto y paralelo a `u`; 0 si no hay. */
+  at(p: P2, u: P2, r = 25): number {
+    let z = 0;
+    for (const sg of this.segs) {
+      const dx = sg.bx - sg.ax, dy = sg.by - sg.ay, l2 = dx * dx + dy * dy;
+      if (l2 < 1e-6 || Math.abs((dx * u[0] + dy * u[1]) / Math.sqrt(l2)) < 0.9) continue;
+      const f = Math.max(0, Math.min(1, ((p[0] - sg.ax) * dx + (p[1] - sg.ay) * dy) / l2));
+      if (Math.hypot(p[0] - sg.ax - f * dx, p[1] - sg.ay - f * dy) > r) continue;
+      z = Math.min(z, sg.za + (sg.zb - sg.za) * f);
+    }
+    return z;
+  }
+  /** Cota de una estación: la de su centro, si queda dentro de un deprimido a lo largo de sus andenes. */
+  station(rings: P2[][]): number {
+    if (!this.segs.length || !rings.length) return 0;
+    let best = 0;
+    for (const r of rings) {
+      const f = frame(r);
+      best = Math.min(best, this.at(f.c, f.u));
+    }
+    return best;
+  }
+}
+
+/**
+ * Deprimidos de la troncal (pasos bajo una calle, trincheras): fondo a su cota, muros con la cara hacia
+ * adentro y, donde OSM dice que pasan bajo una calle y hay altura para un bus, la losa de la calle encima
+ * (translúcida). La trinchera solo se ve por su boca: alrededor, una máscara de profundidad invisible a
+ * nivel del suelo (`mask`) tapa lo que queda bajo tierra, que si no se vería «a través» del mapa (el mapa
+ * base no escribe profundidad). La máscara llega hasta otra boca o una estación bajo tierra (`deep`).
+ */
+export function buildTrenches(pieces: Piece[], deep: P2[][], solid: Mesh, glass: Mesh, mask: Mesh) {
+  const tun = pieces.filter((pc) => pc.k === 'tunel' && pc.c.length >= 4);
+  const geo = tun.map((pc) => {
+    const P: P2[] = [];
+    for (let i = 0; i < pc.c.length; i += 2) P.push([pc.c[i] * KX, pc.c[i + 1] * KY]);
+    return P;
+  });
+  /** ¿El punto cae dentro de la boca de otro deprimido (o de una estación bajo tierra)? */
+  const inOpening = (x: number, y: number, self: number) => {
+    for (let k = 0; k < geo.length; k++) {
+      if (k === self) continue;
+      const P = geo[k], hw = tun[k].w / 2;
+      for (let j = 1; j < P.length; j++) {
+        if (tun[k].z[j - 1] > -0.05 && tun[k].z[j] > -0.05) continue;
+        const [ax, ay] = P[j - 1], [bx, by] = P[j], dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1e-9;
+        const f = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2));
+        if (Math.hypot(x - ax - f * dx, y - ay - f * dy) <= hw + 0.3) return true;
+      }
+    }
+    return deep.some((r) => inside([x, y], grow(r, 1.2)));
+  };
+  const BAND = 30;
+  tun.forEach((pc, pi) => {
+    const P = geo[pi], n = P.length, hw = pc.w / 2;
+    const N: P2[] = P.map((_, j) => {
+      const a = P[Math.max(0, j - 1)], b = P[Math.min(n - 1, j + 1)];
+      const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+      return [-dy / l, dx / l];
+    });
+    const L = (j: number, o: number): P2 => [P[j][0] + N[j][0] * o, P[j][1] + N[j][1] * o];
+    /** Hasta dónde llega la máscara por un lado: hasta otra boca o `BAND` m. */
+    const reach = (j: number, side: number) => {
+      for (let o = hw + 1; o <= hw + BAND; o += 1.5) {
+        const q = L(j, side * o);
+        if (inOpening(q[0], q[1], pi)) return o - hw - 0.8;
+      }
+      return BAND;
+    };
+    const R = P.map((_, j) => [reach(j, 1), reach(j, -1)]);
+    for (let j = 1; j < n; j++) {
+      const za = pc.z[j - 1], zb = pc.z[j];
+      if (za > -0.05 && zb > -0.05) continue;
+      const al = L(j - 1, hw), bl = L(j, hw), ar = L(j - 1, -hw), br = L(j, -hw);
+      // Fondo.
+      solid.quad([ar[0], ar[1], za], [br[0], br[1], zb], [bl[0], bl[1], zb], [al[0], al[1], za], M.TFloor);
+      // Muros: donde el borde no da a otra boca ni a una estación bajo tierra.
+      const ml = [(al[0] + bl[0]) / 2, (al[1] + bl[1]) / 2], mr = [(ar[0] + br[0]) / 2, (ar[1] + br[1]) / 2];
+      const nl = L(j, hw + 0.6), nr = L(j, -hw - 0.6);
+      if (!inOpening((ml[0] + nl[0]) / 2, (ml[1] + nl[1]) / 2, pi)) solid.wall(al, bl, za, 0, M.TWall, zb, 0);
+      if (!inOpening((mr[0] + nr[0]) / 2, (mr[1] + nr[1]) / 2, pi)) solid.wall(br, ar, zb, 0, M.TWall, za, 0);
+      // Máscara a nivel del suelo a los dos lados (invisible: solo profundidad).
+      for (const side of [1, -1]) {
+        const ra = R[j - 1][side > 0 ? 0 : 1], rb = R[j][side > 0 ? 0 : 1];
+        if (ra <= 0.1 && rb <= 0.1) continue;
+        const ia = L(j - 1, side * hw), ib = L(j, side * hw), oa = L(j - 1, side * (hw + Math.max(0, ra))), ob = L(j, side * (hw + Math.max(0, rb)));
+        mask.quad([ia[0], ia[1], -0.04], [ib[0], ib[1], -0.04], [ob[0], ob[1], -0.04], [oa[0], oa[1], -0.04], M.TFloor);
+      }
+      // Losa de la calle encima, donde hay altura para un bus.
+      if (pc.cov && za < -4 && zb < -4) glass.quad([ar[0], ar[1], 0.02], [br[0], br[1], 0.02], [bl[0], bl[1], 0.02], [al[0], al[1], 0.02], M.Lid);
+    }
+    // Máscara en las puntas que siguen hondas (el deprimido sigue en otro tramo: no; termina en el suelo:
+    // la rampa ya llega a 0).
+  });
+}
+
+interface Group { data: Float32Array; vao: WebGLVertexArrayObject | null; buf: WebGLBuffer | null; count: number; on: boolean; minZoom: number; dirty: boolean; depthOnly: boolean }
 
 /** Una pasada (opaca o translúcida) de todos los grupos. Se arma desde `Structures`. */
 export class StructuresLayer implements CustomLayerInterface {
@@ -275,11 +388,12 @@ export class StructuresLayer implements CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
-  setGroup(name: string, v: number[], minZoom: number) {
+  /** `depthOnly`: solo escribe profundidad (máscaras del suelo); se dibuja antes que los demás grupos. */
+  setGroup(name: string, v: number[], minZoom: number, depthOnly = false) {
     const g = this.groups.get(name);
     const data = new Float32Array(v);
-    if (g) Object.assign(g, { data, minZoom, dirty: true });
-    else this.groups.set(name, { data, vao: null, buf: null, count: 0, on: false, minZoom, dirty: true });
+    if (g) Object.assign(g, { data, minZoom, dirty: true, depthOnly });
+    else this.groups.set(name, { data, vao: null, buf: null, count: 0, on: false, minZoom, dirty: true, depthOnly });
     this.map?.triggerRepaint();
   }
 
@@ -330,7 +444,7 @@ export class StructuresLayer implements CustomLayerInterface {
 
   render(gl: WebGLRenderingContext | WebGL2RenderingContext, opts: CustomRenderMethodInput) {
     const zoom = this.map.getZoom();
-    const live = [...this.groups.values()].filter((gr) => gr.on && zoom >= gr.minZoom && (gr.dirty || gr.count));
+    const live = [...this.groups.values()].filter((gr) => gr.on && zoom >= gr.minZoom && (gr.dirty || gr.count)).sort((a, b) => Number(b.depthOnly) - Number(a.depthOnly));
     if (!live.length) return;
     const g = gl as WebGL2RenderingContext;
     for (const gr of live) if (gr.dirty) this.upload(gr);
@@ -354,8 +468,10 @@ export class StructuresLayer implements CustomLayerInterface {
     }
     for (const gr of live) {
       if (!gr.count) continue;
+      if (gr.depthOnly) g.colorMask(false, false, false, false);
       g.bindVertexArray(gr.vao);
       g.drawArrays(g.TRIANGLES, 0, gr.count);
+      if (gr.depthOnly) g.colorMask(true, true, true, true);
     }
     g.bindVertexArray(null);
   }
@@ -374,15 +490,17 @@ export class Structures {
   readonly solid = new StructuresLayer('solid');
   readonly glass = new StructuresLayer('glass');
 
-  set(name: string, build: (solid: Mesh, glass: Mesh) => void, minZoom = 14.8) {
-    const s = new Mesh(), g = new Mesh();
-    build(s, g);
+  set(name: string, build: (solid: Mesh, glass: Mesh, mask: Mesh) => void, minZoom = 14.8) {
+    const s = new Mesh(), g = new Mesh(), m = new Mesh();
+    build(s, g, m);
     this.solid.setGroup(name, s.v, minZoom);
+    this.solid.setGroup(`${name}:mascara`, m.v, minZoom, true);
     this.glass.setGroup(name, g.v, minZoom);
   }
 
   show(name: string, on: boolean) {
     this.solid.show(name, on);
+    this.solid.show(`${name}:mascara`, on);
     this.glass.show(name, on);
   }
 
