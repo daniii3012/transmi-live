@@ -756,6 +756,9 @@ def main():
     # Huellas de estación (F7.7): el edificio o las plataformas de OSM; si no hay, una estimada entre
     # los carriles de los dos sentidos con el largo de sus vagones.
     fp_osm = {s['id']: s for s in (busway or {}).get('stations', [])}
+    # Andenes trazados a mano (data/curated/station_overrides.json): mandan sobre OSM y la estimación.
+    ov_p = ROOT / 'data' / 'curated' / 'station_overrides.json'
+    fp_traced = json.loads(ov_p.read_text())['stations'] if ov_p.exists() else {}
     n_fp = Counter()
     # Tramos en obra (data/curated/obras.json): sus estaciones son provisionales y no se modelan.
     obras_p = ROOT / 'data' / 'curated' / 'obras.json'
@@ -932,6 +935,17 @@ def main():
             r = lambda ring: [[round(x / KX, 6), round(y / KY, 6)] for x, y in ring]
             return {'fp': [r(q) for q in rings_m], **({'roof': [r(q) for q in roofs_m]} if roofs_m else {}), 'fpk': fpk}
 
+        if sid in fp_traced:
+            rings = [[xy(lo, la) for lo, la in poly] for poly in fp_traced[sid]['platforms']]
+            rings = [q + [q[0]] if q[0] != q[-1] else q for q in rings]
+            roofs = [[xy(lo, la) for lo, la in poly] for poly in (fp_osm.get(sid) or {}).get('roofs') or []]
+            roofs = [q + [q[0]] if q[0] != q[-1] else q for q in roofs]
+            if kind != 'portal':
+                over = max(over_fraction(q) for q in rings)
+                if over > 0.10:
+                    review.append(f"Andén trazado de {s['stop_name']} pisa la calzada ({over * 100:.0f} %): revisar station_overrides.json.")
+            n_fp['trazadas'] += 1
+            return out(rings, roofs, 'traced')
         if sid in fp_osm:
             src = fp_osm[sid]
             rings = [[xy(lo, la) for lo, la in poly] for poly in src['polys']]
@@ -940,13 +954,18 @@ def main():
                 placed, moved = rings, 0
             else:
                 placed, moved = place_platforms(rings)
+            roofs = [[xy(lo, la) for lo, la in poly] for poly in src.get('roofs') or []]
+            roofs = [q + [q[0]] if q[0] != q[-1] else q for q in roofs]
             if placed and near(placed):
                 n_fp['osm'] += 1
                 n_fp['corridos'] += moved
                 n_fp['descartados'] += len(rings) - len(placed)
-                roofs = [[xy(lo, la) for lo, la in poly] for poly in src.get('roofs') or []]
                 # Islas: la cubierta es la isla misma (un poco más ancha al dibujar).
-                return out(placed, [q + [q[0]] if q[0] != q[-1] else q for q in roofs], src['kind'])
+                return out(placed, roofs, src['kind'])
+            if kind == 'portal' and roofs and near(roofs):
+                # Portal sin andenes en OSM pero con su cubierta (Portal Norte): solo la cubierta.
+                n_fp['solo_cubierta'] += 1
+                return out([], roofs, 'roof')
             n_fp['osm_lejos'] += 1
         if lane_idx is None or kind == 'portal':
             n_fp['none'] += 1
@@ -993,7 +1012,7 @@ def main():
         if fp:
             # El punto del GTFS a veces queda lejos de la plataforma (Calle 57: ~250 m al sur); la huella
             # sale de los vagones y de la calzada, así que el nombre y el punto van a su centro.
-            pts = [p for ring in fp['fp'] for p in ring[:-1]]
+            pts = [p for ring in (fp['fp'] or fp.get('roof') or []) for p in ring[:-1]]
             clon, clat = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
             shifts.append((math.hypot((clon - lon) * KX, (clat - lat) * KY), name))
             lon, lat = clon, clat
@@ -1056,7 +1075,7 @@ def main():
             v['z'] = votes.most_common(1)[0][0]
     log(f'tramos de corredor: {len(corridor_segments)}; sin letra {n_before} → {sum(1 for v in corridor_segments.values() if not v["z"])} '
         f'({dropped} expresos duplicados descartados)')
-    log(f'huellas de estación: {n_fp["osm"]} de OSM ({n_fp["corridos"]} andenes corridos fuera de la calzada, {n_fp["descartados"]} descartados; {n_fp["osm_lejos"]} estaciones lejanas), {n_fp["est"]} estimadas, {n_fp["none"]} sin huella')
+    log(f'huellas de estación: {n_fp["osm"]} de OSM ({n_fp["corridos"]} andenes corridos fuera de la calzada, {n_fp["descartados"]} descartados; {n_fp["osm_lejos"]} estaciones lejanas), {n_fp["trazadas"]} trazadas a mano, {n_fp["est"]} estimadas, {n_fp["solo_cubierta"]} solo con cubierta, {n_fp["none"]} sin huella')
     if provisional:
         log(f'provisionales (tramo en obra, sin modelar): {len(provisional)}: ' + ', '.join(provisional))
     shifts.sort(reverse=True)

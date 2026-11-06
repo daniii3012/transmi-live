@@ -154,8 +154,8 @@ function grow(ring: P2[], d: number): P2[] {
 
 export function buildStations(net: Network, solid: Mesh, glass: Mesh) {
   for (const s of net.stations.values()) {
-    if (!s.fp?.length || s.prov || s.closed) continue;
-    const plats = s.fp.map((r) => open(r.map(([lo, la]) => [lo * KX, la * KY] as P2)));
+    if ((!s.fp?.length && !s.roof?.length) || s.prov || s.closed) continue;
+    const plats = (s.fp ?? []).map((r) => open(r.map(([lo, la]) => [lo * KX, la * KY] as P2)));
     for (const r of plats) {
       solid.prism(r, 0, PLATFORM_H, M.PlatTop, M.PlatSide);
       // Columnas a lo largo del eje del andén.

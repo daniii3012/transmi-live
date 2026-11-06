@@ -165,6 +165,57 @@ def main():
                 out.append(q)
         return out
 
+    # Ejes de carril (metros del simulador) para ubicar los andenes que OSM trae como línea abierta.
+    lane_segs = []
+    for w in lanes['ways']:
+        hw = 1.7 * (int(w['lanes']) if str(w.get('lanes') or '').isdigit() else 1)
+        for a, b in zip(w['points'], w['points'][1:]):
+            lane_segs.append((a[0], a[1], b[0], b[1], hw))
+
+    def lane_clear(x, y) -> float:
+        """Distancia (m) al borde de calzada más cercano (negativa si el punto está sobre la calzada)."""
+        best = 1e9
+        for ax, ay, bx, by, hw in lane_segs:
+            if abs(ax - x) > 60 and abs(bx - x) > 60:
+                continue
+            dx, dy = bx - ax, by - ay
+            l2 = dx * dx + dy * dy or 1e-9
+            f = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / l2))
+            best = min(best, math.hypot(x - ax - f * dx, y - ay - f * dy) - hw)
+        return best
+
+    def inside_poly(x, y, q) -> bool:
+        c = False
+        for i in range(len(q)):
+            (xi, yi), (xj, yj) = q[i], q[i - 1]
+            if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+                c = not c
+        return c
+
+    def from_line(pts, taken, W=5.0):
+        """Andén de una línea abierta de OSM: 5 m de ancho centrado en la línea si así no pisa la
+        calzada; si no, hacia el lado sin carril. Nada si la línea cae dentro (o a ≤ 3 m) de un andén ya
+        tomado: es su borde."""
+        L = sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:]))
+        if L < 20:
+            return None
+        mid = pts[len(pts) // 2]
+        for q in taken:
+            if inside_poly(mid[0], mid[1], q) or min(math.hypot(mid[0] - p[0], mid[1] - p[1]) for p in q) <= 3:
+                return None
+        a, b = pts[0], pts[-1]
+        ux, uy = (b[0] - a[0]) / (math.hypot(b[0] - a[0], b[1] - a[1]) or 1), (b[1] - a[1]) / (math.hypot(b[0] - a[0], b[1] - a[1]) or 1)
+        nx, ny = -uy, ux
+        side = lambda s: min(lane_clear(mid[0] + nx * s * o, mid[1] + ny * s * o) for o in (1.0, 2.5, 4.0))
+        if side(1) > 0.3 and side(-1) > 0.3:
+            o0, o1 = -W / 2, W / 2
+        else:
+            s = 1 if side(1) > side(-1) else -1
+            o0, o1 = (0.0, W) if s > 0 else (-W, 0.0)
+        left = [(p[0] + nx * o1, p[1] + ny * o1) for p in pts]
+        right = [(p[0] + nx * o0, p[1] + ny * o0) for p in pts]
+        return left + right[::-1]
+
     out_st = []
     for st in layouts['stations']:
         areas = [a for a in st.get('areas') or [] if a.get('closed') and len(a['points']) >= 4]
@@ -176,8 +227,12 @@ def main():
             polys += [a['points'] for a in areas if a.get('role') == 'station_area' and (a.get('osm_tags') or {}).get('building')
                       and 3 <= (a.get('width_m') or 0) <= 14 and (a.get('length_m') or 0) >= 60]
             polys = dedupe(polys)
-            if polys:
-                out_st.append({'id': st['station_id'], 'kind': 'platform', 'polys': [[ll(p) for p in poly] for poly in polys], 'roofs': [], 'src': None})
+            # El recinto de andenes y carriles bajo una sola cubierta (Portal El Dorado, 26 m; Portal Norte,
+            # 27 m): va como cubierta, no como andén (los buses circulan debajo).
+            roofs = [a['points'] for a in areas if a.get('role') == 'station_area' and (a.get('width_m') or 0) > 14 and (a.get('length_m') or 0) >= 60]
+            if polys or roofs:
+                out_st.append({'id': st['station_id'], 'kind': 'platform', 'polys': [[ll(p) for p in poly] for poly in polys],
+                               'roofs': [[ll(p) for p in poly] for poly in dedupe(roofs)], 'src': None})
             continue
         plats = [p['points'] for p in st.get('platforms') or []
                  if p.get('closed') and len(p['points']) >= 4 and area(p['points']) >= 60 and p['role'] in ('platform_trunk', 'platform_feeder')]
@@ -190,9 +245,22 @@ def main():
             kind, polys = 'platform', dedupe(plats)
             roofs = roofs or [a['points'] for a in areas if (a.get('osm_tags') or {}).get('building') in ('bus_station', 'roof')
                               and (a.get('width_m') or 99) <= 20 and area(a['points']) >= 60]
+            # La isla central mapeada como edificio de la estación (Banderas: 301 × 12 m) también es andén.
+            polys = dedupe(polys + [a['points'] for a in areas if (a.get('osm_tags') or {}).get('building') == 'bus_station'
+                                    and 3 <= (a.get('width_m') or 0) <= 14 and (a.get('length_m') or 0) >= 20])
         elif islands:
             kind, polys = 'island', dedupe(islands)
         else:
+            polys = []
+        # Andenes que OSM trae como línea abierta (el borde o el eje): Banderas, la plataforma sur.
+        if plats or islands:
+            for p in st.get('platforms') or []:
+                if p.get('closed') or p['role'] != 'platform_trunk' or len(p['points']) < 2:
+                    continue
+                q = from_line(p['points'], polys)
+                if q:
+                    polys.append(q)
+        if not (plats or islands):
             best = None
             for ar in areas:
                 a, w = area(ar['points']), ar.get('width_m') or 0

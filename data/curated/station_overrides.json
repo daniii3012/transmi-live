@@ -1,0 +1,21 @@
+{
+  "_": "Andenes trazados a mano donde OSM no trae geometría utilizable, sobre imágenes satelitales (Esri World Imagery, solo como referencia visual: la geometría es propia). Tienen prioridad sobre OSM y sobre la estimación; la cubierta de OSM, si la hay, se conserva. Coordenadas lon, lat; anillos sin cerrar.",
+  "stations": {
+    "8002": {
+      "name": "Biblioteca",
+      "traced": "2026-11-05",
+      "platforms": [
+        [[-74.130747, 4.5703326], [-74.1302588, 4.5705037], [-74.1302481, 4.5704769], [-74.1307363, 4.5703058]],
+        [[-74.1306558, 4.5701], [-74.1302374, 4.5702283], [-74.1302293, 4.5702016], [-74.1306478, 4.5700732]]
+      ]
+    },
+    "2000": {
+      "name": "Portal Norte - Unicervantes",
+      "traced": "2026-11-05",
+      "platforms": [
+        [[-74.0460855, 4.7554684], [-74.0460103, 4.7554684], [-74.0462949, 4.7538539], [-74.0463701, 4.7538539]],
+        [[-74.0458578, 4.7554339], [-74.0457846, 4.7554339], [-74.0460672, 4.7538032], [-74.0461424, 4.7538032]]
+      ]
+    }
+  }
+}
