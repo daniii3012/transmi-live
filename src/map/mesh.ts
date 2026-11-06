@@ -23,12 +23,12 @@ type Mat = [string, number];
 export const STRUCT_THEMES: Record<'dark' | 'light', Mat[]> = {
   dark: [
     ['#5d6872', 1], ['#3f4850', 1], ['#76828d', 0.82], ['#4c555e', 1], ['#48525c', 1], ['#363f47', 1], ['#2e353c', 1], ['#58626c', 1], ['#9fb0bf', 0.13],
-    ['#525c66', 1], ['#3b444d', 1], ['#434c55', 1], ['#56616c', 1], ['#69737d', 1], ['#a7b8c7', 0.12], ['#b4bec8', 0.42], ['#4f5962', 1], ['#4d5761', 1], ['#5a646e', 1],
+    ['#525c66', 1], ['#3b444d', 1], ['#434c55', 1], ['#56616c', 1], ['#69737d', 1], ['#a7b8c7', 0.12], ['#8e99a4', 1], ['#4f5962', 1], ['#4d5761', 1], ['#5a646e', 1],
     ['#3a3f45', 0.55], ['#6b6458', 1], ['#c8ccd1', 0.16],
   ],
   light: [
     ['#dde1e5', 1], ['#b7bec5', 1], ['#c4ccd4', 0.86], ['#9aa3ac', 1], ['#d3d9df', 1], ['#b3bbc3', 1], ['#a2abb4', 1], ['#c6cdd4', 1], ['#7f93a6', 0.16],
-    ['#c9cfd5', 1], ['#a9b1b9', 1], ['#b0b8c0', 1], ['#d2d7dc', 1], ['#e4e8eb', 1], ['#8aa1b6', 0.14], ['#9eabb8', 0.4], ['#a3acb5', 1], ['#c7cdd3', 1], ['#bcc3ca', 1],
+    ['#c9cfd5', 1], ['#a9b1b9', 1], ['#b0b8c0', 1], ['#d2d7dc', 1], ['#e4e8eb', 1], ['#8aa1b6', 0.14], ['#d3d8dd', 1], ['#a3acb5', 1], ['#c7cdd3', 1], ['#bcc3ca', 1],
     ['#c9c3b8', 0.5], ['#b9ad98', 1], ['#7d8691', 0.14],
   ],
 };
@@ -76,6 +76,34 @@ export class Mesh {
     const v: P2 = [-u[1], u[0]];
     const pt = (sa: number, sb: number): P2 => [c[0] + u[0] * along * sa + v[0] * across * sb, c[1] + u[1] * along * sa + v[1] * across * sb];
     this.prism([pt(-1, -1), pt(1, -1), pt(1, 1), pt(-1, 1)], z0, z1, top, side, bottom);
+  }
+  /** Sólido entre dos anillos del mismo número de vértices (abajo en z0, arriba en z1): capiteles que se
+   *  ensanchan hacia arriba. Tapa arriba y, si `bottom`, abajo. */
+  loft(lo: P2[], z0: number, hi: P2[], z1: number, top: number, side: number, bottom = false) {
+    if (lo.length !== hi.length || lo.length < 3) return;
+    const flip = area(hi) < 0;
+    const a = flip ? [...lo].reverse() : lo, b = flip ? [...hi].reverse() : hi, n = a.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      this.quad([a[i][0], a[i][1], z0], [a[j][0], a[j][1], z0], [b[j][0], b[j][1], z1], [b[i][0], b[i][1], z1], side);
+    }
+    const cap = (r: P2[], z: number, mat: number, up: boolean) => {
+      const flat: number[] = [];
+      for (const p of r) flat.push(p[0], p[1]);
+      const idx = earcut(flat);
+      for (let i = 0; i < idx.length; i += 3) {
+        const A = r[idx[i]], B = r[idx[i + 1]], C = r[idx[i + 2]];
+        if (up) this.tri([A[0], A[1], z], [B[0], B[1], z], [C[0], C[1], z], mat, [0, 0, 1]);
+        else this.tri([A[0], A[1], z], [C[0], C[1], z], [B[0], B[1], z], mat, [0, 0, -1]);
+      }
+    };
+    cap(b, z1, top, true);
+    if (bottom) cap(a, z0, side, false);
+  }
+  /** Rectángulo centrado en `c` con eje `u`, semilargo `along` y semiancho `across`. */
+  static rect(c: P2, u: P2, along: number, across: number): P2[] {
+    const v: P2 = [-u[1], u[0]];
+    return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sa, sb]) => [c[0] + u[0] * along * sa + v[0] * across * sb, c[1] + u[1] * along * sa + v[1] * across * sb] as P2);
   }
   /** Cilindro (pila redonda) de radio `r`, de z0 a z1. */
   cyl(c: P2, r: number, z0: number, z1: number, mat: number, sides = 12) {

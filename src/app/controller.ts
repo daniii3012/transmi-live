@@ -14,7 +14,7 @@ import { app, saveLayers, savePrefs, loadPrefs } from './store.svelte';
 import { loadMetro, setMetro } from '../map/metroLayers';
 import { Elevation } from '../map/structures';
 import { buildBridges, buildStations, type Structures } from '../map/structuresLayer';
-import { buildMetro } from '../map/metro3d';
+import { buildMetro, type MetroStats } from '../map/metro3d';
 import { applyBaseTheme } from '../map/style';
 import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
 import { go, parse, type View } from './router';
@@ -609,12 +609,21 @@ export class Controller {
   /** Metro L1 en 3D (viaducto, pilas, estaciones): con la capa del metro y la vista 3D. Se arma la
    * primera vez que hace falta, con los mismos datos de la capa 2D. */
   private metroBuilt: Promise<void> | null = null;
+  /** Pilas, pórticos y estaciones armados (para revisar). */
+  metroStats: MetroStats | null = null;
   private metro3d() {
     const on = app.layersOn.metro && app.threeD;
     if (!this.structs) return;
     if (on && !this.metroBuilt) {
-      this.metroBuilt = loadMetro().then((data) => {
-        this.structs!.set('metro', (solid, glass) => buildMetro(data, solid, glass), 13);
+      // Con los carriles y andenes de la troncal: donde una pila caería sobre ella va un pórtico.
+      this.metroBuilt = Promise.all([loadMetro(), this.net.loadLanes()]).then(([data]) => {
+        const platforms: [number, number][][] = [];
+        for (const st of this.net.stations.values()) {
+          if (st.prov || st.closed) continue;
+          for (const r of st.fp ?? []) platforms.push(r.map(([lo, la]) => [lo * KX, la * KY] as [number, number]));
+        }
+        const below = { lanes: (this.net.lanes ?? []).map((l) => l.c), platforms };
+        this.structs!.set('metro', (solid, glass) => { this.metroStats = buildMetro(data, solid, glass, below); }, 13);
       }).catch(() => { this.metroBuilt = null; });
     }
     if (!this.metroBuilt) return;
