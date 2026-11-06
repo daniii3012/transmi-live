@@ -221,41 +221,54 @@ function station(solid: Mesh, glass: Mesh, c: P2, u: P2, L: number, W: number) {
   const pa = 3.5, pb = Math.max(pa + 3, hw - 0.4);
   for (const side of [-1, 1]) solid.box(at(0, side * (pa + pb) / 2), u, L / 2 - 3, (pb - pa) / 2, DECK_Z - 0.02, DECK_Z + 1.05, M.MPlatform, M.MPlatform);
   for (const side of [-1, 1]) solid.box(at(0, side * (hw - 0.2)), u, L / 2, 0.2, DECK_Z, PARAPET_Z, M.MConcourse, M.MConcourse);
-  // Cubierta curva (parábola de alero a cumbrera), con su canto y la cara de abajo. El alero no es recto:
-  // entre arco y arco se levanta y se recoge (borde ondulado, como en las fotos de la obra), así que la
-  // franja exterior se arma por tramos a lo largo; la del centro, de una pieza.
-  const R = hw + OVER, K = 10, B = hw;
+  // Cubierta curva (parábola de alero a cumbrera), con su canto y la cara de abajo, como en las fotos de
+  // la obra (Timiza, Avenida Boyacá, Portal Américas): blanca, con un lucernario a lo largo sobre las
+  // vías, los extremos redondeados en planta y el alero ondulado entre arco y arco. La franja exterior
+  // se arma por tramos a lo largo; las del centro, de una pieza.
+  const R = hw + OVER, B = hw, SKY = Math.min(3.5, B * 0.4), NOSE = Math.min(6, R * 0.5);
   const zr = (b: number) => EAVE + RISE * (1 - (b / R) ** 2);
-  const a0 = -L / 2 - 2, a1 = L / 2 + 2;
+  /** Medio largo de la cubierta a la distancia `b` del eje: extremos redondeados. */
+  const H = (b: number) => L / 2 + NOSE * Math.sqrt(Math.max(0, 1 - (b / R) ** 2));
   const ribs = Math.max(2, Math.round(L / RIB_STEP) + 1), bay = L / (ribs - 1);
   const T = (x: P2, z: number): [number, number, number] => [x[0], x[1], z];
-  for (let k = 0; k < K; k++) {
-    const b0 = -B + (2 * B * k) / K, b1 = -B + (2 * B * (k + 1)) / K, z0 = zr(b0), z1 = zr(b1);
-    const p = at(a0, b0), q = at(a1, b0), r = at(a1, b1), w = at(a0, b1);
+  const cuts = [-B, ...[1, 2, 3].map((i) => -B + ((B - SKY) * i) / 4), -SKY, 0, SKY, ...[1, 2, 3].map((i) => SKY + ((B - SKY) * i) / 4), B];
+  for (let k = 0; k + 1 < cuts.length; k++) {
+    const b0 = cuts[k], b1 = cuts[k + 1], z0 = zr(b0), z1 = zr(b1), h0 = H(b0), h1 = H(b1);
+    const sky = b0 >= -SKY - 1e-6 && b1 <= SKY + 1e-6;
+    const p = at(-h0, b0), q = at(h0, b0), r = at(h1, b1), w = at(-h1, b1);
+    if (sky) { glass.quad(T(p, z0), T(q, z0), T(r, z1), T(w, z1), M.MGlass); continue; }
     solid.quad(T(p, z0), T(q, z0), T(r, z1), T(w, z1), M.MRoof);
     solid.quad(T(w, z1 - ROOF_T), T(r, z1 - ROOF_T), T(q, z0 - ROOF_T), T(p, z0 - ROOF_T), M.MFrame);
-    for (const e of [a0, a1]) solid.quad(T(at(e, b0), z0 - ROOF_T), T(at(e, b1), z1 - ROOF_T), T(at(e, b1), z1), T(at(e, b0), z0), M.MFrame);
+    for (const e of [-1, 1]) solid.quad(T(at(e * h0, b0), z0 - ROOF_T), T(at(e * h1, b1), z1 - ROOF_T), T(at(e * h1, b1), z1), T(at(e * h0, b0), z0), M.MFrame);
+  }
+  // Nervios del lucernario, en cada arco.
+  for (let i = 0; i < ribs; i++) {
+    const t = -L / 2 + (i * L) / (ribs - 1);
+    solid.box(at(t, 0), u, 0.12, SKY, zr(SKY) - ROOF_T, zr(0) + 0.08, M.MFrame, M.MFrame);
   }
   // Franja exterior: en cada arco el alero sale 1,5 m y queda abajo; a mitad de vano se recoge a 0,9 m y
-  // sube 0,9 m.
+  // sube 0,9 m. Hacia los extremos se recoge con la planta redondeada.
+  const Hi = H(B), Ho = H(R);
   const edge = (a: number): [number, number] => {
     const ph = Math.sin((Math.PI * (a + L / 2)) / bay) ** 2;
     const r = hw + OVER - 0.6 * ph;
     return [r, zr(r) + 0.9 * ph];
   };
-  const steps = Math.max(8, Math.ceil(((a1 - a0) / bay) * 6));
+  const steps = Math.max(8, Math.ceil(((2 * Hi) / bay) * 6));
   for (const side of [-1, 1]) {
+    const zb = zr(B);
     for (let i = 0; i < steps; i++) {
-      const s0 = a0 + ((a1 - a0) * i) / steps, s1 = a0 + ((a1 - a0) * (i + 1)) / steps;
-      const [r0, e0] = edge(s0), [r1, e1] = edge(s1), zb = zr(B);
-      const ia = at(s0, side * B), ib = at(s1, side * B), oa = at(s0, side * r0), ob = at(s1, side * r1);
+      const s0 = -Hi + (2 * Hi * i) / steps, s1 = -Hi + (2 * Hi * (i + 1)) / steps;
+      const o0 = (s0 * Ho) / Hi, o1 = (s1 * Ho) / Hi;
+      const [r0, e0] = edge(o0), [r1, e1] = edge(o1);
+      const ia = at(s0, side * B), ib = at(s1, side * B), oa = at(o0, side * r0), ob = at(o1, side * r1);
       solid.quad(T(ia, zb), T(ib, zb), T(ob, e1), T(oa, e0), M.MRoof);
       solid.quad(T(oa, e0 - ROOF_T), T(ob, e1 - ROOF_T), T(ib, zb - ROOF_T), T(ia, zb - ROOF_T), M.MFrame);
       solid.quad(T(oa, e0 - ROOF_T), T(ob, e1 - ROOF_T), T(ob, e1), T(oa, e0), M.MFrame);
     }
-    for (const e of [a0, a1]) {
-      const [r, z] = edge(e), zb = zr(B);
-      solid.quad(T(at(e, side * B), zb - ROOF_T), T(at(e, side * r), z - ROOF_T), T(at(e, side * r), z), T(at(e, side * B), zb), M.MFrame);
+    for (const e of [-1, 1]) {
+      const [r, z] = edge(e * Ho);
+      solid.quad(T(at(e * Hi, side * B), zb - ROOF_T), T(at(e * Ho, side * r), z - ROOF_T), T(at(e * Ho, side * r), z), T(at(e * Hi, side * B), zb), M.MFrame);
     }
   }
   // Arcos cada ~6 m: del antepecho a la cubierta, en los dos costados.
