@@ -74,7 +74,7 @@
     {/if}
 
     <dl class="stats">
-      <div><dt class="label">Velocidad</dt><dd class="num">{kmh != null ? `${kmh} km/h` : '—'}</dd></div>
+      <div title="Calculada con las lecturas de los últimos 3 minutos sobre el recorrido"><dt class="label">Velocidad</dt><dd class="num">{kmh != null ? `${kmh} km/h` : '—'}</dd></div>
       <div><dt class="label">Reporte</dt><dd class="num" class:warn={age > 180}>hace {ago(age)}</dd></div>
       <div><dt class="label">Ruta</dt><dd><button class="link" onclick={() => go({ kind: 'route', id: bus.routeId })}>Ver ruta</button></dd></div>
     </dl>

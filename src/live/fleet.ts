@@ -78,6 +78,24 @@ export interface Bus {
   s: number;
 }
 
+/** Velocidad física máxima creíble (m/s): 70 km/h (las troncales van a 60 como máximo). */
+export const MAX_SPEED = 70 / 3.6;
+
+/**
+ * Velocidad sobre el recorrido (m/s) entre la lectura más vieja de los últimos 3 min y la más reciente,
+ * con al menos 20 s entre ellas: ninguna fuente la trae, se calcula. Con dos lecturas seguidas (como
+ * antes), unos metros de error del GPS en pocos segundos daban 80 km/h; en una ventana se diluyen.
+ * Sin ventana suficiente o por encima de lo creíble, `null` (la ficha muestra «—», no una cifra falsa).
+ */
+export function windowSpeed(h: { at: number; s: number }[]): number | null {
+  if (h.length < 2) return null;
+  const last = h[h.length - 1];
+  const first = h.find((e) => last.at - e.at <= 180_000);
+  if (!first || last.at - first.at < 20_000) return null;
+  const v = (last.s - first.s) / ((last.at - first.at) / 1000);
+  return v >= 0 && v <= MAX_SPEED ? v : null;
+}
+
 /** Número estable en [0, 1) a partir del id del bus. */
 function seedOf(id: string): number {
   let h = 2166136261;
@@ -265,14 +283,6 @@ export class Fleet {
         const n = b.tt.length;
         const wasOn = b.onPath && !first && n > 0;
         if (wasOn && fixAt <= b.tt[n - 1]) return; // lectura más vieja que la última: se ignora
-        // Velocidad reciente sobre el recorrido.
-        if (wasOn && b.fixAt) {
-          const dt = (fixAt - b.fixAt) / 1000;
-          if (dt > 5 && dt < 240) {
-            const v = Math.max(0, (hit.s - b.sFix) / dt);
-            b.speed = b.speed == null ? v : 0.5 * b.speed + 0.5 * v;
-          }
-        }
         const last = wasOn ? b.ts[n - 1] : 0;
         const fwd = hit.s - last;
         // Retroceso grande, salto imposible (más de 3 km o de ~145 km/h): se reinicia en la lectura.
@@ -289,6 +299,8 @@ export class Fleet {
         if (!wasOn || hit.s < b.sFix - HOLD_BACK) b.hist = [];
         b.hist.push({ at: fixAt, s: Math.max(hit.s, b.hist.length ? b.hist[b.hist.length - 1].s : 0) });
         while (b.hist.length > 2 && fixAt - b.hist[0].at > 8 * 60_000) b.hist.shift();
+        // Velocidad: solo con lecturas aceptadas (una imposible, en espera o descartada, no cuenta).
+        b.speed = windowSpeed(b.hist);
         b.sFix = hit.s;
         b.fixAt = fixAt;
         b.fixX = x;

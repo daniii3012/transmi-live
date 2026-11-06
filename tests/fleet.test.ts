@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Fleet, HOLD_BACK } from '../src/live/fleet';
+import { Fleet, HOLD_BACK, windowSpeed } from '../src/live/fleet';
 import { MetricPath, KX, KY } from '../src/domain/geo';
 import { LAT0, LON0, Q, type VehiclesV1 } from '../src/live/api';
 import type { Network } from '../src/data/network';
@@ -116,6 +116,29 @@ describe('flota', () => {
     expect(f.buses.size).toBe(2); // el bus 2 sigue
     expect(f.buses.get('1')!.sFix).toBeCloseTo(2800, -1); // el 1 avanzó con la lectura del respaldo
     expect(f.lag).toBe(lag); // el ritmo del alimentador no cambia
+  });
+
+  it('velocidad: ventana de hasta 3 min, al menos 20 s, y nada por encima de 70 km/h', () => {
+    expect(windowSpeed([{ at: 0, s: 0 }, { at: 21_000, s: 210 }, { at: 42_000, s: 420 }])).toBeCloseTo(10, 6);
+    expect(windowSpeed([{ at: 0, s: 0 }, { at: 15_000, s: 150 }])).toBeNull(); // poca ventana
+    expect(windowSpeed([{ at: 0, s: 0 }, { at: 21_000, s: 500 }])).toBeNull(); // 86 km/h: no es creíble
+    // Lo de hace más de 3 min no cuenta: la ventana empieza en la lectura más vieja dentro de ella.
+    expect(windowSpeed([{ at: 0, s: 0 }, { at: 200_000, s: 100 }, { at: 260_000, s: 700 }])).toBeCloseTo(10, 6);
+  });
+
+  it('velocidad: una lectura imposible no la contamina; un error del GPS en pocos segundos se diluye', () => {
+    const f = new Fleet(net);
+    const T0 = 1_000_000;
+    f.ingest(snap(T0, 1000), T0 * 1000 + 15_000);
+    f.ingest(snap(T0 + 21, 1210), T0 * 1000 + 36_000);
+    f.ingest(snap(T0 + 42, 1420), T0 * 1000 + 57_000);
+    const b = f.buses.get('1')!;
+    expect(b.speed! * 3.6).toBeCloseTo(36, 0);
+    f.ingest(snap(T0 + 63, 2900), T0 * 1000 + 78_000); // 1,5 km en 21 s: en espera, no cuenta
+    expect(b.speed! * 3.6).toBeCloseTo(36, 0);
+    // 6 s después, 60 m de más por error de posición: antes daba ~54 km/h; con la ventana, < 50.
+    f.ingest(snap(T0 + 69, 1540), T0 * 1000 + 84_000);
+    expect(b.speed! * 3.6).toBeLessThan(50);
   });
 
   it('a más de 60 m del recorrido se dibuja en su punto', () => {
