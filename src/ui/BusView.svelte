@@ -74,7 +74,7 @@
     {/if}
 
     <dl class="stats">
-      <div title="Calculada con las lecturas de los últimos 3 minutos sobre el recorrido"><dt class="label">Velocidad</dt><dd class="num">{kmh != null ? `${kmh} km/h` : '—'}</dd></div>
+      <div title="Calculada con las lecturas de los últimos 3 minutos sobre el recorrido: el alimentador no la trae"><dt class="label">Velocidad</dt><dd class="num">{kmh != null ? `${kmh} km/h` : '—'}</dd>{#if kmh != null}<span class="note">estimada</span>{/if}</div>
       <div><dt class="label">Reporte</dt><dd class="num" class:warn={age > 180}>hace {ago(age)}</dd></div>
       <div><dt class="label">Ruta</dt><dd><button class="link" onclick={() => go({ kind: 'route', id: bus.routeId })}>Ver ruta</button></dd></div>
     </dl>
@@ -137,6 +137,7 @@
   .stats div { padding: var(--sp-2) var(--sp-3); display: grid; gap: 2px; }
   .stats div + div { border-left: 1px solid var(--line-1); }
   dd { margin: 0; font-size: var(--fs-row); }
+  .note { font-size: 10px; letter-spacing: 0.02em; color: var(--fg-2); line-height: 1; }
   dd.warn { color: var(--warn); }
   .link { color: var(--fg-0); text-decoration: underline; text-decoration-color: var(--fg-3); text-underline-offset: 3px; font-size: var(--fs-body); }
   .link:hover { text-decoration-color: var(--fg-0); }

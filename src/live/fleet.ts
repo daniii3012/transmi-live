@@ -78,14 +78,15 @@ export interface Bus {
   s: number;
 }
 
-/** Velocidad física máxima creíble (m/s): 70 km/h (las troncales van a 60 como máximo). */
-export const MAX_SPEED = 70 / 3.6;
+/** Velocidad máxima que se muestra (m/s): 90 km/h. Entre 70 y 90 es rara pero posible (las troncales van
+ * a 60; algún tramo de autopista); por encima, es un error del cálculo. */
+export const MAX_SPEED = 90 / 3.6;
 
 /**
  * Velocidad sobre el recorrido (m/s) entre la lectura más vieja de los últimos 3 min y la más reciente,
  * con al menos 20 s entre ellas: ninguna fuente la trae, se calcula. Con dos lecturas seguidas (como
  * antes), unos metros de error del GPS en pocos segundos daban 80 km/h; en una ventana se diluyen.
- * Sin ventana suficiente o por encima de lo creíble, `null` (la ficha muestra «—», no una cifra falsa).
+ * Sin ventana suficiente o por encima de 90 km/h, `null` (la ficha muestra «—», no una cifra falsa).
  */
 export function windowSpeed(h: { at: number; s: number }[]): number | null {
   if (h.length < 2) return null;

@@ -118,10 +118,11 @@ describe('flota', () => {
     expect(f.lag).toBe(lag); // el ritmo del alimentador no cambia
   });
 
-  it('velocidad: ventana de hasta 3 min, al menos 20 s, y nada por encima de 70 km/h', () => {
+  it('velocidad: ventana de hasta 3 min, al menos 20 s, y nada por encima de 90 km/h', () => {
     expect(windowSpeed([{ at: 0, s: 0 }, { at: 21_000, s: 210 }, { at: 42_000, s: 420 }])).toBeCloseTo(10, 6);
     expect(windowSpeed([{ at: 0, s: 0 }, { at: 15_000, s: 150 }])).toBeNull(); // poca ventana
-    expect(windowSpeed([{ at: 0, s: 0 }, { at: 21_000, s: 500 }])).toBeNull(); // 86 km/h: no es creíble
+    expect(windowSpeed([{ at: 0, s: 0 }, { at: 21_000, s: 500 }])! * 3.6).toBeCloseTo(85.7, 0); // rara pero posible: se muestra
+    expect(windowSpeed([{ at: 0, s: 0 }, { at: 21_000, s: 600 }])).toBeNull(); // 103 km/h: error del cálculo
     // Lo de hace más de 3 min no cuenta: la ventana empieza en la lectura más vieja dentro de ella.
     expect(windowSpeed([{ at: 0, s: 0 }, { at: 200_000, s: 100 }, { at: 260_000, s: 700 }])).toBeCloseTo(10, 6);
   });
