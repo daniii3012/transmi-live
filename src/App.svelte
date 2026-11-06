@@ -7,7 +7,7 @@
   import { NetworkLayers } from './map/networkLayers';
   import { Fleet } from './live/fleet';
   import { BusLayer } from './map/busLayer';
-  import { StructuresLayer } from './map/structuresLayer';
+  import { Structures, buildStations } from './map/structuresLayer';
   import { Controller } from './app/controller';
   import { setController, ctl } from './app/instance';
   import { app } from './app/store.svelte';
@@ -55,15 +55,15 @@
         const dimBuses = new BusLayer(fleet, 'dim');
         // Estructuras en 3D: lo opaco antes de los buses (los tapa si pasan detrás o debajo); las
         // cubiertas translúcidas después (los tiñen si pasan debajo).
-        const structSolid = new StructuresLayer(net, 'solid');
-        const structGlass = new StructuresLayer(net, 'glass');
-        view.map.addLayer(structSolid, 'route-focus-glow');
+        const structs = new Structures();
+        structs.set('tm', (solid, glass) => buildStations(net, solid, glass));
+        view.map.addLayer(structs.solid, 'route-focus-glow');
         view.map.addLayer(dimBuses, 'route-focus-glow');
         view.map.addLayer(buses, 'stations-label');
-        view.map.addLayer(structGlass, 'stations-label');
+        view.map.addLayer(structs.glass, 'stations-label');
         const speed = new SpeedLayer(view.map, net, fleet);
         speed.mount(effective());
-        controller = new Controller(view.map, net, fleet, layers, buses, { solid: structSolid, glass: structGlass });
+        controller = new Controller(view.map, net, fleet, layers, buses, structs);
         controller.dimBuses = dimBuses;
         controller.speed = speed;
         setController(controller);

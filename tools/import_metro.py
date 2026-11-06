@@ -7,8 +7,10 @@ El simulador guarda la geometría en metros, en una proyección azimutal equidis
 (-74.136, 4.63027). A la escala de la ciudad se invierte con los radios del elipsoide en ese punto:
 el error es de centímetros. Escribe `data/curated/metro_l1.geojson` (versionado: es pequeño y curado).
 
-Además del trazado y las estaciones, arma el tablero del viaducto como franjas de 9 m de ancho para
-la vista 3D (tablero a 11–13 m; la altura publicada del viaducto es 13 m).
+Además del trazado y las estaciones, deja para la vista 3D (src/map/metro3d.ts) el contorno de cada
+estación con su abscisa sobre el trazado (`at_m`) y sus edificios de acceso y puentes peatonales, con
+sus alturas (las del simulador: estimadas desde los planos de ubicación de la Empresa Metro). El
+viaducto y sus pilas se arman en la página a partir del trazado.
 """
 import json
 import math
@@ -53,26 +55,6 @@ def simplify(pts, tol):
     return [p for p, k in zip(pts, keep) if k]
 
 
-def deck(pts, half=4.5, step=40.0):
-    """Tablero del viaducto: cuadriláteros a lo largo del trazado (sin autointersecciones)."""
-    out = []
-    # Remuestreo cada `step` m para que las franjas sigan las curvas.
-    dense = [pts[0]]
-    for (ax, ay), (bx, by) in zip(pts, pts[1:]):
-        l = math.hypot(bx - ax, by - ay)
-        n = max(1, int(l // step))
-        for k in range(1, n + 1):
-            dense.append((ax + (bx - ax) * k / n, ay + (by - ay) * k / n))
-    for (ax, ay), (bx, by) in zip(dense, dense[1:]):
-        l = math.hypot(bx - ax, by - ay)
-        if l < 0.5:
-            continue
-        nx, ny = -(by - ay) / l * half, (bx - ax) / l * half
-        ring = [(ax + nx, ay + ny), (bx + nx, by + ny), (bx - nx, by - ny), (ax - nx, ay - ny), (ax + nx, ay + ny)]
-        out.append([ll(x, y) for x, y in ring])
-    return out
-
-
 def main():
     src = json.loads(Path(sys.argv[1]).read_text())
     align = simplify([tuple(p) for p in src['alignment']], 1.0)
@@ -81,14 +63,20 @@ def main():
         'properties': {'kind': 'alignment', 'name': 'Metro de Bogotá · Línea 1', 'status': src['status'], 'length_m': round(src['length_m'])},
         'geometry': {'type': 'LineString', 'coordinates': [ll(x, y) for x, y in align]},
     }]
-    for poly in deck(align):
-        features.append({'type': 'Feature', 'properties': {'kind': 'deck', 'base': 11, 'top': 13}, 'geometry': {'type': 'Polygon', 'coordinates': [poly]}})
     for st in src['stations']:
         features.append({'type': 'Feature', 'properties': {'kind': 'station', 'number': st['number'], 'name': st['name'], 'reference': st.get('reference')},
                          'geometry': {'type': 'Point', 'coordinates': ll(*st['xy'])}})
         if st.get('outline'):
-            features.append({'type': 'Feature', 'properties': {'kind': 'station-body', 'name': st['name'], 'base': 9, 'top': 21},
+            features.append({'type': 'Feature', 'properties': {'kind': 'station-body', 'name': st['name'], 'at_m': round(st['at_m'], 1)},
                              'geometry': {'type': 'Polygon', 'coordinates': [[ll(x, y) for x, y in st['outline']]]}})
+        for acc in st.get('access') or []:
+            ring = [ll(x, y) for x, y in acc['outline']]
+            if len(ring) < 3:
+                continue
+            if ring[0] != ring[-1]:
+                ring.append(ring[0])
+            features.append({'type': 'Feature', 'properties': {'kind': 'access', 'sub': acc['kind'], 'station': st['name'], 'z0': acc['z0'], 'z1': acc['z1']},
+                             'geometry': {'type': 'Polygon', 'coordinates': [ring]}})
     dep = src.get('depot')
     if dep and dep.get('outline'):
         features.append({'type': 'Feature', 'properties': {'kind': 'depot', 'name': dep['name']},

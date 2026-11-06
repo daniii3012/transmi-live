@@ -11,9 +11,10 @@ import { KX, KY } from '../domain/geo';
 import { watch } from './watch.svelte';
 import type { SystemKey } from '../domain/types';
 import { app, saveLayers, savePrefs, loadPrefs } from './store.svelte';
-import { setMetro } from '../map/metroLayers';
+import { loadMetro, setMetro } from '../map/metroLayers';
 import { Elevation } from '../map/structures';
-import type { StructuresLayer } from '../map/structuresLayer';
+import { buildBridges, buildStations, type Structures } from '../map/structuresLayer';
+import { buildMetro } from '../map/metro3d';
 import { applyBaseTheme } from '../map/style';
 import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
 import { go, parse, type View } from './router';
@@ -41,7 +42,7 @@ export class Controller {
   restored = false;
   private alertsTimer = 0;
 
-  constructor(private map: MLMap, private net: Network, private fleet: Fleet, private layers: NetworkLayers, private buses: BusLayer, structs?: { solid: StructuresLayer; glass: StructuresLayer }) {
+  constructor(private map: MLMap, private net: Network, private fleet: Fleet, private layers: NetworkLayers, private buses: BusLayer, structs?: Structures) {
     this.structs = structs;
     this.poller = new Poller(apiBase(), (d) => this.onData(d), (s) => (app.poll = s));
   }
@@ -522,8 +523,7 @@ export class Controller {
     applyTheme(t);
     applyBaseTheme(this.map, t);
     this.layers.setTheme(t);
-    this.structs?.solid.setTheme(t);
-    this.structs?.glass.setTheme(t);
+    this.structs?.setTheme(t);
     this.speed?.setTheme(t);
     const rim: [number, number, number] = t === 'light' ? [0.97, 0.975, 0.98] : [0.063, 0.078, 0.094];
     const ring: [number, number, number] = t === 'light' ? [0.2, 0.24, 0.28] : [0.94, 0.95, 0.96];
@@ -552,6 +552,7 @@ export class Controller {
     m.setLayoutProperty('street-stops', 'visibility', l.stops ? 'visible' : 'none');
     this.fleet.trails = l.trails;
     void setMetro(m, l.metro, app.threeD);
+    this.metro3d();
     m.triggerRepaint();
   }
 
@@ -569,6 +570,7 @@ export class Controller {
     app.threeD = on;
     savePrefs({ threeD: on });
     void setMetro(this.map, app.layersOn.metro, on);
+    this.metro3d();
     // Los edificios van debajo de la red: la tapan donde corresponde, pero nunca a los buses.
     this.map.setLayoutProperty('building-3d', 'visibility', on ? 'visible' : 'none');
     this.map.setLayoutProperty('building', 'visibility', on ? 'none' : 'visible');
@@ -587,21 +589,37 @@ export class Controller {
   /** Puentes de la troncal en 3D (F7.5): tableros y buses encima. Se cargan la primera vez que hacen
    * falta (vista 3D y z ≥ 14,5); fuera de 3D, todos los buses van al suelo. */
   private elevation: Elevation | null = null;
-  /** Capas WebGL de estructuras: opaca (andenes, columnas, puentes) y translúcida (cubiertas). */
-  structs?: { solid: StructuresLayer; glass: StructuresLayer };
+  /** Estructuras en WebGL (troncal, metro, obras), en dos pasadas: opaca y translúcida. */
+  structs?: Structures;
   private structures = () => {
-    if (this.structs) { this.structs.solid.visible = this.structs.glass.visible = app.threeD; this.map.triggerRepaint(); }
+    if (this.structs) { this.structs.show('tm', app.threeD); this.map.triggerRepaint(); }
     if (!app.threeD) { this.fleet.elevation = null; return; }
     if (this.elevation) { this.fleet.elevation = (x, y, hx, hy) => this.elevation!.at(x, y, hx, hy); return; }
     if (this.map.getZoom() < 14.5) return;
     void this.net.loadStructures().then(() => {
-      if (!this.net.pieces?.length) return;
-      this.elevation ??= new Elevation(this.net.pieces);
-      this.structs?.solid.setBridges(this.net.pieces);
+      const pieces = this.net.pieces;
+      if (!pieces?.length) return;
+      this.elevation ??= new Elevation(pieces);
+      this.structs?.set('tm', (solid, glass) => { buildStations(this.net, solid, glass); buildBridges(pieces, solid); });
       this.structures();
       this.map.triggerRepaint();
     });
   };
+
+  /** Metro L1 en 3D (viaducto, pilas, estaciones): con la capa del metro y la vista 3D. Se arma la
+   * primera vez que hace falta, con los mismos datos de la capa 2D. */
+  private metroBuilt: Promise<void> | null = null;
+  private metro3d() {
+    const on = app.layersOn.metro && app.threeD;
+    if (!this.structs) return;
+    if (on && !this.metroBuilt) {
+      this.metroBuilt = loadMetro().then((data) => {
+        this.structs!.set('metro', (solid, glass) => buildMetro(data, solid, glass), 13);
+      }).catch(() => { this.metroBuilt = null; });
+    }
+    if (!this.metroBuilt) return;
+    void this.metroBuilt.then(() => { this.structs?.show('metro', app.layersOn.metro && app.threeD); this.map.triggerRepaint(); });
+  }
 
   /** Rutas para el respaldo por ruta: la abierta, la del bus abierto o las de los tramos del viaje. */
   private backupCodes(): string[] {
