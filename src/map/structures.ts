@@ -8,7 +8,9 @@ import { KX, KY } from '../domain/geo';
  * (los puentes viales que van con la troncal, `k: 'via'`) cuenta medio ancho: un zonal en el carril de
  * afuera también va arriba.
  */
-export interface Piece { w: number; z: number[]; c: Float64Array; k?: string; cov?: number }
+/** Pieza de puente o deprimido: ancho `w` (o por vértice, `wv`: rampas de los puentes viales que se
+ * angostan a la vía sola), cota por vértice y eje. */
+export interface Piece { w: number; z: number[]; c: Float64Array; k?: string; cov?: number; wv?: number[] }
 
 const NEAR = 5; // m
 const G = 50; // m, celda del índice

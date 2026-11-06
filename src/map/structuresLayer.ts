@@ -156,7 +156,7 @@ in vec4 v_color;
 out vec4 frag;
 void main() { frag = vec4(v_color.rgb * v_color.a, v_color.a); }`;
 
-export interface Piece { w: number; z: number[]; c: Float64Array; k?: string; cov?: number }
+export interface Piece { w: number; z: number[]; c: Float64Array; k?: string; cov?: number; wv?: number[] }
 
 /**
  * Puentes de la troncal y, donde van en la misma estructura, los de la vía de carros (`k: 'via'`,
@@ -216,24 +216,26 @@ export function buildBridges(pieces: Piece[], solid: Mesh, glass: Mesh) {
     const TOP = via ? M.ViaTop : M.DeckTop, SIDE = via ? M.ViaSide : M.DeckSide, RAIL = via ? M.ViaSide : M.Parapet, PIER = via ? M.ViaSide : M.Pier;
     const bias = (pi % 3) * 0.03;
     const Z = pc.z.map((z) => (z > 0.05 ? z + bias : z));
-    const hw = pc.w / 2;
+    // Medio ancho por vértice: constante, o el de cada vértice en las rampas viales que se angostan.
+    const HW = pc.wv && pc.wv.length === n ? pc.wv.map((w) => w / 2) : P.map(() => pc.w / 2);
     // Normales por vértice (promedio de los tramos vecinos) para que las juntas no se abran.
     const N: P2[] = P.map((p, j) => {
       const a = P[Math.max(0, j - 1)], b = P[Math.min(n - 1, j + 1)];
       const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
       return [-dy / l, dx / l];
     });
-    const L = (j: number, o: number): P2 => [P[j][0] + N[j][0] * o, P[j][1] + N[j][1] * o];
-    // Estribo donde la pieza termina en alto sin que siga otro tablero (los puentes viales que van con la
-    // troncal terminan donde termina el puente de OSM; la vía sigue en terraplén).
+    /** Punto a `o` medios anchos (±1) o a `o` metros (`abs`) del eje en el vértice j. */
+    const L = (j: number, o: number, abs = false): P2 => { const d = abs ? o : o * HW[j]; return [P[j][0] + N[j][0] * d, P[j][1] + N[j][1] * d]; };
+    // Estribo donde la pieza termina en alto sin que siga otro tablero (un puente vial cuya vía sigue
+    // montada sobre otra estructura).
     for (const j of [0, n - 1]) {
-      if (Z[j] > 0.3 && !onOther(P[j][0], P[j][1], Z[j], pi)) mesh.wall(L(j, hw), L(j, -hw), 0, Z[j], SIDE);
+      if (Z[j] > 0.3 && !onOther(P[j][0], P[j][1], Z[j], pi)) mesh.wall(L(j, 1), L(j, -1), 0, Z[j], SIDE);
     }
     let since = PIER_STEP / 2;
     for (let j = 1; j < n; j++) {
       const za = Z[j - 1], zb = Z[j];
       if (za < 0.05 && zb < 0.05) continue;
-      const al = L(j - 1, hw), bl = L(j, hw), ar = L(j - 1, -hw), br = L(j, -hw);
+      const al = L(j - 1, 1), bl = L(j, 1), ar = L(j - 1, -1), br = L(j, -1);
       const bot = (z: number) => Math.max(0, z - DECK);
       // Tablero: cara superior y la de abajo.
       mesh.quad([ar[0], ar[1], za], [br[0], br[1], zb], [bl[0], bl[1], zb], [al[0], al[1], za], TOP);
@@ -241,7 +243,7 @@ export function buildBridges(pieces: Piece[], solid: Mesh, glass: Mesh) {
       const zm = (za + zb) / 2;
       const leftFree = !onOther((al[0] + bl[0]) / 2, (al[1] + bl[1]) / 2, zm, pi);
       const rightFree = !onOther((ar[0] + br[0]) / 2, (ar[1] + br[1]) / 2, zm, pi);
-      const ail = L(j - 1, hw - PARAPET_T), bil = L(j, hw - PARAPET_T), air = L(j - 1, -hw + PARAPET_T), bir = L(j, -hw + PARAPET_T);
+      const ail = L(j - 1, HW[j - 1] - PARAPET_T, true), bil = L(j, HW[j] - PARAPET_T, true), air = L(j - 1, -HW[j - 1] + PARAPET_T, true), bir = L(j, -HW[j] + PARAPET_T, true);
       // Costado y baranda: solo donde el borde no cae sobre otro tablero.
       if (leftFree) {
         mesh.wall(bl, al, bot(zb), zb + PARAPET, SIDE, bot(za), za + PARAPET);
@@ -259,7 +261,7 @@ export function buildBridges(pieces: Piece[], solid: Mesh, glass: Mesh) {
       if (since >= PIER_STEP && zb > 2.5) {
         since = 0;
         const u: P2 = [N[j][1], -N[j][0]];
-        mesh.box(P[j], u, 0.6, Math.min(hw * 0.7, 1.6), 0, zb - DECK, PIER, PIER);
+        mesh.box(P[j], u, 0.6, Math.min(HW[j] * 0.7, 1.6), 0, zb - DECK, PIER, PIER);
       }
     }
   });
@@ -351,7 +353,7 @@ export function buildTrenches(pieces: Piece[], deep: P2[][], solid: Mesh, glass:
     for (let j = 1; j < n; j++) {
       const za = pc.z[j - 1], zb = pc.z[j];
       if (za > -0.05 && zb > -0.05) continue;
-      const al = L(j - 1, hw), bl = L(j, hw), ar = L(j - 1, -hw), br = L(j, -hw);
+      const al = L(j - 1, 1), bl = L(j, 1), ar = L(j - 1, -1), br = L(j, -1);
       solid.quad([ar[0], ar[1], za], [br[0], br[1], zb], [bl[0], bl[1], zb], [al[0], al[1], za], M.TFloor);
       const ml = [(al[0] + bl[0]) / 2, (al[1] + bl[1]) / 2], mr = [(ar[0] + br[0]) / 2, (ar[1] + br[1]) / 2];
       const nl = L(j, hw + 0.6), nr = L(j, -hw - 0.6);
@@ -386,7 +388,7 @@ export function buildFootbridges(foot: { k: string; z: number[]; c: Float64Array
     for (let j = 1; j < n; j++) {
       const za = f.z[j - 1], zb = f.z[j];
       if (za < 0.15 && zb < 0.15) continue;
-      const al = L(j - 1, hw), bl = L(j, hw), ar = L(j - 1, -hw), br = L(j, -hw);
+      const al = L(j - 1, 1), bl = L(j, 1), ar = L(j - 1, -1), br = L(j, -1);
       const bot = (z: number) => Math.max(0, z - EDGE);
       solid.quad([ar[0], ar[1], za], [br[0], br[1], zb], [bl[0], bl[1], zb], [al[0], al[1], za], M.FDeck);
       solid.quad([al[0], al[1], bot(za)], [bl[0], bl[1], bot(zb)], [br[0], br[1], bot(zb)], [ar[0], ar[1], bot(za)], M.FSide);

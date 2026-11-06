@@ -236,6 +236,8 @@ def bridge_structures(busway, roads=None):
             enc.extend((X - px, Y - py))
             px, py = X, Y
         o = {'w': round(pc['w'], 1), 'z': [round(pc['z'][k], 2) for k in keep], 'd': enc}
+        if pc.get('wv'):
+            o['wv'] = [round(pc['wv'][k], 1) for k in keep]
         if pc.get('k'):
             o['k'] = pc['k']
         if pc.get('cov'):
@@ -482,7 +484,14 @@ def road_companions(pieces, roads):
     - de borde a borde: el interior contra el tablero de la troncal (el hueco entre los dos se cierra) y
       el exterior donde va la vía (ancho por carriles, 3,4 m cada uno, más 1 m de bordes);
     - el tramo continuo que acompaña al de la troncal y, más allá del puente de OSM (la vía sigue en
-      terraplén), junto a las rampas de la troncal hasta el suelo; si no baja, un estribo.
+      terraplén), junto a las rampas de la troncal hasta el suelo;
+    - si la rampa de la troncal se aparta antes de llegar al suelo (gira hacia el separador o hacia una
+      estación), la del puente vial sigue sola por la vía que continúa el puente en OSM (`approach` de
+      tools/import_road_bridges.py), con la regla de las rampas de la troncal (suavizada, 7 % como
+      máximo). En su primera mitad pasa del ancho del tablero (que incluye el hueco hasta la troncal) al
+      de la vía, centrada en su eje (`wv`, ancho por vértice): así no pisa los carriles de la troncal
+      donde se abren junto a una estación (General Santander). Antes terminaba en alto, en un estribo
+      (Av. Américas con Boyacá, Cra 30 con Calle 13).
 
     Las barandas de los dos tableros quedan juntas: la barrera entre el carril exclusivo y los mixtos.
     """
@@ -540,6 +549,7 @@ def road_companions(pieces, roads):
                         continue
                     w['points'] += o['points'][1:]
                     w['lanes'] = max(w['lanes'], o['lanes'])
+                    w['approach'] = {'start': (w.get('approach') or {}).get('start', []), 'end': (o.get('approach') or {}).get('end', [])}
                     ways[j] = None
                     merged = True
                     break
@@ -609,13 +619,129 @@ def road_companions(pieces, roads):
                 more.append(((qx + ux * off, qy + uy * off), x[2]))
             return more
 
+        def ramp(c, z0, prev, path, W):
+            # La vía sigue sola hasta el suelo: por `path` (la vía de OSM desde el extremo del puente, con
+            # su acceso), a la distancia del eje que tenía el tablero en `c`; donde la vía de OSM se acaba,
+            # en línea recta. Rampa suavizada con pendiente máxima del 7 % (la regla de la troncal).
+            path = densify(path, 2.0) if len(path) >= 2 else []
+            cum = cumulative(path) if path else []
+            best = None
+            for i in range(1, len(path)):
+                (ax, ay), (bx, by) = path[i - 1], path[i]
+                dx, dy = bx - ax, by - ay
+                l2 = dx * dx + dy * dy or 1e-9
+                f = max(0.0, min(1.0, ((c[0] - ax) * dx + (c[1] - ay) * dy) / l2))
+                d = math.hypot(c[0] - ax - f * dx, c[1] - ay - f * dy)
+                if best is None or d < best[0]:
+                    l = math.sqrt(l2)
+                    side = (dx * (c[1] - ay) - dy * (c[0] - ax)) / l  # + a la izquierda
+                    best = (d, cum[i - 1] + f * l, side)
+            L = 1.5 / SLOPE * z0
+            if best is None or best[0] > 25:
+                # Sin vía que seguir: recta en el sentido del tablero.
+                hx, hy = c[0] - prev[0], c[1] - prev[1]
+                l = math.hypot(hx, hy) or 1
+                path, cum, best = [c, (c[0] + hx / l * L, c[1] + hy / l * L)], [0.0, L], (0.0, 0.0, 0.0)
+            _, s0, side = best
+
+            def at(sv):
+                if sv >= cum[-1]:
+                    (ax, ay), (bx, by) = path[-2], path[-1]
+                    l = math.hypot(bx - ax, by - ay) or 1
+                    ux, uy = (bx - ax) / l, (by - ay) / l
+                    e = sv - cum[-1]
+                    return (bx + ux * e, by + uy * e), (ux, uy)
+                i = max(1, next(k for k in range(1, len(cum)) if cum[k] >= sv))
+                (ax, ay), (bx, by) = path[i - 1], path[i]
+                l = math.hypot(bx - ax, by - ay) or 1
+                f = (sv - cum[i - 1]) / l
+                return (ax + (bx - ax) * f, ay + (by - ay) * f), ((bx - ax) / l, (by - ay) / l)
+            out = []
+            n = max(2, math.ceil(L / 4))
+            for k in range(1, n + 1):
+                t = L * k / n
+                (qx, qy), (ux, uy) = at(s0 + t)
+                u = smooth01(t / (0.5 * L))  # del tablero acompañante a la vía sola
+                o = side * (1 - u)
+                out.append(((qx - uy * o, qy + ux * o), z0 * (1 - smooth01(t / L)), Wc + (W - Wc) * u))
+            return out
+
         head = extend(P[run[0]], P[run[1]], hits[run[0]][0])[::-1]
         tail = extend(P[run[-1]], P[run[-2]], hits[run[-1]][0])
         pts = [q for q, _ in head] + pts + [q for q, _ in tail]
         zs = [z for _, z in head] + zs + [z for _, z in tail]
-        out.append({'pts': pts, 'z': zs, 'w': Wc, 'k': 'via'})
+        acc = r.get('approach') or {}
+        ws = [Wc] * len(pts)
+        n_head = n_tail = 0
+        if zs[-1] > 0.5:
+            path = P[run[-1]:] + [xy(lo, la) for lo, la in acc.get('end', [])]
+            more = ramp(pts[-1], zs[-1], pts[-2], path, min(W, Wc))
+            pts += [q for q, _, _ in more]
+            zs += [z for _, z, _ in more]
+            ws += [w for _, _, w in more]
+            n_tail = len(more)
+        if zs[0] > 0.5:
+            path = P[:run[0] + 1][::-1] + [xy(lo, la) for lo, la in acc.get('start', [])]
+            more = ramp(pts[0], zs[0], pts[1], path, min(W, Wc))[::-1]
+            pts = [q for q, _, _ in more] + pts
+            zs = [z for _, z, _ in more] + zs
+            ws = [w for _, _, w in more] + ws
+            n_head = len(more)
+        out.append({'pts': pts, 'z': zs, 'w': Wc, 'wv': ws, 'k': 'via', '_ramps': (n_head, n_tail)})
         names[r.get('name') or str(r['id'])] += 1
-    log(f'puentes viales con la troncal: {len(out)} ({", ".join(f"{n} {c}" for n, c in names.most_common())})')
+    # Una rampa por la vía solo si no pasa por donde va otro tablero (de la troncal o de otra vía) a una
+    # altura parecida: en los puentes de dos niveles (Calle 80, Autopista) la vía sigue montada sobre
+    # otra estructura; ahí queda el estribo.
+    segs = defaultdict(list)
+    G2 = 25
+
+    def add(P, Z, w, owner, lo=0, hi=None):
+        hi = len(P) if hi is None else hi
+        for j in range(max(1, lo), hi):
+            if Z[j - 1] < 0.5 and Z[j] < 0.5:
+                continue
+            (ax, ay), (bx, by) = P[j - 1], P[j]
+            for gx in range(int((min(ax, bx) - 15) // G2), int((max(ax, bx) + 15) // G2) + 1):
+                for gy in range(int((min(ay, by) - 15) // G2), int((max(ay, by) + 15) // G2) + 1):
+                    segs[(gx, gy)].append((ax, ay, bx, by, Z[j - 1], Z[j], w, owner))
+    for pc in pieces:
+        add(pc['pts'], pc['z'], pc['w'], None)
+    for oi, o in enumerate(out):
+        h, t = o['_ramps']
+        add(o['pts'], o['z'], o['w'], oi, h + 1, len(o['pts']) - t)
+
+    def clear(oi, idx):
+        o = out[oi]
+        for k in idx:
+            (px, py), zp, wp = o['pts'][k], o['z'][k], o['wv'][k]
+            for ax, ay, bx, by, za, zb, w, owner in segs.get((int(px // G2), int(py // G2)), ()):
+                if owner == oi:
+                    continue
+                dx, dy = bx - ax, by - ay
+                l2 = dx * dx + dy * dy or 1e-9
+                f = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / l2))
+                zt = za + (zb - za) * f
+                if math.hypot(px - ax - f * dx, py - ay - f * dy) < w / 2 + wp / 2 - 0.5 and max(zt, zp) > 0.8 and abs(zt - zp) < 4:
+                    return False
+        return True
+    kept = dropped = 0
+    for oi, o in enumerate(out):
+        h, t = o.pop('_ramps')
+        n = len(o['pts'])
+        if t and not clear(oi, range(n - t, n)):
+            o['pts'], o['z'], o['wv'] = o['pts'][:n - t], o['z'][:n - t], o['wv'][:n - t]
+            dropped += 1
+        elif t:
+            kept += 1
+        if h and not clear(oi, range(h)):
+            o['pts'], o['z'], o['wv'] = o['pts'][h:], o['z'][h:], o['wv'][h:]
+            dropped += 1
+        elif h:
+            kept += 1
+        if all(abs(w - o['w']) < 0.05 for w in o['wv']):
+            del o['wv']  # ancho constante: no hace falta por vértice
+    log(f'puentes viales con la troncal: {len(out)} ({", ".join(f"{n} {c}" for n, c in names.most_common())}); '
+        f'rampas por su vía donde la troncal se aparta: {kept} (y {dropped} con estribo: otra estructura en el camino)')
     return out
 
 
