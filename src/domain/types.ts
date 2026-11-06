@@ -33,7 +33,9 @@ export interface Station {
   prov?: string;
   /** Huella (anillos lon, lat): de OSM o estimada entre los carriles (F7.7). */
   fp?: [number, number][][];
-  fpk?: 'osm' | 'est';
+  fpk?: 'platform' | 'island' | 'building' | 'est';
+  /** Cubiertas de OSM (building=roof), si las hay; si no, se dibujan sobre los andenes. */
+  roof?: [number, number][][];
   platforms: Platform[];
 }
 

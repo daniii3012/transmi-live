@@ -202,109 +202,107 @@ def street_level_guide(segs, lanes, cover_m: float = 35.0):
     return out_segs, out_lanes
 
 
-LEVEL_M = 6.5  # altura de un nivel de puente (m)
+LEVEL_M = 5.5  # altura de un nivel de puente (m), como en el simulador
 DECK_M = 0.8  # grosor del tablero
+SLOPE = 0.07  # pendiente de las rampas
 
 
-RAMP_M = 40.0  # largo de las rampas de un puente
-
-
-def bridge_ramp(dist: float, R: float) -> float:
-    """Fracción de la altura de un puente a `dist` m (por la red de puentes) del extremo libre más
-    cercano: rampa suave (smoothstep) de largo `R`. La misma regla en la página (src/map/structures.ts)."""
-    u = max(0.0, min(1.0, dist / R)) if R > 0 else 1.0
+def smooth01(u: float) -> float:
+    u = max(0.0, min(1.0, u))
     return u * u * (3 - 2 * u)
 
 
 def bridge_structures(busway):
-    """Puentes de la calzada exclusiva para el 3D: la línea (para elevar los buses) y el tablero en
-    piezas de 4 m en las rampas (una extrusión no se inclina: escalones de ~0,6 m) y una pieza en lo
-    plano. Ancho por los carriles del carril de OSM (3,5 m por carril + 1,2 m de barandas).
+    """Puentes de la calzada exclusiva para el 3D, como piezas con su altura por vértice.
 
-    Los tramos de puente del mismo nivel que comparten un extremo forman una red (una glorieta elevada
-    son seis tramos cortos): las rampas van solo en los extremos libres, y cada punto toma la distancia
-    por la red al extremo libre más cercano (`d0`, `d1` en los extremos de cada tramo)."""
-    import heapq
-    lanes_by_id = {l['id']: l for l in busway['lanes']}
+    En OSM la etiqueta `bridge` cubre el tramo elevado; las rampas quedan en las vías que siguen. Los
+    tramos de puente del mismo nivel que comparten un extremo forman una red (la glorieta de la Calle 6
+    con NQS son seis tramos): todos a la altura del nivel (5,5 m por nivel). En cada extremo libre, la
+    rampa (pendiente del 7 %, suavizada) baja por el carril de OSM que continúa en el mismo sentido; si no
+    hay carril que siga, baja dentro del propio puente. Ancho por los carriles (3,4 m por carril + 1 m)."""
+    lanes = busway['lanes']
+    lane_by_id = {l['id']: l for l in lanes}
     items = []
     for st in busway['structures']:
         if st['kind'] != 'bridge' or (st.get('level') or 0) <= 0 or len(st['c']) < 2:
             continue
         pts = [xy(lo, la) for lo, la in st['c']]
-        L = sum(math.hypot(bx - ax, by - ay) for (ax, ay), (bx, by) in zip(pts, pts[1:]))
-        if L < 2:
+        if sum(math.hypot(bx - ax, by - ay) for (ax, ay), (bx, by) in zip(pts, pts[1:])) < 2:
             continue
-        items.append({'st': st, 'pts': pts, 'L': L, 'lv': st['level']})
-    # Red: nodos por extremo (redondeado a 1 m) y nivel.
-    key = lambda p, lv: (round(p[0]), round(p[1]), lv)
-    adj = defaultdict(list)
-    for i, it in enumerate(items):
-        a, b = key(it['pts'][0], it['lv']), key(it['pts'][-1], it['lv'])
-        it['a'], it['b'] = a, b
-        adj[a].append((b, it['L']))
-        adj[b].append((a, it['L']))
-    dist = {}
-    heap = [(0.0, n) for n, e in adj.items() if len(e) == 1]
-    while heap:
-        d, n = heapq.heappop(heap)
-        if n in dist:
-            continue
-        dist[n] = d
-        for m, w in adj[n]:
-            if m not in dist:
-                heapq.heappush(heap, (d + w, m))
-    out_b, decks = [], []
+        items.append({'id': st['id'], 'pts': pts, 'lv': st['level'], 'H': LEVEL_M * st['level'],
+                      'w': 3.4 * ((lane_by_id.get(st['id']) or {}).get('lanes') or 1) + 1.0})
+    key = lambda p: (round(p[0]), round(p[1]))
+    deg = Counter()
     for it in items:
-        st, pts, L = it['st'], it['pts'], it['L']
-        H = LEVEL_M * it['lv']
-        d0, d1 = dist.get(it['a'], 1e6), dist.get(it['b'], 1e6)  # un anillo cerrado sin extremos: todo arriba
-        # Un puente aislado y corto no alcanza toda la altura con rampas de 40 m: se acortan.
-        reach = max(min(d0, d1) + L, 1.0) if min(d0, d1) < 1e5 else 1e6
-        R = min(RAMP_M, max(reach / 3, 1.0))
-        n_lanes = (lanes_by_id.get(st['id']) or {}).get('lanes') or 1
-        w = 3.5 * n_lanes + 1.2
-        dense = densify(pts, 4.0)
-        cum = [0.0]
-        for (ax, ay), (bx, by) in zip(dense, dense[1:]):
-            cum.append(cum[-1] + math.hypot(bx - ax, by - ay))
+        deg[(key(it['pts'][0]), it['lv'])] += 1
+        deg[(key(it['pts'][-1]), it['lv'])] += 1
+    bridge_ids = {it['id'] for it in items}
+    # Extremos de los carriles que no son puente, para seguir la rampa.
+    ends = defaultdict(list)
+    for l in lanes:
+        if l['id'] in bridge_ids or len(l['c']) < 2:
+            continue
+        c = [xy(lo, la) for lo, la in l['c']]
+        ends[key(c[0])].append(c)
+        ends[key(c[-1])].append(c[::-1])
+
+    def walk(start, R):
+        """Desde un extremo libre, R m por el carril que sigue (en línea recta con el puente)."""
+        cands = ends.get(key(start)) or []
+        if not cands:
+            return None
+        c = max(cands, key=lambda q: len(q))
+        out, acc = [c[0]], 0.0
+        for a, b in zip(c, c[1:]):
+            l = math.hypot(b[0] - a[0], b[1] - a[1])
+            if acc + l >= R:
+                f = (R - acc) / l
+                out.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+                return out
+            out.append(b)
+            acc += l
+        return out
+
+    pieces = []
+    for it in items:
+        pts, H = it['pts'], it['H']
+        R = H / SLOPE
+        z = [H] * len(pts)
+        for end in (0, -1):
+            if deg[(key(pts[end]), it['lv'])] > 1:
+                continue  # sigue otro tramo de puente
+            ramp = walk(pts[end], R)
+            if ramp and len(ramp) >= 2:
+                dense = densify(ramp, 4.0)
+                cum = [0.0]
+                for (ax, ay), (bx, by) in zip(dense, dense[1:]):
+                    cum.append(cum[-1] + math.hypot(bx - ax, by - ay))
+                zz = [H * smooth01(1 - s / R) for s in cum]
+                if end == 0:
+                    dense, zz = dense[::-1], zz[::-1]
+                pieces.append({'pts': dense, 'z': zz, 'w': it['w']})
+            else:
+                # Sin carril que siga: la rampa va dentro del puente.
+                dense = densify(pts, 4.0)
+                cum = [0.0]
+                for (ax, ay), (bx, by) in zip(dense, dense[1:]):
+                    cum.append(cum[-1] + math.hypot(bx - ax, by - ay))
+                L = cum[-1]
+                Ri = min(R, L / 2)
+                prev = z if len(z) == len(dense) else [H] * len(dense)
+                s_of = (lambda s: s) if end == 0 else (lambda s: L - s)
+                z = [min(prev[k], H * smooth01(s_of(cum[k]) / Ri)) for k in range(len(dense))]
+                pts = dense
+        pieces.append({'pts': pts, 'z': z, 'w': it['w']})
+    out = []
+    for pc in pieces:
         enc, px, py = [], 0, 0
-        for x, y in pts:
+        for x, y in pc['pts']:
             X, Y = round(x / KX * E6), round(y / KY * E6)
             enc.extend((X - px, Y - py))
             px, py = X, Y
-        out_b.append({'h': round(H, 2), 'L': round(L, 1), 'd0': round(min(d0, 1e5), 1), 'd1': round(min(d1, 1e5), 1), 'R': round(R, 1), 'd': enc})
-
-        def heights(i):
-            s = (cum[i] + cum[i + 1]) / 2
-            return round(H * bridge_ramp(min(d0 + s, d1 + L - s), R) * 4) / 4
-        i = 0
-        while i < len(dense) - 1:
-            h = heights(i)
-            j = i + 1
-            while j < len(dense) - 1 and heights(j) == h:
-                j += 1
-            seg = dense[i:j + 1]
-            if len(seg) > 3:
-                seg = [seg[k] for k in simplify(seg, 0.3)]
-            if h >= 0.25 and len(seg) >= 2:
-                left, right = [], []
-                for k, (x, y) in enumerate(seg):
-                    ax, ay = seg[max(0, k - 1)]
-                    bx, by = seg[min(len(seg) - 1, k + 1)]
-                    dx, dy = bx - ax, by - ay
-                    l = math.hypot(dx, dy) or 1.0
-                    nx, ny = -dy / l * w / 2, dx / l * w / 2
-                    left.append((x + nx, y + ny))
-                    right.append((x - nx, y - ny))
-                ring = left + right[::-1] + [left[0]]
-                enc_r, qx, qy = [], 0, 0
-                for x, y in ring:
-                    X, Y = round(x / KX * E6), round(y / KY * E6)
-                    enc_r.extend((X - qx, Y - qy))
-                    qx, qy = X, Y
-                decks.append({'h': h, 'd': enc_r})
-            i = j
-    return out_b, decks
+        out.append({'w': round(pc['w'], 1), 'z': [round(v, 2) for v in pc['z']], 'd': enc})
+    return out
 
 
 def chaikin(pts, iterations: int = 3):
@@ -1113,10 +1111,10 @@ def main():
         # acercarse.
         write('lanes.json', {'v': 1, 'hash': digest, 'scale': E6, 'license': busway.get('license'), 'lanes': lanes_out})
     if busway:
-        # Puentes de la troncal para el 3D (tableros y altura de los buses): solo con la vista 3D.
-        bridges, decks = bridge_structures(busway)
-        write('structures.json', {'v': 1, 'hash': digest, 'scale': E6, 'level_m': LEVEL_M, 'deck_m': DECK_M, 'license': busway.get('license'), 'bridges': bridges, 'decks': decks})
-        log(f'puentes de la troncal: {len(bridges)}, {len(decks)} piezas de tablero')
+        # Puentes de la troncal para el 3D (estructura y altura de los buses): solo con la vista 3D.
+        pieces = bridge_structures(busway)
+        write('structures.json', {'v': 2, 'hash': digest, 'scale': E6, 'level_m': LEVEL_M, 'deck_m': DECK_M, 'license': busway.get('license'), 'pieces': pieces})
+        log(f'puentes de la troncal: {len(pieces)} piezas (tramos elevados y rampas)')
     write('stops.json', {'v': 1, 'hash': digest, 'cols': ['id', 'code', 'name', 'lon', 'lat', 'routes'], 'stops': street})
     # v2: abscisas y tiempos por diferencias (36 % menos con gzip); el cliente reconstruye los acumulados
     # (src/domain/patterns.ts).

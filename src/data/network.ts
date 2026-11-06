@@ -46,10 +46,9 @@ export class Network {
   corridors: { z: string | null; street?: boolean; osm?: boolean; c: [number, number][] }[] = [];
   /** Calzada exclusiva (OSM), para la guía a nivel de calle; se carga al acercarse (`loadLanes`). */
   lanes: { z: string | null; c: Float64Array }[] | null = null;
-  /** Puentes de la troncal (líneas con su altura) y sus tableros, para el 3D (`loadStructures`). */
-  bridges: { h: number; L: number; d0: number; d1: number; R: number; c: Float64Array }[] | null = null;
-  decks: { h: number; c: Float64Array }[] = [];
-  deckM = 0.8;
+  /** Puentes de la troncal para el 3D (`loadStructures`): tramos elevados y rampas con su altura por
+   * vértice (m) y su ancho. */
+  pieces: { w: number; z: number[]; c: Float64Array }[] | null = null;
   private patterns?: Record<string, Pattern>;
   /** Cambios en la red (60 días) y alias de ids re-emitidos (decisión 011). */
   changes: ChangesFile = { v: 1, updated: '', entries: [], aliases: {} };
@@ -121,11 +120,9 @@ export class Network {
   loadStructures(): Promise<void> {
     return this.once('structures', async () => {
       try {
-        const f = await getJSON<{ scale: number; deck_m: number; bridges: { h: number; L: number; d0: number; d1: number; R: number; d: number[] }[]; decks: { h: number; d: number[] }[] }>('structures.json');
-        this.bridges = f.bridges.map((b) => ({ h: b.h, L: b.L, d0: b.d0, d1: b.d1, R: b.R, c: decodeShape(b.d, f.scale) }));
-        this.decks = f.decks.map((d) => ({ h: d.h, c: decodeShape(d.d, f.scale) }));
-        this.deckM = f.deck_m ?? 0.8;
-      } catch { this.bridges = []; /* sin puentes: todo a nivel del suelo */ }
+        const f = await getJSON<{ v: number; scale: number; pieces: { w: number; z: number[]; d: number[] }[] }>('structures.json');
+        this.pieces = (f.pieces ?? []).map((p) => ({ w: p.w, z: p.z, c: decodeShape(p.d, f.scale) }));
+      } catch { this.pieces = []; /* sin puentes: todo a nivel del suelo */ }
     });
   }
 

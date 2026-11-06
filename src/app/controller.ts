@@ -13,6 +13,7 @@ import type { SystemKey } from '../domain/types';
 import { app, saveLayers, savePrefs, loadPrefs } from './store.svelte';
 import { setMetro } from '../map/metroLayers';
 import { Elevation } from '../map/structures';
+import type { StructuresLayer } from '../map/structuresLayer';
 import { applyBaseTheme } from '../map/style';
 import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
 import { go, parse, type View } from './router';
@@ -39,7 +40,8 @@ export class Controller {
   restored = false;
   private alertsTimer = 0;
 
-  constructor(private map: MLMap, private net: Network, private fleet: Fleet, private layers: NetworkLayers, private buses: BusLayer) {
+  constructor(private map: MLMap, private net: Network, private fleet: Fleet, private layers: NetworkLayers, private buses: BusLayer, structs?: { solid: StructuresLayer; glass: StructuresLayer }) {
+    this.structs = structs;
     this.poller = new Poller(apiBase(), (d) => this.onData(d), (s) => (app.poll = s));
   }
 
@@ -513,6 +515,8 @@ export class Controller {
     applyTheme(t);
     applyBaseTheme(this.map, t);
     this.layers.setTheme(t);
+    this.structs?.solid.setTheme(t);
+    this.structs?.glass.setTheme(t);
     this.speed?.setTheme(t);
     const rim: [number, number, number] = t === 'light' ? [0.97, 0.975, 0.98] : [0.063, 0.078, 0.094];
     const ring: [number, number, number] = t === 'light' ? [0.2, 0.24, 0.28] : [0.94, 0.95, 0.96];
@@ -576,14 +580,17 @@ export class Controller {
   /** Puentes de la troncal en 3D (F7.5): tableros y buses encima. Se cargan la primera vez que hacen
    * falta (vista 3D y z ≥ 14,5); fuera de 3D, todos los buses van al suelo. */
   private elevation: Elevation | null = null;
+  /** Capas WebGL de estructuras: opaca (andenes, columnas, puentes) y translúcida (cubiertas). */
+  structs?: { solid: StructuresLayer; glass: StructuresLayer };
   private structures = () => {
+    if (this.structs) { this.structs.solid.visible = this.structs.glass.visible = app.threeD; this.map.triggerRepaint(); }
     if (!app.threeD) { this.fleet.elevation = null; return; }
     if (this.elevation) { this.fleet.elevation = (x, y, hx, hy) => this.elevation!.at(x, y, hx, hy); return; }
     if (this.map.getZoom() < 14.5) return;
     void this.net.loadStructures().then(() => {
-      if (!this.net.bridges?.length) return;
-      this.elevation ??= new Elevation(this.net.bridges);
-      this.layers.setDecks();
+      if (!this.net.pieces?.length) return;
+      this.elevation ??= new Elevation(this.net.pieces);
+      this.structs?.solid.setBridges(this.net.pieces);
       this.structures();
       this.map.triggerRepaint();
     });

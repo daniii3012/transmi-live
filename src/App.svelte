@@ -7,6 +7,7 @@
   import { NetworkLayers } from './map/networkLayers';
   import { Fleet } from './live/fleet';
   import { BusLayer } from './map/busLayer';
+  import { StructuresLayer } from './map/structuresLayer';
   import { Controller } from './app/controller';
   import { setController, ctl } from './app/instance';
   import { app } from './app/store.svelte';
@@ -51,11 +52,17 @@
         // Orden de capas (DISENO.md): buses atenuados bajo la ruta en foco; el resto sobre las estaciones.
         const buses = new BusLayer(fleet, 'main');
         const dimBuses = new BusLayer(fleet, 'dim');
+        // Estructuras en 3D: lo opaco antes de los buses (los tapa si pasan detrás o debajo); las
+        // cubiertas translúcidas después (los tiñen si pasan debajo).
+        const structSolid = new StructuresLayer(net, 'solid');
+        const structGlass = new StructuresLayer(net, 'glass');
+        view.map.addLayer(structSolid, 'route-focus-glow');
         view.map.addLayer(dimBuses, 'route-focus-glow');
         view.map.addLayer(buses, 'stations-label');
+        view.map.addLayer(structGlass, 'stations-label');
         const speed = new SpeedLayer(view.map, net, fleet);
         speed.mount(effective());
-        controller = new Controller(view.map, net, fleet, layers, buses);
+        controller = new Controller(view.map, net, fleet, layers, buses, { solid: structSolid, glass: structGlass });
         controller.dimBuses = dimBuses;
         controller.speed = speed;
         setController(controller);
