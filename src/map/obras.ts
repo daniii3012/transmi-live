@@ -1,6 +1,7 @@
 import type { FilterSpecification, Map as MLMap, GeoJSONSource } from 'maplibre-gl';
 import obrasUrl from '../../data/curated/troncales_obra.json?url';
 import { KX, KY } from '../domain/geo';
+import type { Theme } from '../app/theme';
 import { M, type Mesh, type P2 } from './mesh';
 
 /**
@@ -21,6 +22,12 @@ export interface Work { id: string; name: string; status?: string; progress_pct?
 export interface Works { works: Work[] }
 
 const IDS = ['obras-casing', 'obras-plan', 'obras-built', 'obras-area', 'obras-label'];
+/** Grises de cada tema (como el metro): el borde y el halo negros fijos pesaban en el tema claro. */
+const THEMES = {
+  dark: { casing: '#07090b', line: '#9aa4ae', text: '#a7b0b9', bg: '#101418' },
+  light: { casing: '#ffffff', line: '#7d8792', text: '#4a5560', bg: '#e9ecef' },
+} as const;
+let theme: Theme = 'dark';
 let data: Promise<Works> | null = null;
 let loaded = false;
 const want = { on: false };
@@ -57,21 +64,37 @@ export async function setObras(map: MLMap, on: boolean) {
     let d: Works;
     try { d = await loadObras(); } catch { loaded = false; return; }
     map.addSource('obras', { type: 'geojson', data: toGeoJSON(d) });
-    const before = 'street-stops';
+    // Los trazados, debajo del recorrido en foco y del plan; los rótulos, encima de los trazados.
+    const before = 'route-focus-glow', top = 'street-stops';
     const lines = ['all', ['==', ['geometry-type'], 'LineString'], ['!=', ['get', 'kind'], 'area']] as unknown as FilterSpecification;
     const width = ['interpolate', ['linear'], ['zoom'], 10, 1.4, 16, 3.6] as unknown as number;
-    map.addLayer({ id: 'obras-casing', type: 'line', source: 'obras', filter: lines, layout: { 'line-join': 'round' }, paint: { 'line-color': '#07090b', 'line-opacity': 0.7, 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3.4, 16, 8] } }, before);
-    map.addLayer({ id: 'obras-plan', type: 'line', source: 'obras', filter: ['all', lines, ['==', ['get', 'built'], false]] as unknown as FilterSpecification, layout: { 'line-join': 'round' }, paint: { 'line-color': '#9aa4ae', 'line-width': width, 'line-dasharray': [1.6, 1.4] } }, before);
-    map.addLayer({ id: 'obras-built', type: 'line', source: 'obras', filter: ['all', lines, ['==', ['get', 'built'], true]] as unknown as FilterSpecification, layout: { 'line-join': 'round' }, paint: { 'line-color': '#9aa4ae', 'line-width': width } }, before);
-    map.addLayer({ id: 'obras-area', type: 'line', source: 'obras', filter: ['==', ['get', 'kind'], 'area'], paint: { 'line-color': '#9aa4ae', 'line-width': 1.2, 'line-dasharray': [3, 2] } }, before);
+    map.addLayer({ id: 'obras-casing', type: 'line', source: 'obras', filter: lines, layout: { 'line-join': 'round' }, paint: { 'line-opacity': 0.7, 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3.4, 16, 8] } }, before);
+    map.addLayer({ id: 'obras-plan', type: 'line', source: 'obras', filter: ['all', lines, ['==', ['get', 'built'], false]] as unknown as FilterSpecification, layout: { 'line-join': 'round' }, paint: { 'line-width': width, 'line-dasharray': [1.6, 1.4] } }, before);
+    map.addLayer({ id: 'obras-built', type: 'line', source: 'obras', filter: ['all', lines, ['==', ['get', 'built'], true]] as unknown as FilterSpecification, layout: { 'line-join': 'round' }, paint: { 'line-width': width } }, before);
+    map.addLayer({ id: 'obras-area', type: 'line', source: 'obras', filter: ['==', ['get', 'kind'], 'area'], paint: { 'line-width': 1.2, 'line-dasharray': [3, 2] } }, before);
     map.addLayer({
       id: 'obras-label', type: 'symbol', source: 'obras', filter: ['has', 'label'], minzoom: 11,
       layout: { 'text-field': ['get', 'label'], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-optional': true, 'symbol-placement': 'point' },
-      paint: { 'text-color': '#c4c9d0', 'text-halo-color': '#07090b', 'text-halo-width': 1.6 },
-    });
+      paint: { 'text-halo-width': 1.6 },
+    }, top);
+    paint(map);
   }
   if (!map.getSource('obras')) return;
   for (const id of IDS) map.setLayoutProperty(id, 'visibility', want.on ? 'visible' : 'none');
+}
+
+/** Colores de la capa según el tema (al crearla y al cambiar de tema). */
+export function setObrasTheme(map: MLMap, t: Theme) {
+  theme = t;
+  if (map.getSource('obras')) paint(map);
+}
+
+function paint(map: MLMap) {
+  const T = THEMES[theme];
+  map.setPaintProperty('obras-casing', 'line-color', T.casing);
+  for (const id of ['obras-plan', 'obras-built', 'obras-area']) map.setPaintProperty(id, 'line-color', T.line);
+  map.setPaintProperty('obras-label', 'text-color', T.text);
+  map.setPaintProperty('obras-label', 'text-halo-color', T.bg);
 }
 
 export function obrasSource(map: MLMap) { return map.getSource('obras') as GeoJSONSource | undefined; }
