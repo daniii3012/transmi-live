@@ -128,45 +128,80 @@ def main():
             'c': [ll(p) for p in w['points']],
         })
 
-    # Huella de cada estación: el edificio (building=bus_station) más grande con proporción de
-    # estación (ancho 3–20 m, ≥ 250 m²); si no hay, las plataformas cerradas. Los recortes de pocos
-    # metros cuadrados (casetas, accesos) se descartan. Los portales son sus plataformas (troncales y
-    # de alimentación): el edificio grande de un portal es la entrada o un parqueadero, que el mapa
-    # base ya dibuja.
+    # Geometría de cada estación, como en el simulador (map.mjs, buildStationGeometry e islandAreas):
+    # - andenes cerrados de OSM (troncales y de alimentación), si los hay;
+    # - si no, las «islas»: áreas de la estación largas y angostas (≥ 20 m, 1,5–12 m de ancho, tres
+    #   veces más largas que anchas). Marsella trae seis de 28–48 × 4,6 m, Héroes cuatro;
+    # - si no, el edificio de la estación más grande con proporción de estación (3–20 m, ≥ 250 m²).
+    # Las áreas `building=roof` son cubiertas: van como techo, no como andén. Los portales son sus
+    # plataformas (el edificio grande es la entrada o un parqueadero, que el mapa base ya dibuja).
+    # La validación contra los carriles (y el corrimiento de una isla que los pise) se hace al compilar.
+    def overlap(a, b) -> float:
+        """Fracción de `a` dentro de `b` (muestreo en rejilla de 1 m)."""
+        xs, ys = [p[0] for p in a], [p[1] for p in a]
+        def inside(x, y, q):
+            c = False
+            for i in range(len(q)):
+                (xi, yi), (xj, yj) = q[i], q[i - 1]
+                if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+                    c = not c
+            return c
+        n = k = 0
+        x = min(xs)
+        while x <= max(xs):
+            y = min(ys)
+            while y <= max(ys):
+                if inside(x, y, a):
+                    n += 1
+                    k += inside(x, y, b)
+                y += 1.0
+            x += 1.0
+        return k / n if n else 0.0
+
+    def dedupe(polys):
+        out = []
+        for q in sorted(polys, key=area, reverse=True):
+            if not any(overlap(q, o) > 0.5 for o in out):
+                out.append(q)
+        return out
+
     out_st = []
     for st in layouts['stations']:
+        areas = [a for a in st.get('areas') or [] if a.get('closed') and len(a['points']) >= 4]
         if re.match(r'(?i)portal', st.get('name') or ''):
             polys = [p['points'] for p in st.get('platforms') or []
                      if p.get('closed') and len(p['points']) >= 4 and area(p['points']) >= 300 and p['role'] in ('platform_trunk', 'platform_feeder')]
             if polys:
-                out_st.append({'id': st['station_id'], 'kind': 'platform', 'polys': [[ll(p) for p in poly] for poly in polys], 'src': None})
+                out_st.append({'id': st['station_id'], 'kind': 'platform', 'polys': [[ll(p) for p in poly] for poly in polys], 'roofs': [], 'src': None})
             continue
-        best = None
-        for ar in st.get('areas') or []:
-            pts = ar['points']
-            if not ar.get('closed') or len(pts) < 4:
-                continue
-            a = area(pts)
-            w = ar.get('width_m') or 0
-            if a >= 250 and 3 <= w <= 20 and (best is None or a > best[0]):
-                best = (a, ar)
-        polys = []
-        kind = None
-        if best:
-            polys = [best[1]['points']]
-            kind = 'building'
+        plats = [p['points'] for p in st.get('platforms') or []
+                 if p.get('closed') and len(p['points']) >= 4 and area(p['points']) >= 60 and p['role'] in ('platform_trunk', 'platform_feeder')]
+        long_narrow = [a for a in areas if a.get('role') == 'station_area' and (a.get('length_m') or 0) >= 20
+                       and 1.5 <= (a.get('width_m') or 0) <= 12 and a['length_m'] >= 3 * a['width_m']]
+        is_roof = lambda a: (a.get('osm_tags') or {}).get('building') == 'roof'
+        roofs = [a['points'] for a in long_narrow if is_roof(a)]
+        islands = [a['points'] for a in long_narrow if not is_roof(a)]
+        if plats:
+            kind, polys = 'platform', dedupe(plats)
+            roofs = roofs or [a['points'] for a in areas if (a.get('osm_tags') or {}).get('building') in ('bus_station', 'roof')
+                              and (a.get('width_m') or 99) <= 20 and area(a['points']) >= 60]
+        elif islands:
+            kind, polys = 'island', dedupe(islands)
         else:
-            for p in st.get('platforms') or []:
-                if p.get('closed') and len(p['points']) >= 4 and area(p['points']) >= 60 and p['role'] == 'platform_trunk':
-                    polys.append(p['points'])
-            kind = 'platform' if polys else None
-        if not polys:
-            continue
+            best = None
+            for ar in areas:
+                a, w = area(ar['points']), ar.get('width_m') or 0
+                if a >= 250 and 3 <= w <= 20 and (best is None or a > best[0]):
+                    best = (a, ar)
+            if not best:
+                continue
+            kind, polys = 'building', [best[1]['points']]
         out_st.append({
             'id': st['station_id'],
             'kind': kind,
             'polys': [[ll(p) for p in poly] for poly in polys],
-            'src': best[1]['source'] if best else None,
+            'roofs': [[ll(p) for p in poly] for poly in dedupe(roofs)],
+            'src': None,
         })
 
     out_str = []

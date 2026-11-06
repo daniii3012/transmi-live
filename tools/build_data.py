@@ -774,10 +774,152 @@ def main():
         return None
     provisional = []
 
+    # Calzada exclusiva con su ancho (3,4 m por carril alrededor del eje de la vía de OSM): un andén no
+    # puede pisarla. Rejilla de tramos para medir y corregir.
+    LANE_W = 3.4
+    carriage = defaultdict(list)
+    if busway:
+        for w in busway['lanes']:
+            hw = LANE_W * (w.get('lanes') or 1) / 2
+            pts = [xy(lo, la) for lo, la in w['c']]
+            for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+                for gx in range(int(min(ax, bx) // 40) - 1, int(max(ax, bx) // 40) + 2):
+                    for gy in range(int(min(ay, by) // 40) - 1, int(max(ay, by) // 40) + 2):
+                        carriage[(gx, gy)].append((ax, ay, bx, by, hw))
+
+    def seg_d(px, py, ax, ay, bx, by):
+        dx, dy = bx - ax, by - ay
+        l2 = dx * dx + dy * dy or 1e-9
+        f = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / l2))
+        return math.hypot(px - ax - f * dx, py - ay - f * dy)
+
+    def on_carriage(px, py) -> bool:
+        return any(seg_d(px, py, *s[:4]) < s[4] - 0.5 for s in carriage.get((int(px // 40), int(py // 40)), ()))
+
+    def pip(x, y, q):
+        c = False
+        for i in range(len(q)):
+            (xi, yi), (xj, yj) = q[i], q[i - 1]
+            if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+                c = not c
+        return c
+
+    def over_fraction(poly) -> float:
+        xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+        n = k = 0
+        x = min(xs)
+        while x <= max(xs):
+            y = min(ys)
+            while y <= max(ys):
+                if pip(x, y, poly):
+                    n += 1
+                    k += on_carriage(x, y)
+                y += 1.0
+            x += 1.0
+        return k / n if n else 1.0
+
+    def frame(poly):
+        """Centro, eje (unitario), normal, largo y ancho de un andén (por su lado más largo)."""
+        pts = poly[:-1] if poly[0] == poly[-1] else poly
+        cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+        best = max(zip(pts, pts[1:] + pts[:1]), key=lambda e: math.hypot(e[1][0] - e[0][0], e[1][1] - e[0][1]))
+        ux, uy = best[1][0] - best[0][0], best[1][1] - best[0][1]
+        l = math.hypot(ux, uy) or 1.0
+        ux, uy = ux / l, uy / l
+        nx, ny = -uy, ux
+        a = [(p[0] - cx) * ux + (p[1] - cy) * uy for p in pts]
+        b = [(p[0] - cx) * nx + (p[1] - cy) * ny for p in pts]
+        return (cx, cy), (ux, uy), (nx, ny), max(a) - min(a), max(b) - min(b)
+
+    def fit_lateral(poly):
+        """Corrimiento de lado (m, sobre la normal) para que el andén quede fuera de la calzada: entre
+        dos calzadas, centrado; junto a una, con su borde a 0,3 m. Como fitIslandNow del simulador."""
+        (cx, cy), (ux, uy), (nx, ny), L, W = frame(poly)
+        shifts = []
+        t = -L / 2 + 4
+        while t <= L / 2 - 4 + 1e-6:
+            px, py = cx + ux * t, cy + uy * t
+            left, right = math.inf, -math.inf
+            for ax, ay, bx, by, hw in carriage.get((int(px // 40), int(py // 40)), ()):
+                dx, dy = bx - ax, by - ay
+                l = math.hypot(dx, dy)
+                if l < 1e-6 or abs((dx * ux + dy * uy) / l) < 0.9:
+                    continue
+                f = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (l * l)))
+                qx, qy = ax + f * dx, ay + f * dy
+                if abs((qx - px) * ux + (qy - py) * uy) > 3:
+                    continue
+                d = (qx - px) * nx + (qy - py) * ny
+                if abs(d) > 15:
+                    continue
+                if d > 0:
+                    left = min(left, d - hw)
+                else:
+                    right = max(right, d + hw)
+            if left < math.inf and right > -math.inf:
+                shifts.append((left + right) / 2)
+            elif left < math.inf:
+                shifts.append(min(0.0, left - W / 2 - 0.3))
+            elif right > -math.inf:
+                shifts.append(max(0.0, right + W / 2 + 0.3))
+            t += max(4.0, (L - 8) / 6)
+        if not shifts:
+            return None
+        shifts.sort()
+        sh = shifts[len(shifts) // 2]
+        return sh if abs(sh) <= 6 else None
+
+    def place_platforms(polys_m):
+        """Andenes que no pisan la calzada (≤ 10 % de su superficie); los que la pisan, corridos de lado si
+        así quedan bien; si no, fuera. Devuelve (aceptados, corridos)."""
+        ok, moved = [], 0
+        for poly in polys_m:
+            if over_fraction(poly) <= 0.10:
+                ok.append(poly)
+                continue
+            sh = fit_lateral(poly)
+            if sh is None:
+                continue
+            (_, _), _, (nx, ny), _, _ = frame(poly)
+            q = [(x + nx * sh, y + ny * sh) for x, y in poly]
+            if over_fraction(q) <= 0.10:
+                ok.append(q)
+                moved += 1
+        return ok, moved
+
+    def modules(ring, wagons):
+        """La huella estimada (un rectángulo entre los carriles) partida en vagones: las paradas del GTFS
+        a lo largo del eje se agrupan (más de 25 m entre grupos) y cada grupo es un módulo."""
+        (cx, cy), (ux, uy), _, L, _ = frame(ring)
+        proj = sorted((wx - cx) * ux + (wy - cy) * uy for wx, wy in wagons)
+        groups = []
+        for v in proj:
+            if groups and v - groups[-1][1] <= 25:
+                groups[-1][1] = v
+            else:
+                groups.append([v, v])
+        if len(groups) < 2:
+            return [ring]
+        pts = ring[:-1]
+        a = [(p[0] - cx) * ux + (p[1] - cy) * uy for p in pts]
+        a0, a1 = min(a), max(a)
+        out = []
+        for g0, g1 in groups:
+            s0, s1 = max(a0, g0 - 16), min(a1, g1 + 16)
+            if s1 - s0 < 12:
+                continue
+            q = []
+            for p in pts:
+                along = (p[0] - cx) * ux + (p[1] - cy) * uy
+                t = s0 if along < (a0 + a1) / 2 else s1
+                q.append((p[0] + ux * (t - along), p[1] + uy * (t - along)))
+            out.append(q + [q[0]])
+        return out or [ring]
+
     def footprint(s, kind: str) -> dict:
-        """Huella aceptada solo si su centro queda a ≤ 120 m de los vagones (o del punto de la
-        estación si no tiene): así se descarta un edificio de OSM que no es el de esta estación
-        (Quirigua) o que cubre solo una de sus partes (Ricaurte)."""
+        """Andenes y cubiertas de la estación. De OSM (andenes o islas, vía el simulador), validados
+        contra la calzada; la huella se acepta solo si su centro queda a ≤ 120 m de los vagones (o del
+        punto de la estación si no tiene). Si no hay, una estimada entre los carriles, por vagones."""
         sid = s['stop_id']
         wagons = [stop_xy[stop_ix[k['stop_id']]] for k in kids.get(sid, [])]
         ref = (sum(p[0] for p in wagons) / len(wagons), sum(p[1] for p in wagons) / len(wagons)) if wagons else stop_xy[stop_ix[sid]]
@@ -787,11 +929,25 @@ def main():
             cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
             return math.hypot(cx - ref[0], cy - ref[1]) <= (300 if kind == 'portal' else 120)  # un portal ocupa una manzana
 
+        def out(rings_m, roofs_m, fpk):
+            r = lambda ring: [[round(x / KX, 6), round(y / KY, 6)] for x, y in ring]
+            return {'fp': [r(q) for q in rings_m], **({'roof': [r(q) for q in roofs_m]} if roofs_m else {}), 'fpk': fpk}
+
         if sid in fp_osm:
-            rings = fp_osm[sid]['polys']
-            if near([[xy(lo, la) for lo, la in r] for r in rings]):
+            src = fp_osm[sid]
+            rings = [[xy(lo, la) for lo, la in poly] for poly in src['polys']]
+            rings = [q + [q[0]] if q[0] != q[-1] else q for q in rings]
+            if kind == 'portal':
+                placed, moved = rings, 0
+            else:
+                placed, moved = place_platforms(rings)
+            if placed and near(placed):
                 n_fp['osm'] += 1
-                return {'fp': [[[round(lo, 6), round(la, 6)] for lo, la in ring] for ring in rings], 'fpk': 'osm'}
+                n_fp['corridos'] += moved
+                n_fp['descartados'] += len(rings) - len(placed)
+                roofs = [[xy(lo, la) for lo, la in poly] for poly in src.get('roofs') or []]
+                # Islas: la cubierta es la isla misma (un poco más ancha al dibujar).
+                return out(placed, [q + [q[0]] if q[0] != q[-1] else q for q in roofs], src['kind'])
             n_fp['osm_lejos'] += 1
         if lane_idx is None:
             return {}
@@ -805,7 +961,7 @@ def main():
             n_fp['none'] += 1
             return {}
         n_fp['est'] += 1
-        return {'fp': [[[round(x / KX, 6), round(y / KY, 6)] for x, y in ring]], 'fpk': 'est'}
+        return out(modules(ring, wagons), [], 'est')
 
     stations = []
     shifts: list[tuple[float, str]] = []
@@ -887,7 +1043,7 @@ def main():
             v['z'] = votes.most_common(1)[0][0]
     log(f'tramos de corredor: {len(corridor_segments)}; sin letra {n_before} → {sum(1 for v in corridor_segments.values() if not v["z"])} '
         f'({dropped} expresos duplicados descartados)')
-    log(f'huellas de estación: {n_fp["osm"]} de OSM ({n_fp["osm_lejos"]} descartadas por lejanas), {n_fp["est"]} estimadas, {n_fp["none"]} sin huella')
+    log(f'huellas de estación: {n_fp["osm"]} de OSM ({n_fp["corridos"]} andenes corridos fuera de la calzada, {n_fp["descartados"]} descartados; {n_fp["osm_lejos"]} estaciones lejanas), {n_fp["est"]} estimadas, {n_fp["none"]} sin huella')
     if provisional:
         log(f'provisionales (tramo en obra, sin modelar): {len(provisional)}: ' + ', '.join(provisional))
     shifts.sort(reverse=True)
