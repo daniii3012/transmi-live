@@ -954,8 +954,12 @@ def main():
     # Tramos en obra (data/curated/obras.json): sus estaciones son provisionales y no se modelan.
     obras_p = ROOT / 'data' / 'curated' / 'obras.json'
     obras = [(z, [xy(lo, la) for lo, la in z['line']]) for z in (json.loads(obras_p.read_text())['zones'] if obras_p.exists() else [])]
+    # Las definitivas que ya operan dentro del tramo (Calle 26 - Atrio, Calle 72 - Areandina) se modelan.
+    definitive = {d['id'] for z, _ in obras for d in z.get('definitivas', [])}
 
-    def in_works(lon, lat):
+    def in_works(lon, lat, sid=None):
+        if sid in definitive:
+            return None
         p = xy(lon, lat)
         for z, line in obras:
             for (ax, ay), (bx, by) in zip(line, line[1:]):
@@ -1196,7 +1200,7 @@ def main():
         rs = sorted({routes[ri]['route_id'] for ri in stop_routes.get(stop_ix[s['stop_id']], ())})
         lon, lat = float(s['stop_lon']), float(s['stop_lat'])
         # Provisionales (tramo en obra) y cerradas: sin huella ni cuerpo; solo la marca.
-        works = in_works(lon, lat) if kind != 'cable' else None
+        works = in_works(lon, lat, s['stop_id']) if kind != 'cable' else None
         if works:
             provisional.append(name)
         fp = footprint(s, kind) if kind != 'cable' and not works and rs else {}

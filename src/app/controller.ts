@@ -12,6 +12,7 @@ import { watch } from './watch.svelte';
 import type { SystemKey } from '../domain/types';
 import { app, saveLayers, savePrefs, loadPrefs } from './store.svelte';
 import { loadMetro, setMetro } from '../map/metroLayers';
+import { buildObras, loadObras, setObras } from '../map/obras';
 import { Elevation } from '../map/structures';
 import { buildBridges, buildStations, type Structures } from '../map/structuresLayer';
 import { buildMetro, type MetroStats } from '../map/metro3d';
@@ -552,7 +553,9 @@ export class Controller {
     m.setLayoutProperty('street-stops', 'visibility', l.stops ? 'visible' : 'none');
     this.fleet.trails = l.trails;
     void setMetro(m, l.metro, app.threeD);
+    void setObras(m, l.obras);
     this.metro3d();
+    this.obras3d();
     m.triggerRepaint();
   }
 
@@ -571,6 +574,7 @@ export class Controller {
     savePrefs({ threeD: on });
     void setMetro(this.map, app.layersOn.metro, on);
     this.metro3d();
+    this.obras3d();
     // Los edificios van debajo de la red: la tapan donde corresponde, pero nunca a los buses.
     this.map.setLayoutProperty('building-3d', 'visibility', on ? 'visible' : 'none');
     this.map.setLayoutProperty('building', 'visibility', on ? 'none' : 'visible');
@@ -628,6 +632,18 @@ export class Controller {
     }
     if (!this.metroBuilt) return;
     void this.metroBuilt.then(() => { this.structs?.show('metro', app.layersOn.metro && app.threeD); this.map.triggerRepaint(); });
+  }
+
+  /** Troncales en obra en 3D (puentes y deprimidos con el diseño terminado): con el modo de obras y la
+   * vista 3D. */
+  private obrasBuilt: Promise<void> | null = null;
+  private obras3d() {
+    if (!this.structs) return;
+    if (app.layersOn.obras && app.threeD && !this.obrasBuilt) {
+      this.obrasBuilt = loadObras().then((d) => { this.structs!.set('obras', (solid, glass) => buildObras(d, solid, glass), 13); }).catch(() => { this.obrasBuilt = null; });
+    }
+    if (!this.obrasBuilt) return;
+    void this.obrasBuilt.then(() => { this.structs?.show('obras', app.layersOn.obras && app.threeD); this.map.triggerRepaint(); });
   }
 
   /** Rutas para el respaldo por ruta: la abierta, la del bus abierto o las de los tramos del viaje. */
