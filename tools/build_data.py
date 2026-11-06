@@ -948,19 +948,33 @@ def main():
                 # Islas: la cubierta es la isla misma (un poco más ancha al dibujar).
                 return out(placed, [q + [q[0]] if q[0] != q[-1] else q for q in roofs], src['kind'])
             n_fp['osm_lejos'] += 1
-        if lane_idx is None:
-            return {}
-        # Portales y estaciones partidas (vagones a más de 300 m entre sí): sin estimar.
-        spread = max((math.hypot(a[0] - b[0], a[1] - b[1]) for a in wagons for b in wagons), default=0)
-        if kind == 'portal' or spread > 300:
+        if lane_idx is None or kind == 'portal':
             n_fp['none'] += 1
             return {}
-        ring = bw.estimate_footprint(stop_xy[stop_ix[sid]], wagons, lane_idx)
-        if not ring or not near([ring]):
+        # Estimada por grupos de vagones: una estación partida (Calle 161, Calle 85: dos mitades a
+        # ~300 m) se estima por cada mitad, y cada grupo se centra en sus vagones (el punto del GTFS a
+        # veces queda lejos: Granja, ~300 m). Grupos: vagones a menos de 120 m entre sí.
+        groups = []
+        for w in wagons:
+            near_g = [g for g in groups if any(math.hypot(w[0] - v[0], w[1] - v[1]) < 120 for v in g)]
+            merged = [w]
+            for g in near_g:
+                merged += g
+                groups.remove(g)
+            groups.append(merged)
+        if not groups:
+            groups = [[stop_xy[stop_ix[sid]]]]
+        rings = []
+        for g in groups:
+            cx, cy = sum(p[0] for p in g) / len(g), sum(p[1] for p in g) / len(g)
+            ring = bw.estimate_footprint((cx, cy), g, lane_idx)
+            if ring:
+                rings += modules(ring, g)
+        if not rings or not near(rings):
             n_fp['none'] += 1
             return {}
         n_fp['est'] += 1
-        return out(modules(ring, wagons), [], 'est')
+        return out(rings, [], 'est')
 
     stations = []
     shifts: list[tuple[float, str]] = []

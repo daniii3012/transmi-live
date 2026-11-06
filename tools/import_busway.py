@@ -171,6 +171,11 @@ def main():
         if re.match(r'(?i)portal', st.get('name') or ''):
             polys = [p['points'] for p in st.get('platforms') or []
                      if p.get('closed') and len(p['points']) >= 4 and area(p['points']) >= 300 and p['role'] in ('platform_trunk', 'platform_feeder')]
+            # Plataformas troncales mapeadas como edificio de la estación (Portal El Dorado: 243 × 9,5 m):
+            # áreas con edificio y proporción de andén (3–14 m de ancho, ≥ 60 m de largo).
+            polys += [a['points'] for a in areas if a.get('role') == 'station_area' and (a.get('osm_tags') or {}).get('building')
+                      and 3 <= (a.get('width_m') or 0) <= 14 and (a.get('length_m') or 0) >= 60]
+            polys = dedupe(polys)
             if polys:
                 out_st.append({'id': st['station_id'], 'kind': 'platform', 'polys': [[ll(p) for p in poly] for poly in polys], 'roofs': [], 'src': None})
             continue
