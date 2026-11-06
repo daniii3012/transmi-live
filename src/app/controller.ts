@@ -638,7 +638,7 @@ export class Controller {
           if (st.prov || st.closed) continue;
           for (const r of st.fp ?? []) platforms.push(r.map(([lo, la]) => [lo * KX, la * KY] as [number, number]));
         }
-        const below = { lanes: (this.net.lanes ?? []).map((l) => l.c), platforms };
+        const below = { lanes: (this.net.lanes ?? []).map((l) => l.c), corridors: (this.net.lanes ?? []).map((l) => l.z), platforms };
         this.structs!.set('metro', (solid, glass) => { this.metroStats = buildMetro(data, solid, glass, below); }, 13);
       }).catch(() => { this.metroBuilt = null; });
     }

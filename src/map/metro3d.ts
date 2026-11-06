@@ -46,7 +46,14 @@ type FC = GeoJSON.FeatureCollection;
 type Ring = [number, number][];
 
 /** Lo de la troncal que el viaducto debe respetar: carriles (lon, lat) y andenes (metros locales). */
-export interface TroncalBelow { lanes: Float64Array[]; platforms: P2[][] }
+export interface TroncalBelow { lanes: Float64Array[]; platforms: P2[][]; /** Corredor de cada carril (letra de la troncal), en el orden de `lanes`. */ corridors?: (string | null)[] }
+
+/**
+ * Luces especiales publicadas: el puente de dovelas sobre la Av. El Dorado (Calle 26) salva más de 215 m
+ * entre las columnas de la Calle 24B y la Calle 26 (Empresa Metro, Portafolio). Se ubica donde el trazado
+ * cruza la troncal de la Calle 26 (letra K).
+ */
+const LONG_SPANS: { corridor: string; length: number }[] = [{ corridor: 'K', length: 215 }];
 
 const deckZ = (s: number) => DECK_Z * Math.max(0, Math.min(1, s / RAMP));
 
@@ -173,17 +180,36 @@ export function buildMetro(fc: FC, solid: Mesh, glass: Mesh, below?: TroncalBelo
 
   // Pilas (o pórticos sobre la troncal).
   const lanes = below?.lanes.length ? new LaneIndex(below.lanes) : null;
-  const plats = (below?.platforms ?? []).map((r) => frame(r));
-  const nearPlatform = (c: P2) => plats.some((f) => {
+  const plats = (below?.platforms ?? []).map((r) => ({ r, f: frame(r) }));
+  /** Andén de la troncal a menos de 10 m de la pila, si lo hay. */
+  const nearPlatform = (c: P2) => plats.find(({ f }) => {
     const dx = c[0] - f.c[0], dy = c[1] - f.c[1];
     const a = Math.max(0, Math.abs(dx * f.u[0] + dy * f.u[1]) - f.L / 2), b = Math.max(0, Math.abs(-dx * f.u[1] + dy * f.u[0]) - f.W / 2);
     return Math.hypot(a, b) < 10;
   });
+  // Luces largas: tramos sin pilas centrados donde el trazado cruza la troncal indicada.
+  const noPiers: [number, number][] = [];
+  for (const sp of LONG_SPANS) {
+    const cross = crossings(path, below?.lanes ?? [], below?.corridors ?? [], sp.corridor);
+    if (cross.length) {
+      const m = cross.reduce((a, b) => a + b, 0) / cross.length;
+      noPiers.push([m - sp.length / 2, m + sp.length / 2]);
+    }
+  }
   for (let s = RAMP; s < path.length; s += PIER_STEP) {
-    if (inSpan(free, s)) continue;
+    if (inSpan(free, s) || inSpan(noPiers, s)) continue;
     const c = pt(s), u = dir(s), v: P2 = [-u[1], u[0]], top = deckZ(s) - BEAM;
+    // Sobre una estación de la troncal: las columnas del pórtico van pegadas a sus muros (estaciones
+    // definitivas de la Caracas: Calle 26, Calle 72; foto de la Calle 26 en Infobae), no al borde de la vía.
+    const st = nearPlatform(c);
+    if (st) {
+      const bs = st.r.map((p) => (p[0] - c[0]) * v[0] + (p[1] - c[1]) * v[1]);
+      const t0 = Math.min(...bs) - 0.9, t1 = Math.max(...bs) + 0.9;
+      if (t1 - t0 < 16 && t0 < 0 && t1 > 0) { portal(solid, c, u, v, t0, t1, top); stats.portals++; stats.portalAt.push([c[0] / KX, c[1] / KY]); continue; }
+    }
+    // Sobre un carril (la pila caería en la calzada): pórtico a los costados de la calzada.
     const ts = lanes?.cross(c, v, 18) ?? [];
-    if (ts.length && (nearPlatform(c) || ts.some((t) => Math.abs(t) < 3.2))) {
+    if (ts.length && ts.some((t) => Math.abs(t) < 3.2)) {
       const t0 = Math.min(...ts) - 3.2, t1 = Math.max(...ts) + 3.2;
       if (t1 - t0 < 34) { portal(solid, c, u, v, t0, t1, top); stats.portals++; stats.portalAt.push([c[0] / KX, c[1] / KY]); continue; }
     }
@@ -196,10 +222,27 @@ export function buildMetro(fc: FC, solid: Mesh, glass: Mesh, below?: TroncalBelo
   return stats;
 }
 
-/** Pórtico: dos columnas en los desplazamientos t0 y t1 (sobre `v`) y la viga cabezal bajo el tablero. */
+/** Abscisas donde el trazado cruza (a más de 45°) los carriles de una troncal. */
+function crossings(path: MetricPath, lanes: Float64Array[], corridors: (string | null)[], z: string): number[] {
+  const out: number[] = [];
+  lanes.forEach((c, li) => {
+    if (corridors[li] !== z) return;
+    for (let i = 2; i < c.length; i += 2) {
+      const ax = c[i - 2] * KX, ay = c[i - 1] * KY, bx = c[i] * KX, by = c[i + 1] * KY;
+      const hit = path.nearest((ax + bx) / 2, (ay + by) / 2, undefined, 0, Infinity, 30);
+      if (!hit || hit.d > Math.hypot(bx - ax, by - ay) / 2 + 5) continue;
+      const h = path.headingAt(hit.s), l = Math.hypot(bx - ax, by - ay) || 1;
+      if (Math.abs((Math.cos(h) * (bx - ax) + Math.sin(h) * (by - ay)) / l) < 0.7) out.push(hit.s);
+    }
+  });
+  return out;
+}
+
+/** Pórtico: dos columnas redondas en los desplazamientos t0 y t1 (sobre `v`) y la viga cabezal bajo el
+ *  tablero. */
 function portal(solid: Mesh, c: P2, u: P2, v: P2, t0: number, t1: number, top: number) {
   const at = (t: number): P2 => [c[0] + v[0] * t, c[1] + v[1] * t];
-  for (const t of [t0, t1]) solid.box(at(t), u, 0.8, 0.8, 0, top - PORTAL_BEAM, M.MPier, M.MPier);
+  for (const t of [t0, t1]) solid.cyl(at(t), 0.8, 0, top - PORTAL_BEAM, M.MPier, 12);
   solid.box(at((t0 + t1) / 2), u, 1, (t1 - t0) / 2 + 0.8, top - PORTAL_BEAM, top, M.MPier, M.MPier, true);
 }
 

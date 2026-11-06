@@ -2,7 +2,7 @@ import type { CustomLayerInterface, CustomRenderMethodInput, Map as MLMap } from
 import type { Network } from '../data/network';
 import { KX, KY } from '../domain/geo';
 import { ORIGIN } from '../live/fleet';
-import { M, MATS, Mesh, STRUCT_THEMES, ccw, frame, grow, open, type P2 } from './mesh';
+import { M, MATS, Mesh, STRUCT_THEMES, area, ccw, grow, inside, open as openRing, slices, type P2 } from './mesh';
 
 /**
  * Estructuras en 3D (H7), en WebGL propio como los buses: las extrusiones de MapLibre solo hacen
@@ -38,7 +38,7 @@ const PARAPET = 0.9;
 const PARAPET_T = 0.25;
 const PIER_STEP = 24;
 
-const toXY = (r: [number, number][]) => open(r.map(([lo, la]) => [lo * KX, la * KY] as P2));
+const toXY = (r: [number, number][]) => openRing(r.map(([lo, la]) => [lo * KX, la * KY] as P2));
 
 /** Paredes de vidrio alrededor del andén, con un paral en cada esquina y cada ~6 m. */
 function walls(ring: P2[], solid: Mesh, glass: Mesh) {
@@ -63,29 +63,60 @@ function walls(ring: P2[], solid: Mesh, glass: Mesh) {
   }
 }
 
+/** Fracción de los puntos del andén (vértices y centro) que caen bajo una cubierta. */
+function covered(plat: P2[], roof: P2[]): number {
+  let cx = 0, cy = 0;
+  for (const p of plat) { cx += p[0]; cy += p[1]; }
+  const pts = [...plat, [cx / plat.length, cy / plat.length] as P2];
+  return pts.filter((p) => inside(p, roof)).length / pts.length;
+}
+
+/**
+ * Estaciones. Cada andén lleva su techo: la cubierta de OSM que lo cubre o, si ninguna, una propia algo
+ * más ancha (antes, con una cubierta de OSM en la estación, los andenes que ella no cubría quedaban sin
+ * techo: Ricaurte, Banderas). Dos estilos:
+ *
+ * - vagón (lo común): paredes de vidrio con parales y la cubierta apoyada en ellas;
+ * - abierto (los portales, y los andenes de más de 8 m bajo una cubierta de OSM, como el centro de
+ *   Banderas): sin paredes, con columnas a lo largo del eje del andén (quebrado o no) bajo la cubierta.
+ *
+ * Las cubiertas de OSM que no cubren ningún andén (pasillos, accesos) también se dibujan.
+ */
 export function buildStations(net: Network, solid: Mesh, glass: Mesh) {
   for (const s of net.stations.values()) {
     if ((!s.fp?.length && !s.roof?.length) || s.prov || s.closed) continue;
-    const plats = (s.fp ?? []).map(toXY);
+    const roofs = (s.roof ?? []).map(toXY);
     const portal = s.kind === 'portal';
-    for (const r of plats) {
+    const plats = (s.fp ?? []).map(toXY).map((r) => {
+      const sl = slices(r, COL_STEP, 2);
+      const len = sl.length > 1 ? Math.hypot(sl[sl.length - 1].c[0] - sl[0].c[0], sl[sl.length - 1].c[1] - sl[0].c[1]) + 4 : 4;
+      const ri = roofs.findIndex((q) => covered(r, q) >= 0.6);
+      return { r, sl, ri, open: portal || (ri >= 0 && area(r) / len > 8) };
+    });
+    for (const { r, sl, ri, open } of plats) {
+      const z = open ? CANOPY_Z : ROOF_Z;
       solid.prism(r, 0, PLATFORM_H, M.PlatTop, M.PlatSide);
-      if (!portal) { walls(r, solid, glass); continue; }
-      // Portal: columnas a lo largo del eje del andén, bajo la cubierta grande.
-      const f = frame(r);
-      if (f.L < 8) continue;
-      const k = Math.max(2, Math.floor((f.L - 4) / COL_STEP) + 1);
-      for (let i = 0; i < k; i++) {
-        const t = -f.L / 2 + 2 + ((f.L - 4) * i) / (k - 1);
-        solid.box([f.c[0] + f.u[0] * t, f.c[1] + f.u[1] * t], f.u, COL / 2, COL / 2, PLATFORM_H, CANOPY_Z, M.Column, M.Column);
+      if (open) {
+        // Columnas por el eje del andén, bajo la cubierta.
+        sl.forEach((k, i) => {
+          const a = sl[Math.max(0, i - 1)].c, b = sl[Math.min(sl.length - 1, i + 1)].c;
+          const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+          solid.box(k.c, [(b[0] - a[0]) / l, (b[1] - a[1]) / l], COL / 2, COL / 2, PLATFORM_H, z, M.Column, M.Column);
+        });
+      } else {
+        walls(r, solid, glass);
       }
+      // Techo propio si ninguna cubierta de OSM lo cubre: el del vagón, de lámina (opaco); el abierto,
+      // translúcido (los buses paran debajo) y sin cara de abajo (dos capas casi juntas dejaban ver las
+      // aristas de los triángulos).
+      if (ri < 0) (open ? glass : solid).prism(grow(r, open ? 0.6 : ROOF_PAD), z, z + ROOF_T, M.Roof, M.Roof, !open);
     }
-    // Cubiertas: las de OSM (building=roof) si están; si no, sobre cada andén, algo más anchas. La del
-    // vagón es de lámina (opaca); la del portal, translúcida: los buses paran debajo.
-    const z = portal ? CANOPY_Z : ROOF_Z;
-    const roofs = s.roof?.length ? s.roof.map(toXY) : plats.map((r) => grow(r, portal ? 0.6 : ROOF_PAD));
-    // La translúcida, sin cara de abajo: dos capas casi juntas dejaban ver las aristas de los triángulos.
-    for (const r of roofs) (portal ? glass : solid).prism(r, z, z + ROOF_T, M.Roof, M.Roof, !portal);
+    // Cubiertas de OSM: translúcidas sobre andenes abiertos (o en un portal); si no, opacas.
+    roofs.forEach((q, i) => {
+      const big = portal || plats.some((p) => p.ri === i && p.open);
+      const z = big ? CANOPY_Z : ROOF_Z;
+      (big ? glass : solid).prism(q, z, z + ROOF_T, M.Roof, M.Roof, !big);
+    });
   }
 }
 

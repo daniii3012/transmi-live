@@ -116,7 +116,7 @@ export class Mesh {
   }
 }
 
-function area(ring: P2[]) {
+export function area(ring: P2[]) {
   let a = 0;
   for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; a += p[0] * q[1] - q[0] * p[1]; }
   return a / 2;
@@ -175,4 +175,42 @@ export function grow(ring: P2[], d: number): P2[] {
     const k = Math.min(2.5, 1 / Math.max(0.2, mx * n1[0] + my * n1[1]));
     return [p[0] + mx * d * k, p[1] + my * d * k];
   });
+}
+
+/** ¿El punto cae dentro del anillo? (par-impar) */
+export function inside(p: P2, ring: P2[]): boolean {
+  let c = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+
+/**
+ * Eje central de un andén largo y angosto, aunque esté quebrado (los de Portal 80): cortes
+ * perpendiculares al eje general cada `step` m; en cada uno, el punto medio del ancho y el ancho.
+ */
+export function slices(ring: P2[], step: number, inset = 0): { c: P2; w: number; t: number }[] {
+  const f = frame(ring);
+  const v: P2 = [-f.u[1], f.u[0]];
+  const loc = ring.map((p) => [(p[0] - f.c[0]) * f.u[0] + (p[1] - f.c[1]) * f.u[1], (p[0] - f.c[0]) * v[0] + (p[1] - f.c[1]) * v[1]] as P2);
+  const a0 = Math.min(...loc.map((p) => p[0])) + inset, a1 = Math.max(...loc.map((p) => p[0])) - inset;
+  if (a1 <= a0) return [];
+  const n = Math.max(1, Math.round((a1 - a0) / step));
+  const out: { c: P2; w: number; t: number }[] = [];
+  for (let k = 0; k <= n; k++) {
+    const t = a0 + ((a1 - a0) * k) / n;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < loc.length; i++) {
+      const p = loc[i], q = loc[(i + 1) % loc.length];
+      if ((p[0] - t) * (q[0] - t) > 0 || p[0] === q[0]) continue;
+      const b = p[1] + ((q[1] - p[1]) * (t - p[0])) / (q[0] - p[0]);
+      lo = Math.min(lo, b); hi = Math.max(hi, b);
+    }
+    if (hi < lo) continue;
+    const b = (lo + hi) / 2;
+    out.push({ c: [f.c[0] + f.u[0] * t + v[0] * b, f.c[1] + f.u[1] * t + v[1] * b], w: hi - lo, t });
+  }
+  return out;
 }

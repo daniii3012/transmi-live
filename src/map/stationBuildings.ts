@@ -1,127 +1,97 @@
-import type { Map as MLMap } from 'maplibre-gl';
+import type { FilterSpecification, Map as MLMap } from 'maplibre-gl';
 import type { Network } from '../data/network';
 import { KX, KY } from '../domain/geo';
 
 /**
  * Edificios del mapa base que son la estación misma (OSM `building=bus_station`, cubiertas de
- * plataformas, rampas): en 3D se aplanan con un estado de entidad para que no dupliquen la estación
- * propia (cuerpo y techo) ni levanten una provisional, que no se modela. Un edificio se aplana si:
+ * plataformas, rampas): en 3D no se levantan, para que no dupliquen la estación propia (cuerpo y techo)
+ * ni levanten una provisional, que no se modela. No se levanta un edificio que toque (a ≤ `PAD` m):
  *
- * - se solapa con una huella de estación (con `PAD` de holgura; no basta con que su centro caiga
- *   dentro: OSM suele partir la estación en una pieza por vagón y la huella estimada puede correrse);
- * - o es una estructura sobre el separador de la troncal (centro a ≤ `MEDIAN` del eje de un carril
- *   exclusivo) a menos de `NEAR` de una estación que no sea portal: así caen las cubiertas de las
- *   provisionales y las piezas que la huella no alcanza. Los edificios de la calle quedan más lejos.
+ * - una huella de estación (OSM suele partir la estación en una pieza por vagón y la huella estimada
+ *   puede correrse);
+ * - la franja del separador alrededor de cada estación: su huella alargada `EXT` m por punta y ensanchada
+ *   `SIDE` m por lado (cubiertas y rampas que la huella no alcanza); en una provisional, que no tiene
+ *   huella, 260 × 20 m a lo largo del carril más cercano.
  *
- * Los edificios partidos entre teselas llegan en varias piezas con el mismo id: se revisa cada pieza.
- * Se recorre lo cargado al quedar quieto el mapa, solo en 3D y desde z14,5.
+ * Se decide por geometría, con la expresión `distance` de MapLibre en el filtro de la capa. Antes se
+ * marcaba cada edificio por su id con un estado de entidad, pero las teselas del mapa base repiten ids
+ * entre edificios distintos (el mismo id a más de 1 km): al marcar uno se aplanaban muchos de la ciudad,
+ * unos segundos después de cargar (revisión del 6 nov.). Con polígonos simples el filtro casi no cuesta;
+ * con los ejes de los carriles (miles de tramos) la carga de teselas tardaba diez veces más.
  */
-type Ring = [number, number][];
-interface Fp { box: [number, number, number, number]; rings: Ring[] }
-
 const PAD = 6; // m
-const MEDIAN = 8; // m
-const NEAR = 250; // m
-const G = 60; // m, celda de los índices
+const EXT = 25; // m
+const SIDE = 4; // m
 
-function inside(p: [number, number], ring: Ring): boolean {
-  let ok = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) ok = !ok;
+type Ring = [number, number][];
+type P = [number, number];
+
+/** Rectángulo (lon, lat) de centro `c`, eje `u` (metros locales), semilargo `a` y semiancho `b`. */
+function rect(c: P, u: P, a: number, b: number): Ring {
+  const v: P = [-u[1], u[0]];
+  const r = [[-1, -1], [1, -1], [1, 1], [-1, 1], [-1, -1]].map(([sa, sb]) => [(c[0] + u[0] * a * sa + v[0] * b * sb) / KX, (c[1] + u[1] * a * sa + v[1] * b * sb) / KY] as P);
+  return r;
+}
+
+/** Eje (lado más largo), centro, largo y ancho de un conjunto de anillos en metros locales. */
+function frameOf(rings: P[][]): { c: P; u: P; L: number; W: number } {
+  const all = rings.flat();
+  let best = 0, u: P = [1, 0];
+  for (const r of rings) for (let i = 1; i < r.length; i++) {
+    const l = Math.hypot(r[i][0] - r[i - 1][0], r[i][1] - r[i - 1][1]);
+    if (l > best) { best = l; u = [(r[i][0] - r[i - 1][0]) / l, (r[i][1] - r[i - 1][1]) / l]; }
   }
-  return ok;
-}
-function segDist(p: [number, number], ax: number, ay: number, bx: number, by: number): number {
-  const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1e-9;
-  const f = Math.max(0, Math.min(1, ((p[0] - ax) * dx + (p[1] - ay) * dy) / l2));
-  return Math.hypot(p[0] - ax - f * dx, p[1] - ay - f * dy);
-}
-function distToRing(p: [number, number], ring: Ring): number {
-  let best = Infinity;
-  for (let i = 1; i < ring.length; i++) best = Math.min(best, segDist(p, ring[i - 1][0], ring[i - 1][1], ring[i][0], ring[i][1]));
-  return best;
-}
-/** ¿Se tocan (con holgura `pad`) dos anillos? */
-function overlaps(a: Ring, b: Ring, pad: number): boolean {
-  for (const p of a) if (inside(p, b) || distToRing(p, b) <= pad) return true;
-  for (const p of b) if (inside(p, a)) return true;
-  return false;
+  const o = all[0];
+  let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+  for (const p of all) {
+    const a = (p[0] - o[0]) * u[0] + (p[1] - o[1]) * u[1], b = -(p[0] - o[0]) * u[1] + (p[1] - o[1]) * u[0];
+    a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b);
+  }
+  const ma = (a0 + a1) / 2, mb = (b0 + b1) / 2;
+  return { c: [o[0] + u[0] * ma - u[1] * mb, o[1] + u[1] * ma + u[0] * mb], u, L: a1 - a0, W: b1 - b0 };
 }
 
 export function hideStationBuildings(map: MLMap, net: Network) {
-  const fps: Fp[] = [];
-  const points: [number, number][] = [];
+  const base: Ring[][] = [];
   for (const s of net.stations.values()) {
-    if (s.kind !== 'portal' && s.kind !== 'cable') points.push([s.lon * KX, s.lat * KY]);
-    if (!s.fp?.length) continue;
-    const rings = s.fp.map((r) => r.map(([lo, la]) => [lo * KX, la * KY] as [number, number]));
-    const all = rings.flat();
-    const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
-    fps.push({ box: [Math.min(...xs) - PAD, Math.min(...ys) - PAD, Math.max(...xs) + PAD, Math.max(...ys) + PAD], rings });
+    if (s.kind === 'cable' || !s.fp?.length) continue;
+    for (const r of s.fp) {
+      const ring = r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1] ? r : [...r, r[0]];
+      if (ring.length >= 4) base.push([ring as Ring]);
+    }
+    if (s.kind === 'portal') continue;
+    const f = frameOf(s.fp.map((r) => r.map(([lo, la]) => [lo * KX, la * KY] as P)));
+    base.push([rect(f.c, f.u, f.L / 2 + EXT, f.W / 2 + SIDE)]);
   }
-  // Índice de los carriles exclusivos (llegan al acercarse; ver Network.loadLanes).
-  let lanes: Map<string, number[]> | null = null;
-  const indexLanes = () => {
-    if (lanes || !net.lanes) return;
-    lanes = new Map();
-    for (const l of net.lanes) {
-      const c = l.c;
-      for (let i = 2; i < c.length; i += 2) {
-        const ax = c[i - 2] * KX, ay = c[i - 1] * KY, bx = c[i] * KX, by = c[i + 1] * KY;
-        for (let gx = Math.floor(Math.min(ax, bx) / G); gx <= Math.floor(Math.max(ax, bx) / G); gx++) {
-          for (let gy = Math.floor(Math.min(ay, by) / G); gy <= Math.floor(Math.max(ay, by) / G); gy++) {
-            const k = `${gx}:${gy}`;
-            let a = lanes.get(k);
-            if (!a) lanes.set(k, (a = []));
-            a.push(ax, ay, bx, by);
-          }
+  /** Provisionales (sin huella): a lo largo del carril más cercano. */
+  const provisional = (): Ring[][] => {
+    if (!net.lanes) return [];
+    const out: Ring[][] = [];
+    for (const s of net.stations.values()) {
+      if (!s.prov) continue;
+      const p: P = [s.lon * KX, s.lat * KY];
+      let best = Infinity, u: P = [1, 0];
+      for (const l of net.lanes) {
+        const c = l.c;
+        for (let i = 2; i < c.length; i += 2) {
+          const ax = c[i - 2] * KX, ay = c[i - 1] * KY, bx = c[i] * KX, by = c[i + 1] * KY;
+          const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1e-9;
+          const t = Math.max(0, Math.min(1, ((p[0] - ax) * dx + (p[1] - ay) * dy) / l2));
+          const d = Math.hypot(p[0] - ax - t * dx, p[1] - ay - t * dy);
+          if (d < best) { best = d; const l = Math.sqrt(l2); u = [dx / l, dy / l]; }
         }
       }
+      if (best < 60) out.push([rect(p, u, 130, 10)]);
     }
+    return out;
   };
-  const nearLane = (p: [number, number]) => {
-    const a = lanes?.get(`${Math.floor(p[0] / G)}:${Math.floor(p[1] / G)}`);
-    if (!a) return false;
-    for (let i = 0; i < a.length; i += 4) if (segDist(p, a[i], a[i + 1], a[i + 2], a[i + 3]) <= MEDIAN) return true;
-    return false;
+  const apply = () => {
+    if (!map.getLayer('building-3d')) return;
+    const geo = { type: 'MultiPolygon', coordinates: [...base, ...provisional()] };
+    map.setFilter('building-3d', ['>', ['distance', geo], PAD] as unknown as FilterSpecification);
   };
-  const nearStation = (p: [number, number]) => points.some((q) => Math.abs(q[0] - p[0]) < NEAR && Math.abs(q[1] - p[1]) < NEAR && Math.hypot(q[0] - p[0], q[1] - p[1]) < NEAR);
-
-  const flagged = new Set<string | number>();
-  const seen = new Set<string>();
-  const run = () => {
-    if (map.getZoom() < 14.5 || map.getLayoutProperty('building-3d', 'visibility') === 'none') return;
-    if (!net.lanes) { void net.loadLanes().then(() => { indexLanes(); run(); }); }
-    indexLanes();
-    for (const f of map.querySourceFeatures('omt', { sourceLayer: 'building' })) {
-      if (f.id == null || flagged.has(f.id)) continue;
-      const g = f.geometry;
-      const outers = g.type === 'Polygon' ? [g.coordinates[0]] : g.type === 'MultiPolygon' ? g.coordinates.map((p) => p[0]) : [];
-      for (const outer of outers) {
-        if (!outer || outer.length < 3) continue;
-        // Pieza ya revisada (con o sin carriles cargados: la regla del separador necesita los carriles).
-        const key = `${f.id}:${outer[0][0].toFixed(6)},${outer[0][1].toFixed(6)}:${outer.length}:${lanes ? 1 : 0}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const ring = outer.map(([lo, la]) => [lo * KX, la * KY] as [number, number]);
-        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, cx = 0, cy = 0;
-        for (const [x, y] of ring) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); cx += x; cy += y; }
-        const c: [number, number] = [cx / ring.length, cy / ring.length];
-        let hit = false;
-        for (const fp of fps) {
-          if (x1 < fp.box[0] || x0 > fp.box[2] || y1 < fp.box[1] || y0 > fp.box[3]) continue;
-          if (fp.rings.some((r) => overlaps(ring, r, PAD))) { hit = true; break; }
-        }
-        if (!hit && lanes && Math.max(x1 - x0, y1 - y0) < 400 && nearLane(c) && nearStation(c)) hit = true;
-        if (hit) {
-          map.setFeatureState({ source: 'omt', sourceLayer: 'building', id: f.id }, { station: true });
-          flagged.add(f.id);
-          break;
-        }
-      }
-    }
-  };
-  map.on('idle', run);
-  return run;
+  apply();
+  // Los carriles llegan al acercarse (Network.loadLanes): con ellos se suman las provisionales.
+  if (!net.lanes) void net.loadLanes().then(apply);
+  return apply;
 }

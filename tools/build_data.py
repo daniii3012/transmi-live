@@ -423,8 +423,40 @@ def road_companions(pieces, roads):
                 best = (d, (qx, qy), Z[j - 1] + (Z[j] - Z[j - 1]) * f, pieces[pi]['w'])
         return best
 
+    # Un mismo puente viene en varios tramos de OSM (se parten en cada cambio de etiqueta): se unen los
+    # que siguen uno tras otro con el mismo nombre y sentido, para que el tablero no tenga cortes (Cra 30
+    # con Calle 13).
+    def chains(ways):
+        ways = [dict(w, points=list(w['points'])) for w in ways]
+        key = lambda p: (round(p[0], 5), round(p[1], 5))
+        merged = True
+        while merged:
+            merged = False
+            starts = {}
+            for i, w in enumerate(ways):
+                starts.setdefault(key(w['points'][0]), []).append(i)
+            for i, w in enumerate(ways):
+                if w is None:
+                    continue
+                for j in starts.get(key(w['points'][-1]), []):
+                    o = ways[j]
+                    if j == i or o is None or o.get('name') != w.get('name'):
+                        continue
+                    (ax, ay), (bx, by) = xy(*w['points'][-2]), xy(*w['points'][-1])
+                    (cx, cy), (dx, dy) = xy(*o['points'][0]), xy(*o['points'][1])
+                    l1, l2 = math.hypot(bx - ax, by - ay) or 1, math.hypot(dx - cx, dy - cy) or 1
+                    if ((bx - ax) * (dx - cx) + (by - ay) * (dy - cy)) / (l1 * l2) < 0.8:
+                        continue
+                    w['points'] += o['points'][1:]
+                    w['lanes'] = max(w['lanes'], o['lanes'])
+                    ways[j] = None
+                    merged = True
+                    break
+            ways = [w for w in ways if w is not None]
+        return ways
+
     out, names = [], Counter()
-    for r in roads:
+    for r in chains(roads):
         P = densify([xy(lo, la) for lo, la in r['points']], 4.0)
         if len(P) < 3:
             continue

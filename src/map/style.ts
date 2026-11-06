@@ -96,9 +96,9 @@ export function darkStyle(theme: Theme = 'dark'): StyleSpecification {
         layout: { visibility: 'none' },
         paint: {
           'fill-extrusion-color': ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 6], 0, C.b3dLow, 60, C.b3dHigh],
-          // Los edificios de OSM que son la estación misma no se levantan: la estación propia (huella,
-          // cuerpo y techo) va en su lugar (F7.7; ver stationBuildings.ts).
-          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14.5, 0, 15.5, ['case', ['boolean', ['feature-state', 'station'], false], 0, ['coalesce', ['get', 'render_height'], 6]]],
+          // Los edificios de OSM que son la estación misma no se levantan: los quita el filtro de la capa
+          // (por geometría; ver stationBuildings.ts) y la estación propia va en su lugar (F7.7).
+          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14.5, 0, 15.5, ['coalesce', ['get', 'render_height'], 6]],
           'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
           'fill-extrusion-opacity': 0.92,
           'fill-extrusion-vertical-gradient': true,
