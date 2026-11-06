@@ -1511,11 +1511,57 @@ def main():
                         return True
             return False
 
-        landed = 0
+        # Rampas que bajan frente a la punta de un andén (2–20 m: el andén modelado es más corto que el real
+        # o la rampa de OSM termina en la plazoleta de acceso): un tramo más, de la rampa al borde del andén
+        # en su punta, que sube a su altura. Solo frente a la punta (no al costado, que es la pared del vagón).
+        frames = []
+        for q in plat_rings:
+            n_ = len(q) - 1 if q[0] == q[-1] else len(q)
+            cxq = sum(p_[0] for p_ in q[:n_]) / n_
+            cyq = sum(p_[1] for p_ in q[:n_]) / n_
+            best_l, ux, uy = 0.0, 1.0, 0.0
+            for (ax, ay), (bx, by) in zip(q, q[1:]):
+                l_ = math.hypot(bx - ax, by - ay)
+                if l_ > best_l:
+                    best_l, ux, uy = l_, (bx - ax) / l_, (by - ay) / l_
+            al = [(p_[0] - cxq) * ux + (p_[1] - cyq) * uy for p_ in q]
+            bl = [-(p_[0] - cxq) * uy + (p_[1] - cyq) * ux for p_ in q]
+            frames.append((q, cxq, cyq, ux, uy, min(al), max(al), min(bl), max(bl)))
+
+        def landing(x, y):
+            """Punto en la punta del andén más cercano frente a (x, y), si está a 2–20 m."""
+            best = None
+            for q, cxq, cyq, ux, uy, a0, a1, b0, b1 in frames:
+                a = (x - cxq) * ux + (y - cyq) * uy
+                b = -(x - cxq) * uy + (y - cyq) * ux
+                if b < b0 - 4 or b > b1 + 4:
+                    continue  # al costado: no
+                if a > a1:
+                    d, ea = a - a1, a1
+                elif a < a0:
+                    d, ea = a0 - a, a0
+                else:
+                    continue
+                if 2 <= d <= 20 and (best is None or d < best[0]):
+                    bb = min(max(b, b0 + 1), b1 - 1)
+                    best = (d, (cxq + ux * ea - uy * bb, cyq + uy * ea + ux * bb))
+            return best[1] if best else None
+
+        landed = linked = 0
         if fb_p.exists():
             for f in json.loads(fb_p.read_text())['footbridges']:
+                pts3 = [list(p_) for p_ in f['points']]
+                for end in (0, -1):
+                    lo, la, z = pts3[end]
+                    if z > 1.5:
+                        continue
+                    q = landing(*xy(lo, la))
+                    if q:
+                        new = [q[0] / KX, q[1] / KY, 0.9]
+                        pts3 = [new] + pts3 if end == 0 else pts3 + [new]
+                        linked += 1
                 enc, zs, px, py = [], [], 0, 0
-                for lo, la, z in f['points']:
+                for lo, la, z in pts3:
                     x, y = xy(lo, la)
                     if z < 0.9 and near_platform(x, y):
                         z, landed = 0.9, landed + 1
@@ -1524,7 +1570,7 @@ def main():
                     px, py = X, Y
                     zs.append(round(z, 2))
                 foot.append({'k': f['kind'], 'z': zs, 'd': enc})
-            log(f'puentes peatonales: {len(foot)} piezas ({landed} puntos de rampa llevados a la altura del andén)')
+            log(f'puentes peatonales: {len(foot)} piezas ({landed} puntos de rampa llevados a la altura del andén, {linked} empalmados con la punta de un andén)')
         write('structures.json', {'v': 2, 'hash': digest, 'scale': E6, 'level_m': LEVEL_M, 'deck_m': DECK_M, 'license': busway.get('license'), 'pieces': pieces, 'foot': foot})
         log(f'puentes de la troncal: {len(pieces)} piezas (tramos elevados y rampas)')
     write('stops.json', {'v': 1, 'hash': digest, 'cols': ['id', 'code', 'name', 'lon', 'lat', 'routes'], 'stops': street})
