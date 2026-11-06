@@ -168,6 +168,11 @@
       "name": "Calle 72 - Areandina",
       "traced": "2026-11-06",
       "nota": "Según el comunicado de TRANSMILENIO del 19/08/2026: tres vagones de 90 m y 8 m de ancho unidos por pasarelas centrales, 383 m en total. Eje y centro de la estimación por los vagones del GTFS (las imágenes satelitales disponibles son de antes de la obra).",
+      "calzada_revisada": {
+        "fecha": "2026-11-06",
+        "hasta_pct": 27,
+        "motivo": "La calzada exclusiva de OSM es de antes de la obra; los vagones de 8 m son los del comunicado. Revisado y aceptado (issue #1)."
+      },
       "platforms": [
         [
           [

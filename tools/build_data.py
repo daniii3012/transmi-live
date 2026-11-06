@@ -1386,7 +1386,10 @@ def main():
             roofs = [q + [q[0]] if q[0] != q[-1] else q for q in roofs]
             if kind != 'portal':
                 over = max(over_fraction(q) for q in rings)
-                if over > 0.10:
+                # Un solape ya revisado (`calzada_revisada`, con el porcentaje aceptado) no vuelve a la
+                # revisión; si crece, sí.
+                ok = (fp_traced[sid].get('calzada_revisada') or {}).get('hasta_pct', 10)
+                if over > 0.10 and over * 100 > ok + 0.5:
                     review.append(f"Andén trazado de {s['stop_name']} pisa la calzada ({over * 100:.0f} %): revisar station_overrides.json.")
             n_fp['trazadas'] += 1
             return out(rings, roofs, 'traced')
