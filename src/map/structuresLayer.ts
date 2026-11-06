@@ -63,12 +63,15 @@ function walls(ring: P2[], solid: Mesh, glass: Mesh, z0 = 0) {
   }
 }
 
-/** Fracción de los puntos del andén (vértices y centro) que caen bajo una cubierta. */
+/** Fracción de los puntos del andén (vértices y centro) que caen bajo una cubierta, con 1 m de holgura:
+ *  una cubierta de OSM que es el mismo polígono que el andén (el centro de Banderas) deja los vértices
+ *  justo en el borde, y la prueba de «dentro» los descartaba. */
 function covered(plat: P2[], roof: P2[]): number {
   let cx = 0, cy = 0;
   for (const p of plat) { cx += p[0]; cy += p[1]; }
   const pts = [...plat, [cx / plat.length, cy / plat.length] as P2];
-  return pts.filter((p) => inside(p, roof)).length / pts.length;
+  const big = grow(roof, 1);
+  return pts.filter((p) => inside(p, big)).length / pts.length;
 }
 
 /**
