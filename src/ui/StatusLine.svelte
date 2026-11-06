@@ -1,12 +1,15 @@
 <script lang="ts">
   import { app } from '../app/store.svelte';
   import { fmtHMS, ago, fmtNum } from '../domain/time';
+  import { backup } from '../live/backup.svelte';
 
   let { compact = false }: { compact?: boolean } = $props();
   const p = $derived(app.poll);
   const age = $derived(p.feedTime ? Math.max(0, app.now / 1000 - p.feedTime) : null);
+  const onBackup = $derived(backup.status === 'active' && backup.codes.length > 0);
+  // En la barra compacta del teléfono no cabe un segmento más: con el respaldo en uso, la etiqueta lo dice.
   const label = $derived(
-    p.status === 'live' ? 'En vivo' : p.status === 'stale' ? 'Datos viejos' : p.status === 'error' ? 'Sin conexión' : p.status === 'idle' ? 'En pausa' : 'Conectando',
+    compact && onBackup ? 'Respaldo' : p.status === 'live' ? 'En vivo' : p.status === 'stale' ? 'Datos viejos' : p.status === 'error' ? 'Sin conexión' : p.status === 'idle' ? 'En pausa' : 'Conectando',
   );
 </script>
 
@@ -18,10 +21,13 @@
   {#if p.feedTime}
     <span class="sep" aria-hidden="true">·</span>
     <span class="num"><span class="sr">datos de las </span>{fmtHMS(p.feedTime * 1000).slice(0, 5)}<span class="sec">{fmtHMS(p.feedTime * 1000).slice(5)}</span></span>
-    {#if !compact}
+    {#if !compact && !onBackup}
       <span class="sep" aria-hidden="true">·</span>
       <span class="num faint">hace {ago(age ?? 0)}</span>
     {/if}
+  {/if}
+  {#if !compact && onBackup}
+    <span class="sep" aria-hidden="true">·</span><span class="num backup" title="Posiciones del servicio por ruta mientras el alimentador está detenido">Respaldo {backup.codes.join(' ')}</span>
   {/if}
   {#if !compact && p.status === 'error' && p.error}
     <span class="sep">·</span><span class="faint">{p.error}</span>

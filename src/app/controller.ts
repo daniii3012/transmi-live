@@ -17,6 +17,7 @@ import type { StructuresLayer } from '../map/structuresLayer';
 import { applyBaseTheme } from '../map/style';
 import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
 import { go, parse, type View } from './router';
+import { backup } from '../live/backup.svelte';
 
 export const PANEL_W = 380;
 
@@ -96,7 +97,11 @@ export class Controller {
       if (document.hidden) this.wake = null;
       else { if (app.following) void this.keepAwake(true); void this.checkData(); }
     });
-    this.clock = window.setInterval(() => { app.now = Date.now(); watch.check(this.net, this.fleet, app.now); }, 1000);
+    this.clock = window.setInterval(() => {
+      app.now = Date.now();
+      watch.check(this.net, this.fleet, app.now);
+      backup.tick(this.net, this.fleet, app.poll.feedTime, this.backupCodes(), app.now);
+    }, 1000);
     this.poller.start();
     this.setTheme(themePref());
     onSystemChange(() => { if (app.themePref === 'system') this.setTheme('system'); });
@@ -595,6 +600,15 @@ export class Controller {
       this.map.triggerRepaint();
     });
   };
+
+  /** Rutas para el respaldo por ruta: la abierta, la del bus abierto o las de los tramos del viaje. */
+  private backupCodes(): string[] {
+    const v = app.view;
+    if (v.kind === 'route') { const c = this.net.routes.get(v.id)?.code; return c ? [c] : []; }
+    if (v.kind === 'bus') { const c = this.fleet.buses.get(v.id)?.route?.code; return c ? [c] : []; }
+    if (v.kind === 'plan' && this.fleet.focusRoutes) return [...this.fleet.focusRoutes].map((id) => this.net.routes.get(id)?.code).filter((c): c is string => !!c);
+    return [];
+  }
 
   zoom(d: number) { this.map.easeTo({ zoom: this.map.getZoom() + d, duration: 220 }); }
   north() { this.map.easeTo({ bearing: 0, pitch: app.threeD ? this.map.getPitch() : 0, duration: 400 }); }

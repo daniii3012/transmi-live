@@ -24,6 +24,7 @@
   import MapMenu from './ui/MapMenu.svelte';
   import Toast from './ui/Toast.svelte';
   import ChangesView from './ui/ChangesView.svelte';
+  import SettingsView from './ui/SettingsView.svelte';
   import { favorites } from './app/favorites.svelte';
   import { watch } from './app/watch.svelte';
   import { hideStationBuildings } from './map/stationBuildings';
@@ -126,6 +127,8 @@
           <PlanView id={app.view.id} />
         {:else if app.view.kind === 'changes'}
           <ChangesView />
+        {:else if app.view.kind === 'settings'}
+          <SettingsView />
         {/if}
       </div>
     {/key}

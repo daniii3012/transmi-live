@@ -105,6 +105,19 @@ describe('flota', () => {
     expect(b.sFix).toBeCloseTo(4150, -1);
   });
 
+  it('el respaldo por ruta incorpora lecturas sin quitar los demás buses ni mover el retraso', () => {
+    const f = new Fleet(net);
+    const T0 = 1_000_000;
+    const d = snap(T0, 1000);
+    f.ingest({ ...d, n: 2, id: ['1', '2'], label: ['A1', 'B2'], plate: ['X', 'Y'], route: ['R', 'R'], lat: [...d.lat, ...d.lat], lon: [d.lon[0], d.lon[0] + 300], age: [0, 0], stop: ['s', 's'], seq: [1, 1], start: [0, 0] }, T0 * 1000 + 15_000);
+    const lag = f.lag;
+    // El alimentador se quedó quieto; el respaldo trae solo el bus 1, 3 min después.
+    f.merge(snap(T0 + 180, 2800), T0 * 1000 + 200_000);
+    expect(f.buses.size).toBe(2); // el bus 2 sigue
+    expect(f.buses.get('1')!.sFix).toBeCloseTo(2800, -1); // el 1 avanzó con la lectura del respaldo
+    expect(f.lag).toBe(lag); // el ritmo del alimentador no cambia
+  });
+
   it('a más de 60 m del recorrido se dibuja en su punto', () => {
     const f = new Fleet(net);
     f.ingest(snap(1000, 1000, 150), 0);

@@ -111,8 +111,8 @@
       {@render children()}
     </div>
     <footer class="foot">
-      <span>Proyecto independiente · datos abiertos</span>
-      <a href="https://github.com/daniii3012/transmi-live/blob/main/FUENTES.md" target="_blank" rel="noopener">Fuentes</a>
+      <span class="about">Proyecto independiente</span>
+      <span class="links"><a href="#/configuracion">Configuración</a><a href="https://github.com/daniii3012/transmi-live/blob/main/FUENTES.md" target="_blank" rel="noopener">Fuentes</a></span>
     </footer>
   </aside>
 {/if}
@@ -159,6 +159,8 @@
     color: var(--fg-2);
   }
   .foot a { color: var(--fg-2); text-decoration: none; }
+  .foot .links { display: flex; gap: var(--sp-3); flex: none; }
+  .foot .about { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: var(--sp-3); }
   .foot a:hover { color: var(--fg-0); }
 
   /* Móvil: barra superior y hoja inferior. */

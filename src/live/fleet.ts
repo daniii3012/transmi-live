@@ -195,43 +195,55 @@ export class Fleet {
     }
     this.feedTime = d.t;
     const seen = new Set<string>();
-    for (let i = 0; i < d.n; i++) {
-      const id = d.id[i] || d.label[i];
-      seen.add(id);
-      const lat = LAT0 + d.lat[i] / Q, lon = LON0 + d.lon[i] / Q;
-      const x = lon * KX, y = lat * KY;
-      const age = d.age[i];
-      const fixAt = (d.t - age) * 1000;
-      const routeId = d.route[i];
-      let b = this.buses.get(id);
-      if (b && b.fixAt === fixAt && b.routeId === routeId) {
-        b.age = age;
-        continue; // misma lectura: el bus no ha reportado de nuevo
-      }
-      if (!b || b.routeId !== routeId) {
-        const route = this.net.routes.get(routeId);
-        const fresh: Bus = {
-          id, label: d.label[i], plate: d.plate[i], routeId, route, path: this.net.paths.get(routeId), sys: route?.sys, kind: busKind(d.label[i], route?.code, route?.sys),
-          fixX: x, fixY: y, fixAt, age, stopId: d.stop[i], seq: d.seq[i], start: d.start[i],
-          onPath: false, offPath: Infinity, sFix: 0, tt: [], ts: [], tm: [], off: 0, offAt: now, snap: true, suspect: null, drawnAt: 0, v: 0, x0: x, y0: y, x1: x, y1: y, t0: now, t1: now,
-          speed: null, hist: [], bornAt: b ? b.bornAt : now, pingAt: 0, seed: seedOf(id), x, y, hx: 1, hy: 0, s: 0,
-        };
-        if (b) { fresh.x = b.x; fresh.y = b.y; fresh.hx = b.hx; fresh.hy = b.hy; }
-        this.place(fresh, x, y, fixAt, now, true);
-        this.buses.set(id, fresh);
-        continue;
-      }
-      b.label = d.label[i];
-      b.plate = d.plate[i];
-      b.age = age;
-      b.stopId = d.stop[i];
-      b.seq = d.seq[i];
-      b.start = d.start[i];
-      b.pingAt = now;
-      this.place(b, x, y, fixAt, now, false);
-    }
+    for (let i = 0; i < d.n; i++) seen.add(this.upsert(d, i, now));
     for (const id of this.buses.keys()) if (!seen.has(id)) this.buses.delete(id);
     for (const f of this.listeners) f();
+  }
+
+  /**
+   * Lecturas de UNA ruta (respaldo por ruta, ver live/backup.svelte.ts): se incorporan como las del
+   * alimentador, pero sin quitar los demás buses ni tocar el ritmo del alimentador (retraso, intervalo).
+   */
+  merge(d: VehiclesV1, now = Date.now()) {
+    for (let i = 0; i < d.n; i++) this.upsert(d, i, now);
+    for (const f of this.listeners) f();
+  }
+
+  /** Incorpora la lectura `i` de una instantánea; devuelve el id del bus. */
+  private upsert(d: VehiclesV1, i: number, now: number): string {
+    const id = d.id[i] || d.label[i];
+    const lat = LAT0 + d.lat[i] / Q, lon = LON0 + d.lon[i] / Q;
+    const x = lon * KX, y = lat * KY;
+    const age = d.age[i];
+    const fixAt = (d.t - age) * 1000;
+    const routeId = d.route[i];
+    let b = this.buses.get(id);
+    if (b && b.fixAt === fixAt && b.routeId === routeId) {
+      b.age = age;
+      return id; // misma lectura: el bus no ha reportado de nuevo
+    }
+    if (!b || b.routeId !== routeId) {
+      const route = this.net.routes.get(routeId);
+      const fresh: Bus = {
+        id, label: d.label[i], plate: d.plate[i], routeId, route, path: this.net.paths.get(routeId), sys: route?.sys, kind: busKind(d.label[i], route?.code, route?.sys),
+        fixX: x, fixY: y, fixAt, age, stopId: d.stop[i], seq: d.seq[i], start: d.start[i],
+        onPath: false, offPath: Infinity, sFix: 0, tt: [], ts: [], tm: [], off: 0, offAt: now, snap: true, suspect: null, drawnAt: 0, v: 0, x0: x, y0: y, x1: x, y1: y, t0: now, t1: now,
+        speed: null, hist: [], bornAt: b ? b.bornAt : now, pingAt: 0, seed: seedOf(id), x, y, hx: 1, hy: 0, s: 0,
+      };
+      if (b) { fresh.x = b.x; fresh.y = b.y; fresh.hx = b.hx; fresh.hy = b.hy; }
+      this.place(fresh, x, y, fixAt, now, true);
+      this.buses.set(id, fresh);
+      return id;
+    }
+    b.label = d.label[i];
+    b.plate = d.plate[i];
+    b.age = age;
+    b.stopId = d.stop[i];
+    b.seq = d.seq[i];
+    b.start = d.start[i];
+    b.pingAt = now;
+    this.place(b, x, y, fixAt, now, false);
+    return id;
   }
 
   /** Ubica una lectura y programa el movimiento hasta ella. */
