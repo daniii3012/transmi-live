@@ -1428,7 +1428,44 @@ def main():
             review.append('Tramos elevados sobre andenes de estación: ' + ', '.join(n for n, _ in over.most_common()) + ' (revisar los niveles del puente en OSM).')
         else:
             log('puentes sobre andenes: ninguno')
-        write('structures.json', {'v': 2, 'hash': digest, 'scale': E6, 'level_m': LEVEL_M, 'deck_m': DECK_M, 'license': busway.get('license'), 'pieces': pieces})
+        # Puentes peatonales (tools/import_footbridges.py): donde la rampa llega a un andén, termina a la
+        # altura del andén (0,9 m) y no en el suelo, para entrar a la estación sin escalón.
+        foot = []
+        fb_p = ROOT / 'data' / 'curated' / 'footbridges.json'
+        plat_rings = [[xy(lo, la) for lo, la in ring] for s_ in stations for ring in (s_.get('fp') or [])]
+
+        def near_platform(x, y):
+            for q in plat_rings:
+                inside_q = False
+                for i in range(len(q)):
+                    (xi, yi), (xj, yj) = q[i], q[i - 1]
+                    if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+                        inside_q = not inside_q
+                if inside_q:
+                    return True
+                for (ax, ay), (bx, by) in zip(q, q[1:]):
+                    dx, dy = bx - ax, by - ay
+                    l2 = dx * dx + dy * dy or 1e-9
+                    f = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / l2))
+                    if math.hypot(x - ax - f * dx, y - ay - f * dy) <= 2.0:
+                        return True
+            return False
+
+        landed = 0
+        if fb_p.exists():
+            for f in json.loads(fb_p.read_text())['footbridges']:
+                enc, zs, px, py = [], [], 0, 0
+                for lo, la, z in f['points']:
+                    x, y = xy(lo, la)
+                    if z < 0.9 and near_platform(x, y):
+                        z, landed = 0.9, landed + 1
+                    X, Y = round(lo * E6), round(la * E6)
+                    enc.extend((X - px, Y - py))
+                    px, py = X, Y
+                    zs.append(round(z, 2))
+                foot.append({'k': f['kind'], 'z': zs, 'd': enc})
+            log(f'puentes peatonales: {len(foot)} piezas ({landed} puntos de rampa llevados a la altura del andén)')
+        write('structures.json', {'v': 2, 'hash': digest, 'scale': E6, 'level_m': LEVEL_M, 'deck_m': DECK_M, 'license': busway.get('license'), 'pieces': pieces, 'foot': foot})
         log(f'puentes de la troncal: {len(pieces)} piezas (tramos elevados y rampas)')
     write('stops.json', {'v': 1, 'hash': digest, 'cols': ['id', 'code', 'name', 'lon', 'lat', 'routes'], 'stops': street})
     # v2: abscisas y tiempos por diferencias (36 % menos con gzip); el cliente reconstruye los acumulados

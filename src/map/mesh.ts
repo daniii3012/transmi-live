@@ -11,15 +11,17 @@ export type P2 = [number, number];
 type P3 = [number, number, number];
 
 /** Materiales (índice por vértice): troncal, metro (M…), obras (O…), puentes viales que van con la troncal
- *  (Via…, translúcidos) y deprimidos (muros, fondo y losa translúcida donde pasa una calle encima). */
+ *  (Via…, translúcidos), deprimidos (muros, fondo y losa translúcida donde pasa una calle encima) y puentes
+ *  peatonales (F…). */
 export const M = {
   PlatTop: 0, PlatSide: 1, Roof: 2, Column: 3, DeckTop: 4, DeckSide: 5, Pier: 6, Parapet: 7, Wall: 8,
   MDeck: 9, MDeckSide: 10, MPier: 11, MConcourse: 12, MPlatform: 13, MGlass: 14, MRoof: 15, MFrame: 16, MAccess: 17, MBridge: 18,
   OSite: 19, OStruct: 20, OPlanned: 21,
   ViaTop: 22, ViaSide: 23,
   TWall: 24, TFloor: 25, Lid: 26,
+  FDeck: 27, FSide: 28, FRail: 29,
 } as const;
-export const MATS = 27;
+export const MATS = 30;
 
 /** Color y opacidad por material (la opacidad solo cuenta en la pasada translúcida). */
 type Mat = [string, number];
@@ -30,6 +32,7 @@ export const STRUCT_THEMES: Record<'dark' | 'light', Mat[]> = {
     ['#3a3f45', 0.55], ['#5c666f', 1], ['#c8ccd1', 0.18],
     ['#66717c', 0.3], ['#4e5862', 0.26],
     ['#3a444e', 1], ['#1a1f25', 1], ['#5d6872', 0.5],
+    ['#626d78', 1], ['#47515b', 1], ['#a7b8c7', 0.22],
   ],
   light: [
     ['#dde1e5', 1], ['#b7bec5', 1], ['#c4ccd4', 0.86], ['#9aa3ac', 1], ['#d3d9df', 1], ['#b3bbc3', 1], ['#a2abb4', 1], ['#c6cdd4', 1], ['#7f93a6', 0.16],
@@ -37,6 +40,7 @@ export const STRUCT_THEMES: Record<'dark' | 'light', Mat[]> = {
     ['#c9c3b8', 0.5], ['#b7bfc7', 1], ['#7d8691', 0.18],
     ['#c3cad1', 0.42], ['#a7b0b9', 0.36],
     ['#b3bcc5', 1], ['#d3d8dd', 1], ['#c9d0d7', 0.55],
+    ['#e1e5e9', 1], ['#bcc4cb', 1], ['#7f93a6', 0.25],
   ],
 };
 

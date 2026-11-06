@@ -49,6 +49,8 @@ export class Network {
   /** Puentes de la troncal para el 3D (`loadStructures`): tramos elevados y rampas con su altura por
    * vértice (m) y su ancho. */
   pieces: { w: number; z: number[]; c: Float64Array; k?: string; cov?: number }[] | null = null;
+  /** Puentes peatonales (de OSM vía el simulador), con su altura por vértice. */
+  foot: { k: string; z: number[]; c: Float64Array }[] = [];
   private patterns?: Record<string, Pattern>;
   /** Cambios en la red (60 días) y alias de ids re-emitidos (decisión 011). */
   changes: ChangesFile = { v: 1, updated: '', entries: [], aliases: {} };
@@ -120,8 +122,9 @@ export class Network {
   loadStructures(): Promise<void> {
     return this.once('structures', async () => {
       try {
-        const f = await getJSON<{ v: number; scale: number; pieces: { w: number; z: number[]; d: number[]; k?: string; cov?: number }[] }>('structures.json');
+        const f = await getJSON<{ v: number; scale: number; pieces: { w: number; z: number[]; d: number[]; k?: string; cov?: number }[]; foot?: { k: string; z: number[]; d: number[] }[] }>('structures.json');
         this.pieces = (f.pieces ?? []).map((p) => ({ w: p.w, z: p.z, c: decodeShape(p.d, f.scale), k: p.k, cov: p.cov }));
+        this.foot = (f.foot ?? []).map((p) => ({ k: p.k, z: p.z, c: decodeShape(p.d, f.scale) }));
       } catch { this.pieces = []; /* sin puentes: todo a nivel del suelo */ }
     });
   }

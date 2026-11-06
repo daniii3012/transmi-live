@@ -362,6 +362,48 @@ export function buildTrenches(pieces: Piece[], deep: P2[][], solid: Mesh, glass:
   });
 }
 
+/**
+ * Puentes peatonales (OSM vía el simulador, que calcula su altura: 5,5 m por nivel sobre una calle o la
+ * troncal y rampas del 10 % desde cada extremo libre). Tablero de 3 m (2,2 en escaleras y rampas) con su
+ * canto, barandas de vidrio de 1,1 m y columnas cada 18 m donde va alto. Los tramos a ras del suelo no se
+ * dibujan; las rampas que llegan a un andén terminan a su altura (tools/build_data.py).
+ */
+export function buildFootbridges(foot: { k: string; z: number[]; c: Float64Array }[], solid: Mesh, glass: Mesh) {
+  const EDGE = 0.6, RAIL = 1.1, STEP = 18;
+  for (const f of foot) {
+    const n = f.c.length / 2;
+    if (n < 2) continue;
+    const P: P2[] = [];
+    for (let i = 0; i < n; i++) P.push([f.c[2 * i] * KX, f.c[2 * i + 1] * KY]);
+    const hw = f.k === 'deck' ? 1.5 : 1.1;
+    const N: P2[] = P.map((_, j) => {
+      const a = P[Math.max(0, j - 1)], b = P[Math.min(n - 1, j + 1)];
+      const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+      return [-dy / l, dx / l];
+    });
+    const L = (j: number, o: number): P2 => [P[j][0] + N[j][0] * o, P[j][1] + N[j][1] * o];
+    let run = STEP / 2;
+    for (let j = 1; j < n; j++) {
+      const za = f.z[j - 1], zb = f.z[j];
+      if (za < 0.15 && zb < 0.15) continue;
+      const al = L(j - 1, hw), bl = L(j, hw), ar = L(j - 1, -hw), br = L(j, -hw);
+      const bot = (z: number) => Math.max(0, z - EDGE);
+      solid.quad([ar[0], ar[1], za], [br[0], br[1], zb], [bl[0], bl[1], zb], [al[0], al[1], za], M.FDeck);
+      solid.quad([al[0], al[1], bot(za)], [bl[0], bl[1], bot(zb)], [br[0], br[1], bot(zb)], [ar[0], ar[1], bot(za)], M.FSide);
+      solid.wall(bl, al, bot(zb), zb, M.FSide, bot(za), za);
+      solid.wall(ar, br, bot(za), za, M.FSide, bot(zb), zb);
+      glass.wall(bl, al, zb, zb + RAIL, M.FRail, za, za + RAIL);
+      glass.wall(ar, br, za, za + RAIL, M.FRail, zb, zb + RAIL);
+      const seg = Math.hypot(P[j][0] - P[j - 1][0], P[j][1] - P[j - 1][1]);
+      run += seg;
+      if (run >= STEP && zb - EDGE > 1) {
+        run = 0;
+        solid.box(P[j], [N[j][1], -N[j][0]], 0.25, 0.25, 0, zb - EDGE, M.FSide, M.FSide);
+      }
+    }
+  }
+}
+
 interface Group { data: Float32Array; vao: WebGLVertexArrayObject | null; buf: WebGLBuffer | null; count: number; on: boolean; minZoom: number; dirty: boolean; depthOnly: boolean }
 
 /** Una pasada (opaca o translúcida) de todos los grupos. Se arma desde `Structures`. */
