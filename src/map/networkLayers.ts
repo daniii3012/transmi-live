@@ -11,8 +11,8 @@ import type { Theme } from '../app/theme';
 
 /** Colores de la red que dependen del tema (fondo de las mezclas, atenuado, nombres, estaciones). */
 const THEMES = {
-  dark: { bg: '#101418', dim: '#2a3139', label: '#a7b0b9', labelDim: '#3d4650', closed: '#56606b', station: '#e3e7eb', stopFill: '#161b20', stopStroke: '#7b93b8', light: '#e9ecef', fp: '#3a434d', fpEdge: '#8b96a1', fpBody: '#363e46', fpRoof: '#6a747e' },
-  light: { bg: '#e9ecef', dim: '#cfd5db', label: '#4a5560', labelDim: '#b4bbc2', closed: '#a3abb4', station: '#ffffff', stopFill: '#fbfbfc', stopStroke: '#5f7aa3', light: '#12171c', fp: '#eef1f4', fpEdge: '#8f99a3', fpBody: '#aeb6be', fpRoof: '#dde2e7' },
+  dark: { bg: '#101418', dim: '#2a3139', label: '#a7b0b9', labelDim: '#3d4650', closed: '#56606b', station: '#e3e7eb', stopFill: '#161b20', stopStroke: '#7b93b8', light: '#e9ecef', fp: '#3a434d', fpEdge: '#8b96a1', fpBody: '#363e46', fpRoof: '#6a747e', deck: '#3d4650' },
+  light: { bg: '#e9ecef', dim: '#cfd5db', label: '#4a5560', labelDim: '#b4bbc2', closed: '#a3abb4', station: '#ffffff', stopFill: '#fbfbfc', stopStroke: '#5f7aa3', light: '#12171c', fp: '#eef1f4', fpEdge: '#8f99a3', fpBody: '#aeb6be', fpRoof: '#dde2e7', deck: '#c3cad1' },
 } as const;
 let BG: string = THEMES.dark.bg;
 
@@ -69,6 +69,7 @@ export class NetworkLayers {
     m.setPaintProperty('station-fp-line', 'line-color', ['case', ['boolean', ['feature-state', 'sel'], false], T.light, T.fpEdge]);
     m.setPaintProperty('station-fp-3d', 'fill-extrusion-color', T.fpBody);
     m.setPaintProperty('station-fp-roof', 'fill-extrusion-color', T.fpRoof);
+    m.setPaintProperty('busway-decks', 'fill-extrusion-color', T.deck);
     m.setPaintProperty('street-stops', 'circle-stroke-color', T.stopStroke);
     m.setPaintProperty('user', 'circle-stroke-color', T.bg);
     m.setPaintProperty('stations-alert', 'circle-stroke-color', T.bg);
@@ -89,6 +90,7 @@ export class NetworkLayers {
     m.addSource('routes-core', { type: 'geojson', data: this.routesFC(['troncal', 'dual', 'cable']), tolerance: 0.3 });
     m.addSource('corridors', { type: 'geojson', data: this.corridorsFC(), tolerance: 0.3 });
     m.addSource('lanes', { type: 'geojson', data: empty(), tolerance: 0.2 });
+    m.addSource('decks', { type: 'geojson', data: empty(), tolerance: 0.1 });
     m.addSource('route-focus', { type: 'geojson', data: empty(), lineMetrics: true });
     m.addSource('stations', { type: 'geojson', data: this.stationsFC(), promoteId: 'id' });
     m.addSource('station-fp', { type: 'geojson', data: this.footprintsFC(), promoteId: 'id' });
@@ -223,6 +225,11 @@ export class NetworkLayers {
         'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 15, ['case', ['boolean', ['feature-state', 'sel'], false], 1.6, 0.6], 18, ['case', ['boolean', ['feature-state', 'sel'], false], 2.4, 1.2]],
         'line-opacity': fpOn,
       },
+    });
+    // Tableros de los puentes de la troncal (F7.5), en 3D: los buses que los recorren van encima.
+    m.addLayer({
+      id: 'busway-decks', type: 'fill-extrusion', source: 'decks', minzoom: 14.8, layout: { visibility: 'none' },
+      paint: { 'fill-extrusion-color': T0.deck, 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 0.95 },
     });
     m.addLayer({
       id: 'station-fp-3d', type: 'fill-extrusion', source: 'station-fp', minzoom: 14.8, layout: { visibility: 'none' },
@@ -552,7 +559,20 @@ export class NetworkLayers {
   set3d(on: boolean) {
     const m = this.map;
     for (const id of ['station-fp', 'station-fp-line']) m.setLayoutProperty(id, 'visibility', on ? 'none' : 'visible');
-    for (const id of ['station-fp-3d', 'station-fp-roof']) m.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+    for (const id of ['station-fp-3d', 'station-fp-roof', 'busway-decks']) m.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+  }
+
+  /** Tableros de los puentes (ya cargados con `Network.loadStructures`). */
+  setDecks() {
+    const deck = this.net.deckM;
+    (this.map.getSource('decks') as GeoJSONSource | undefined)?.setData({
+      type: 'FeatureCollection',
+      features: this.net.decks.map((d) => ({
+        type: 'Feature',
+        properties: { h: d.h, base: Math.max(0, d.h - deck) },
+        geometry: { type: 'Polygon', coordinates: [coords(d.c)] },
+      })),
+    });
   }
 
   /** Marcas de estación dibujadas en lienzo: cuadrado claro con borde oscuro; portal más grande;

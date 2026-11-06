@@ -12,6 +12,7 @@ import { watch } from './watch.svelte';
 import type { SystemKey } from '../domain/types';
 import { app, saveLayers, savePrefs, loadPrefs } from './store.svelte';
 import { setMetro } from '../map/metroLayers';
+import { Elevation } from '../map/structures';
 import { applyBaseTheme } from '../map/style';
 import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
 import { go, parse, type View } from './router';
@@ -71,6 +72,8 @@ export class Controller {
       this.gesture = false;
       if (app.following) this.keepOffset();
     });
+    // Puentes en 3D: se cargan al acercarse por primera vez.
+    m.on('zoomend', () => { if (app.threeD && !this.elevation) this.structures(); });
     // Cámara guardada para volver al mismo lugar.
     let saveTimer = 0;
     m.on('moveend', () => {
@@ -559,6 +562,7 @@ export class Controller {
     this.map.setLayoutProperty('building-3d', 'visibility', on ? 'visible' : 'none');
     this.map.setLayoutProperty('building', 'visibility', on ? 'none' : 'visible');
     this.layers.set3d(on);
+    this.structures();
     if (instant) { this.map.jumpTo({ pitch: on ? 55 : 0 }); return; }
     const v = app.view;
     this.map.easeTo({ pitch: on ? 55 : 0, bearing: on ? (this.map.getBearing() || -18) : this.map.getBearing(), duration: 700 });
@@ -568,6 +572,22 @@ export class Controller {
       if (v.kind === 'plan') this.afterMove(() => this.layers.drawPlan(), 900);
     }, 700);
   }
+
+  /** Puentes de la troncal en 3D (F7.5): tableros y buses encima. Se cargan la primera vez que hacen
+   * falta (vista 3D y z ≥ 14,5); fuera de 3D, todos los buses van al suelo. */
+  private elevation: Elevation | null = null;
+  private structures = () => {
+    if (!app.threeD) { this.fleet.elevation = null; return; }
+    if (this.elevation) { this.fleet.elevation = (x, y, hx, hy) => this.elevation!.at(x, y, hx, hy); return; }
+    if (this.map.getZoom() < 14.5) return;
+    void this.net.loadStructures().then(() => {
+      if (!this.net.bridges?.length) return;
+      this.elevation ??= new Elevation(this.net.bridges);
+      this.layers.setDecks();
+      this.structures();
+      this.map.triggerRepaint();
+    });
+  };
 
   zoom(d: number) { this.map.easeTo({ zoom: this.map.getZoom() + d, duration: 220 }); }
   north() { this.map.easeTo({ bearing: 0, pitch: app.threeD ? this.map.getPitch() : 0, duration: 400 }); }

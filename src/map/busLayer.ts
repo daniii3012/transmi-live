@@ -32,6 +32,7 @@ layout(location=3) in vec4 a_color;
 layout(location=4) in float a_size;
 layout(location=5) in float a_flags;
 layout(location=6) in float a_ping;
+layout(location=7) in float a_elev;   // altura sobre un puente (m)
 uniform mat4 u_matrix;
 uniform float u_mpp;
 uniform float u_ppm;
@@ -76,7 +77,7 @@ void main() {
   vec2 fwd = normalize(a_dir);
   vec2 sd = vec2(-fwd.y, fwd.x);
   vec2 world = a_pos + (fwd * lx + sd * ly) * u_mpp;
-  gl_Position = u_matrix * vec4(world, 0.0, 1.0);
+  gl_Position = u_matrix * vec4(world, a_elev * u_mpp * u_ppm, 1.0);
   v_local = vec2(lx, ly);
   v_foot = foot;
   v_r = r;
@@ -290,6 +291,7 @@ export class BusLayer implements CustomLayerInterface {
     attr(4, 1, 8);
     attr(5, 1, 9);
     attr(6, 1, 10);
+    attr(7, 1, 13);
     g.bindVertexArray(null);
   }
 
