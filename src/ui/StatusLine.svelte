@@ -1,15 +1,22 @@
 <script lang="ts">
   import { app } from '../app/store.svelte';
-  import { fmtHMS, ago, fmtNum } from '../domain/time';
+  import { fmtHMS, fmtHM, fmtDay, otherDay, ago, fmtNum } from '../domain/time';
   import { backup } from '../live/backup.svelte';
 
   let { compact = false }: { compact?: boolean } = $props();
   const p = $derived(app.poll);
   const age = $derived(p.feedTime ? Math.max(0, app.now / 1000 - p.feedTime) : null);
+  const ms = $derived(p.feedTime ? p.feedTime * 1000 : 0);
+  // Datos de otro día (el alimentador lleva horas detenido): la fecha antes de la hora, sin segundos.
+  const day = $derived(ms && otherDay(ms, app.now) ? fmtDay(ms, app.now) : null);
   const onBackup = $derived(backup.status === 'active' && backup.codes.length > 0);
+  // Barra del teléfono con datos sin actualizar: «Sin actualizar» ocupa casi todo el ancho (375 px), así
+  // que va sin segundos ni conteo de buses, y de otro día solo con la fecha (la hora, en escritorio; el
+  // conteo de una lectura de otro día tampoco se muestra).
+  const shortBar = $derived(compact && p.status === 'stale');
   // En la barra compacta del teléfono no cabe un segmento más: con el respaldo en uso, la etiqueta lo dice.
   const label = $derived(
-    compact && onBackup ? 'Respaldo' : p.status === 'live' ? 'En vivo' : p.status === 'stale' ? 'Datos viejos' : p.status === 'error' ? 'Sin conexión' : p.status === 'idle' ? 'En pausa' : 'Conectando',
+    compact && onBackup ? 'Respaldo' : p.status === 'live' ? 'En vivo' : p.status === 'stale' ? 'Sin actualizar' : p.status === 'error' ? 'Sin conexión' : p.status === 'idle' ? 'En pausa' : 'Conectando',
   );
 </script>
 
@@ -20,7 +27,13 @@
   <span class="label" role="status" aria-live="polite">{label}</span>
   {#if p.feedTime}
     <span class="sep" aria-hidden="true">·</span>
-    <span class="num"><span class="sr">datos de las </span>{fmtHMS(p.feedTime * 1000).slice(0, 5)}<span class="sec">{fmtHMS(p.feedTime * 1000).slice(5)}</span></span>
+    {#if day && compact}
+      <span class="num"><span class="sr">datos del </span>{day}</span>
+    {:else if day}
+      <span class="num"><span class="sr">datos del </span>{day}<span class="sr"> a las</span> {fmtHM(ms)}</span>
+    {:else}
+      <span class="num"><span class="sr">datos de las </span>{fmtHMS(ms).slice(0, 5)}{#if !shortBar}<span class="sec">{fmtHMS(ms).slice(5)}</span>{/if}</span>
+    {/if}
     {#if !compact && !onBackup}
       <span class="sep" aria-hidden="true">·</span>
       <span class="num faint">hace {ago(age ?? 0)}</span>
@@ -32,7 +45,7 @@
   {#if !compact && p.status === 'error' && p.error}
     <span class="sep">·</span><span class="faint">{p.error}</span>
   {/if}
-  {#if compact && p.vehicles}
+  {#if compact && p.vehicles && !day && (p.status !== 'stale' || onBackup)}
     <span class="sep">·</span><span class="num">{fmtNum(p.vehicles)}</span>
   {/if}
 </div>

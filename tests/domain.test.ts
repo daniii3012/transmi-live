@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { MetricPath, decodeShape, KX, KY } from '../src/domain/geo';
 import { etas, timeAt, pace, bandIndex, nextStopIndex, etaText, setSchedScale } from '../src/domain/eta';
 import { beforeEach } from 'vitest';
-import { textOn, ago, meters } from '../src/domain/time';
+import { textOn, ago, meters, otherDay, fmtDay } from '../src/domain/time';
 import type { Pattern } from '../src/domain/types';
 import { undeltaPatterns } from '../src/domain/patterns';
 import { busKind } from '../src/domain/fleetTypes';
@@ -87,7 +87,16 @@ describe('llegadas', () => {
     expect(etaText(3900)).toBe('1 h 05');
     expect(ago(3)).toBe('ahora');
     expect(ago(42)).toBe('42 s');
+    expect(ago(23.8 * 3600)).toBe('23 h');
+    expect(ago(30 * 3600)).toBe('1 día');
+    expect(ago(50 * 3600)).toBe('2 días');
     expect(meters(420)).toBe('420 m');
+    // Días de Bogotá: el 5 nov a las 19:11 y el 6 a las 05:00 son días distintos; 23:59 y 00:01, también.
+    const t = Date.parse('2026-11-05T19:11:00-05:00');
+    expect(otherDay(t, Date.parse('2026-11-05T23:59:00-05:00'))).toBe(false);
+    expect(otherDay(t, Date.parse('2026-11-06T00:01:00-05:00'))).toBe(true);
+    expect(fmtDay(t, t)).toBe('5 nov');
+    expect(fmtDay(t, Date.parse('2027-01-02T08:00:00-05:00'))).toBe('5 nov 2026');
     expect(textOn('#f2b705')).toBe('#07090b');
     expect(textOn('#4f6bed')).toBe('#ffffff');
   });

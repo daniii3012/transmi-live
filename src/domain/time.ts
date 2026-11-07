@@ -20,12 +20,28 @@ export function clock(sec: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-/** Antigüedad legible: «ahora», «12 s», «3 min», «1 h». */
+/** Día de Bogotá (días desde 1970, UTC−5 fijo). */
+const bogotaDay = (ms: number) => Math.floor((ms - 5 * 3600 * 1000) / 86_400_000);
+
+/** ¿`ms` cae en otro día de Bogotá que `now`? (más de 24 h atrás siempre lo es). */
+export const otherDay = (ms: number, now = Date.now()) => bogotaDay(ms) !== bogotaDay(now);
+
+const dm = new Intl.DateTimeFormat('es-CO', { timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric' });
+/** Fecha corta: «5 nov»; de otro año, «5 nov 2025». */
+export function fmtDay(ms: number, now = Date.now()): string {
+  const p = Object.fromEntries(dm.formatToParts(ms).map((x) => [x.type, x.value]));
+  const d = `${p.day} ${p.month.replace('.', '')}`;
+  return p.year === dm.formatToParts(now).find((x) => x.type === 'year')?.value ? d : `${d} ${p.year}`;
+}
+
+/** Antigüedad legible: «ahora», «12 s», «3 min», «1 h», «2 días». */
 export function ago(sec: number): string {
   if (sec < 5) return 'ahora';
   if (sec < 60) return `${Math.round(sec)} s`;
   if (sec < 3600) return `${Math.round(sec / 60)} min`;
-  return `${Math.round(sec / 3600)} h`;
+  if (sec < 86400) return `${Math.min(23, Math.round(sec / 3600))} h`;
+  const d = Math.floor(sec / 86400);
+  return d === 1 ? '1 día' : `${d} días`;
 }
 
 /** Distancia legible: «350 m», «2,4 km». */
