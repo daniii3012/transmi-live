@@ -10,6 +10,7 @@
   import { etaText } from '../domain/eta';
   import { meters } from '../domain/time';
   import RouteBadge from './RouteBadge.svelte';
+  import { legAtStop } from '../domain/legs';
   import Pulse from './Pulse.svelte';
 
   const net = $derived(app.net);
@@ -131,7 +132,7 @@
               <button class="row near" onclick={() => go({ kind: p.kind, id: p.id })}>
                 <span class="place" class:stop={p.kind === 'stop'}></span>
                 <span class="dest">{p.name}<span class="faint">&nbsp;· {meters(p.d)}</span></span>
-                {#if p.next}<span class="nx"><RouteBadge route={p.next.route} size="sm" /><span class="num">{etaText(p.next.seconds)}</span></span>{:else}<span class="faint num">—</span>{/if}
+                {#if p.next}<span class="nx"><RouteBadge route={p.next.route} code={legAtStop(p.next.route, p.next.index)?.c} size="sm" /><span class="num">{etaText(p.next.seconds)}</span></span>{:else}<span class="faint num">—</span>{/if}
               </button>
             </li>
           {/each}
@@ -209,6 +210,7 @@
     <!-- En el teléfono el panel no tiene pie: los enlaces del pie van al final del inicio. -->
     <nav class="links" aria-label="Más">
       <span class="about">No oficial</span>
+      <a href="#/recorrido">Recorrido</a>
       <a href="#/configuracion">Configuración</a>
       <a href="https://github.com/daniii3012/transmi-live/blob/main/FUENTES.md" target="_blank" rel="noopener">Fuentes</a>
     </nav>

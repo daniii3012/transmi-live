@@ -60,6 +60,8 @@ class AppState {
   /** Ubicación propia (lon, lat), si la persona la pidió. */
   userPos = $state<[number, number] | null>(null);
   alerts = $state.raw<Alert[]>([]);
+  /** Recorrido automático en curso (ver app/tour.ts). */
+  tour = $state.raw<import('./tour').TourState | null>(null);
   /** Pulso: buses en vía por instantánea desde que se abrió la página (hasta 2 h). */
   pulse = $state.raw<{ t: number; n: number }[]>([]);
 }

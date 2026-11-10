@@ -7,15 +7,17 @@ export type View =
   | { kind: 'stop'; id: string }
   | { kind: 'plan'; id: string }
   | { kind: 'changes'; id: string }
-  | { kind: 'settings'; id: string };
+  | { kind: 'settings'; id: string }
+  | { kind: 'tour'; id: string };
 
-const SEG: Record<View['kind'], string> = { home: '', route: 'ruta', bus: 'bus', station: 'estacion', stop: 'paradero', plan: 'planear', changes: 'cambios', settings: 'configuracion' };
+const SEG: Record<View['kind'], string> = { home: '', route: 'ruta', bus: 'bus', station: 'estacion', stop: 'paradero', plan: 'planear', changes: 'cambios', settings: 'configuracion', tour: 'recorrido' };
 const BY_SEG = Object.fromEntries(Object.entries(SEG).map(([k, v]) => [v, k])) as Record<string, View['kind']>;
 
 export function parse(hash = location.hash): View {
   if (hash === '#/planear') return { kind: 'plan', id: '' };
   if (hash === '#/cambios') return { kind: 'changes', id: '' };
   if (hash === '#/configuracion') return { kind: 'settings', id: '' };
+  if (hash === '#/recorrido') return { kind: 'tour', id: '' };
   const m = /^#\/([a-z]+)\/(.+)$/.exec(hash);
   const kind = m && BY_SEG[m[1]];
   if (!m || !kind || kind === 'home') return { kind: 'home' };
@@ -26,6 +28,7 @@ export function href(v: View): string {
   if (v.kind === 'plan' && !v.id) return '#/planear';
   if (v.kind === 'changes') return '#/cambios';
   if (v.kind === 'settings') return '#/configuracion';
+  if (v.kind === 'tour') return '#/recorrido';
   return v.kind === 'home' ? '#/' : `#/${SEG[v.kind]}/${encodeURIComponent(v.id)}`;
 }
 

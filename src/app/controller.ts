@@ -9,7 +9,8 @@ import { apiBase } from '../live/api';
 import { fetchAlerts } from '../live/alerts';
 import { KX, KY } from '../domain/geo';
 import { watch } from './watch.svelte';
-import type { SystemKey } from '../domain/types';
+import type { Route, SystemKey } from '../domain/types';
+import { busCodes, legAtS } from '../domain/legs';
 import { app, saveLayers, savePrefs, loadPrefs } from './store.svelte';
 import { loadMetro, setMetro, setMetroTheme } from '../map/metroLayers';
 import { buildObras, loadObras, setObras, setObrasTheme } from '../map/obras';
@@ -21,6 +22,8 @@ import { applyBaseTheme } from '../map/style';
 import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
 import { go, parse, type View } from './router';
 import { backup } from '../live/backup.svelte';
+import { Tour } from './tour';
+import palette from '../../data/curated/palette.json';
 
 export const PANEL_W = 380;
 /** Ancho de la columna de controles del mapa en el teléfono (botón de 44 px + margen de 12). */
@@ -104,7 +107,7 @@ export class Controller {
     addEventListener('resize', () => (app.narrow = innerWidth < 760));
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this.wake = null;
-      else { if (app.following) void this.keepAwake(true); void this.checkData(); }
+      else { if (app.following || this.tour) void this.keepAwake(true); void this.checkData(); }
     });
     // El respaldo por ruta también cambia la flota: conteos y listas al día (como en onData).
     backup.onChange = () => { this.remember(); app.counts = this.fleet.counts(); app.version++; this.map.triggerRepaint(); };
@@ -296,6 +299,9 @@ export class Controller {
     }
     app.view = v;
     if (!keepCamera) this.restored = false;
+    // Recorrido automático: toma la cámara; cualquier otra vista lo termina.
+    if (v.kind === 'tour') { this.startTour(); return; }
+    this.endTour();
     const f = this.fleet;
     f.selectedId = null;
     let focus: string | null = null;
@@ -533,8 +539,48 @@ export class Controller {
     return app.view.kind === 'bus' ? this.fleet.buses.get(app.view.id) : undefined;
   }
 
+  // ── Recorrido automático ───────────────────────────────────────────────────────────────────
+  private tour: Tour | null = null;
+  private tourExit: (() => void) | null = null;
+  private startTour() {
+    if (this.tour) return;
+    this.stopFollow();
+    this.showJourney(null, null, null);
+    this.layers.setSelectedPlace(null);
+    // Sin panel ni hoja: el mapa entero. En el teléfono el rótulo ocupa el pie: el bus seguido va
+    // en el centro de lo que queda.
+    app.sheetHeight = 0;
+    this.map.setPadding({ top: 0, bottom: app.narrow ? 200 : 0, left: 0, right: 0 });
+    this.tour = new Tour(this.map, this.net, this.fleet, this.layers, palette.zones as Record<string, { name: string; color: string }>);
+    void this.keepAwake(true);
+    // Cualquier toque, rueda o tecla termina el recorrido (al inicio). Se arma un instante después
+    // para que el toque que lo abrió no lo cierre.
+    const el = this.map.getCanvasContainer();
+    const exit = () => { if (app.view.kind === 'tour') go({ kind: 'home' }); };
+    const key = (e: KeyboardEvent) => { if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) exit(); };
+    const arm = window.setTimeout(() => {
+      el.addEventListener('pointerdown', exit, { passive: true });
+      el.addEventListener('wheel', exit, { passive: true });
+      addEventListener('keydown', key);
+    }, 600);
+    this.tourExit = () => { clearTimeout(arm); el.removeEventListener('pointerdown', exit); el.removeEventListener('wheel', exit); removeEventListener('keydown', key); };
+    this.tour.start();
+  }
+
+  private endTour() {
+    if (!this.tour) return;
+    this.tour.stop();
+    this.tour = null;
+    this.tourExit?.();
+    this.tourExit = null;
+    if (app.view.kind !== 'bus') void this.keepAwake(false);
+    this.map.easeTo({ pitch: app.threeD ? 55 : 0, duration: 500 });
+    setTimeout(() => this.syncPadding(), 300);
+  }
+
   // ── Toques ─────────────────────────────────────────────────────────────────────────────────
   private onClick(e: MapMouseEvent) {
+    if (app.view.kind === 'tour') return;
     const touch = (e.originalEvent as PointerEvent).pointerType === 'touch' || matchMedia('(pointer: coarse)').matches;
     const r = touch ? 24 : 14;
     const project = (lon: number, lat: number) => this.map.project([lon, lat]);
@@ -732,9 +778,12 @@ export class Controller {
   /** Rutas para el respaldo por ruta: la abierta, la del bus abierto o las de los tramos del viaje. */
   private backupCodes(): string[] {
     const v = app.view;
-    if (v.kind === 'route') { const c = this.net.routes.get(v.id)?.code; return c ? [c] : []; }
-    if (v.kind === 'bus') { const c = this.fleet.buses.get(v.id)?.route?.code; return c ? [c] : []; }
-    if (v.kind === 'plan' && this.fleet.focusRoutes) return [...this.fleet.focusRoutes].map((id) => this.net.routes.get(id)?.code).filter((c): c is string => !!c);
+    // Por los códigos que lleva el bus (A153, C153), no por el del catálogo (CA153), que el servicio
+    // por ruta puede no conocer.
+    const of = (r: Route | undefined) => (r ? busCodes(r) : []);
+    if (v.kind === 'route') return of(this.net.routes.get(v.id));
+    if (v.kind === 'bus') { const b = this.fleet.buses.get(v.id); const leg = b?.route && b.onPath ? legAtS(b.route, b.sFix) : null; return leg ? [leg.c] : of(b?.route); }
+    if (v.kind === 'plan' && this.fleet.focusRoutes) return [...this.fleet.focusRoutes].flatMap((id) => of(this.net.routes.get(id)));
     return [];
   }
 

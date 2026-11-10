@@ -25,6 +25,7 @@
   import Toast from './ui/Toast.svelte';
   import ChangesView from './ui/ChangesView.svelte';
   import SettingsView from './ui/SettingsView.svelte';
+  import TourCaption from './ui/TourCaption.svelte';
   import { favorites } from './app/favorites.svelte';
   import { watch } from './app/watch.svelte';
   import { hideStationBuildings } from './map/stationBuildings';
@@ -91,7 +92,7 @@
       app.searchOpen = true;
       return;
     }
-    if (typing || app.searchOpen) return;
+    if (typing || app.searchOpen || app.view.kind === 'tour') return;
     // Esc cierra primero lo que esté encima (menú del mapa, capas) y luego vuelve a la vista anterior.
     if (e.key === 'Escape') {
       if (app.ctxMenu) app.ctxMenu = null;
@@ -112,7 +113,10 @@
 <!-- Título de la página para lectores de pantalla y buscadores (la marca visible es un botón). -->
 <h1 class="sr">TransMi Live: TransMilenio en tiempo real (no oficial)</h1>
 
-{#if app.net}
+{#if app.net && app.view.kind === 'tour'}
+  <TourCaption />
+  <Toast />
+{:else if app.net}
   <Panel>
     {#key app.view.kind === 'home' ? 'home' : app.view.kind === 'plan' ? 'plan' : `${app.view.kind}:${app.view.id}`}
       <div class="viewwrap" in:fly={{ y: reduced ? 0 : 8, duration: reduced ? 1 : 200, easing: cubicOut }}>

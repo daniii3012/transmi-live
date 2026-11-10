@@ -182,7 +182,7 @@
     </div>
     <footer class="foot">
       <span class="about">Proyecto no oficial</span>
-      <span class="links"><a href="#/configuracion">Configuración</a><a href="https://github.com/daniii3012/transmi-live/blob/main/FUENTES.md" target="_blank" rel="noopener">Fuentes</a></span>
+      <span class="links"><a href="#/recorrido" title="Recorrido automático por las troncales">Recorrido</a><a href="#/configuracion">Configuración</a><a href="https://github.com/daniii3012/transmi-live/blob/main/FUENTES.md" target="_blank" rel="noopener">Fuentes</a></span>
     </footer>
   </aside>
 {/if}
