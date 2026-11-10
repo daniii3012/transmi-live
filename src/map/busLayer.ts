@@ -52,10 +52,10 @@ void main() {
   float flags = a_flags;
   bool dim = bit(flags, 1.0);
   bool selected = bit(flags, 4.0);
-  bool trail = bit(flags, 16.0);
+  float tailK = floor(flags / 256.0) / 15.0; // largo de la estela (0–1; 0: sin estela)
   bool focused = bit(flags, 32.0);
   bool arriving = bit(flags, 64.0);
-  float k = dim ? 0.8 : (focused || selected ? 1.2 : 1.0);
+  float k = dim ? 0.85 : (focused || selected ? 1.2 : 1.0);
   float sz = min(a_size, 1.0);
   // Punto: radio en px según el zoom. Zonal y alimentador (≈ 5.000 a la vez) a escala de ciudad
   // más pequeños: la troncal se lee encima; recuperan su tamaño hacia z14,5.
@@ -68,7 +68,7 @@ void main() {
   float len = max(18.0 * a_size * u_ppm, wid * (1.5 + 1.1 * a_size));
   vec2 foot = vec2(len, wid) * 0.5;
   float pad = selected ? 24.0 : (arriving || a_ping >= 0.0) ? 17.0 : 6.0;
-  float tail = trail ? max(30.0, len * 3.0) : 0.0;
+  float tail = max(30.0, len * 3.0) * tailK;
   float front = max(r, foot.x) + pad;
   float back = max(r, foot.x) + max(pad, tail);
   float side = max(r, foot.y) + pad;
@@ -133,8 +133,13 @@ void main() {
   bool focused = bit(flags, 32.0);
   bool arriving = bit(flags, 64.0);
   vec3 base = v_color.rgb;
-  if (dim) base = mix(u_mute, base, 0.3);
-  else if (v_size < 0.8 && !focused && !selected) base = mix(u_mute, base, mix(0.5, 1.0, smoothstep(0.35, 0.9, u_zf)));
+  // Atenuado, no borrado: con una ruta o un bus en foco, el resto de la flota se sigue viendo (al 30 %
+  // del color, en el tema oscuro los buses parecían desaparecer al seleccionar otro).
+  // Zonal y alimentador (≈ 5.000 a la vez) van más apagados a escala de ciudad, también atenuados.
+  bool minor = v_size < 0.8 && !focused && !selected;
+  float far_ = mix(0.5, 1.0, smoothstep(0.35, 0.9, u_zf));
+  if (dim) base = mix(u_mute, base, minor ? 0.52 * mix(0.6, 1.0, smoothstep(0.35, 0.9, u_zf)) : 0.52);
+  else if (minor) base = mix(u_mute, base, far_);
   if (hover) base = mix(base, vec3(1.0), 0.22);
 
   // Forma: punto (+ flecha) que se transforma en huella.
@@ -209,7 +214,7 @@ void main() {
       acc += vec4(v_color.rgb * a, a) * (1.0 - acc.a);
     }
   }
-  float k = v_color.a * (stale ? 0.45 : 1.0) * (dim ? 0.8 : 1.0);
+  float k = v_color.a * (stale ? 0.45 : 1.0) * (dim ? 0.9 : 1.0);
   acc *= k;
   if (acc.a < 0.01) discard;
   frag = acc;
@@ -314,6 +319,8 @@ export class BusLayer implements CustomLayerInterface {
     const bodies = pitch > 10 && zoom >= 16.3;
     const rise = Math.min(1, (zoom - 16.3) / 0.5) * Math.min(1, (pitch - 10) / 15);
     this.fleet.rearDirs = bodies;
+    // 30 px de estela en metros, a este zoom (para acortarla en las curvas).
+    this.fleet.tailMin = (30 * 40_075_016.686 * Math.cos((this.map.getCenter().lat * Math.PI) / 180)) / (512 * Math.pow(2, zoom));
     const { data, count } = this.fleet.fill(now, this.only, box);
     if (count) {
       g.useProgram(this.prog);
