@@ -11,18 +11,24 @@ import { bogotaSeconds } from '../domain/time';
 export interface Watched { busId: string; busLabel: string; routeCode: string; color: string; index: number; stopName: string; threshold: number }
 export interface Toast { text: string; busId: string | null; at: number; action?: { label: string; run: () => void } }
 
+/** Tiempo que el aviso espera a un bus que salió de la flota antes de cancelarse. */
+const LOST_MS = 4 * 60_000;
+
 class Watch {
   item = $state<Watched | null>(null);
   toast = $state<Toast | null>(null);
   /** Estimado actual hasta la parada (s), para mostrarlo en la ficha. */
   seconds = $state<number | null>(null);
   private toastTimer = 0;
+  /** Desde cuándo falta en la flota el bus del aviso. */
+  private lostAt: number | null = null;
 
   is(busId: string, index: number) { return this.item?.busId === busId && this.item.index === index; }
 
   set(w: Watched | null) {
     this.item = w;
     this.seconds = null;
+    this.lostAt = null;
     if (w && typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission().catch(() => {});
   }
 
@@ -37,8 +43,19 @@ class Watch {
     const w = this.item;
     if (!w || !net || !fleet) return;
     const bus = fleet.buses.get(w.busId);
-    const p = bus ? net.pattern(bus.routeId) : undefined;
-    if (!bus || !p || !bus.onPath) return; // sin dato por ahora: se sigue esperando
+    // El bus salió de la flota: se espera unos minutos por si vuelve (el alimentador omite buses por
+    // momentos) y, si no, el aviso se cancela diciéndolo: esperar para siempre sería un aviso que no llega.
+    if (!bus) {
+      this.lostAt ??= now;
+      if (now - this.lostAt > LOST_MS) {
+        this.set(null);
+        this.show(`Aviso cancelado: el bus ${w.busLabel} (${w.routeCode}) dejó de reportar antes de ${w.stopName}`, null);
+      }
+      return;
+    }
+    this.lostAt = null;
+    const p = net.pattern(bus.routeId);
+    if (!p || !bus.onPath) return; // sin dato por ahora: se sigue esperando
     const band = bandIndex(bogotaSeconds(now));
     const t = bandTimes(p, band);
     const k = t ? pace(p, t, bus.hist) : 1;

@@ -10,6 +10,8 @@
   import Star from './Star.svelte';
   import AlertList from './AlertList.svelte';
   import HourBars from './HourBars.svelte';
+  import type { Route } from '../domain/types';
+  import { backup } from '../live/backup.svelte';
 
   let { id }: { id: string } = $props();
   const net = $derived(app.net!);
@@ -82,6 +84,30 @@
   });
   const hourNow = $derived.by(() => { const h = Math.floor(bogotaSeconds(app.now) / 3600); return h < 4 ? h + 24 : h; });
   const others = $derived(route?.pair?.map((p) => net.routes.get(p)!).filter(Boolean) ?? []);
+  /**
+   * Variantes de la misma línea: el circuito que une dos códigos (FZ63 = «F63 Pradera || Z63 Tibanica»)
+   * y sus partes. TRANSMILENIO programa unas u otras según la hora (entre semana el F63 sale como
+   * FZ63 casi todo el día): quien busca el F63 a mediodía encontraba una ruta sin buses.
+   */
+  const variants = $derived.by(() => {
+    if (!route) return [];
+    const parts = (r: Route) => (r.loop ? r.name.split('||').map((x) => x.trim().split(' ')[0].toUpperCase()) : []);
+    const mine = parts(route), code = route.code.toUpperCase();
+    const out: Route[] = [];
+    for (const r of net.routes.values()) {
+      if (r.id === route.id || r.sys !== route.sys || route.pair?.includes(r.id)) continue;
+      if (mine.includes(r.code.toUpperCase()) || parts(r).includes(code)) out.push(r);
+    }
+    return out;
+  });
+  /** Sin salidas a esta hora y una variante que sí las tiene: ahí están los buses. */
+  const variantNow = $derived.by(() => {
+    void app.now;
+    if (!serviceReady || !freq || freq.perHour) return null;
+    return variants.find((r) => (frequencyNow(net, r.id, app.now)?.perHour ?? 0) > 0) ?? null;
+  });
+  /** Con salidas programadas y el alimentador al día, ningún bus de la ruta reporta. */
+  const silent = $derived(!!freq?.perHour && buses.length === 0 && app.poll.status === 'live');
   const alerts = $derived(app.alerts.filter((a) => a.routes.includes(id)));
 
   const ROW = 52;
@@ -150,6 +176,12 @@
         {#if expected}· el horario espera <span class="num">~{expected}</span> en vía{/if}
       </p>
     {/if}
+    {#if variantNow}
+      <p class="notice">A esta hora la línea sale como <button class="link" onclick={() => go({ kind: 'route', id: variantNow.id }, true)}>{variantNow.code}{variantNow.loop ? ' (circuito)' : ` hacia ${variantNow.dest}`}</button>: sus buses van con ese código.</p>
+    {:else if silent}
+      <p class="notice">Ningún bus de esta ruta reporta ahora, aunque el horario tiene salidas esta hora.
+        <span class="faint">El alimentador abierto no trae toda la flota en todo momento.{backup.status === 'off' ? '' : backup.status === 'rejected' ? ' El respaldo por ruta rechazó las credenciales.' : ' El respaldo por ruta tampoco trae buses de esta ruta por ahora.'}</span></p>
+    {/if}
     {#if routeChanges.length}
       <div class="changed">
         {#each routeChanges as c, k (k)}
@@ -172,12 +204,17 @@
       </details>
     {/if}
 
-    {#if others.length}
+    {#if others.length || variants.length}
       <div class="pair">
         {#each others as o (o.id)}
           <button class="btn" onclick={() => go({ kind: 'route', id: o.id }, true)}>
             <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5h9l-3-3M13 11H4l3 3" fill="none" stroke="currentColor" stroke-width="1.4" /></svg>
             Hacia {o.dest}
+          </button>
+        {/each}
+        {#each variants as o (o.id)}
+          <button class="btn" onclick={() => go({ kind: 'route', id: o.id }, true)}>
+            <span class="num">{o.code}</span>{o.loop ? 'Circuito' : `Hacia ${o.dest}`}
           </button>
         {/each}
       </div>
@@ -240,6 +277,10 @@
   .hours[open] summary::before { content: '−'; }
   .hours[open] summary { margin-bottom: var(--sp-3); }
   .pair { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  .notice { margin: -4px 0 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-1); border-left: 2px solid var(--warn); font-size: var(--fs-small); line-height: 1.5; color: var(--fg-1); }
+  .notice .faint { display: block; margin-top: 2px; }
+  .link { color: var(--fg-0); text-decoration: underline; text-decoration-color: var(--fg-3); text-underline-offset: 3px; }
+  .link:hover { text-decoration-color: var(--fg-0); }
   .btn { height: 32px; padding: 0 var(--sp-3); border: 1px solid var(--line-2); display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); color: var(--fg-1); }
   .btn:hover { color: var(--fg-0); border-color: var(--fg-3); }
   .dhead { display: flex; justify-content: space-between; margin-bottom: var(--sp-2); }

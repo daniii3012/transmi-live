@@ -23,6 +23,12 @@ import { go, parse, type View } from './router';
 import { backup } from '../live/backup.svelte';
 
 export const PANEL_W = 380;
+/** Ancho de la columna de controles del mapa en el teléfono (botón de 44 px + margen de 12). */
+const CONTROLS_W = 56;
+/** Cada cuánto se repite el pulso sobre la ruta abierta (ms). */
+const PULSE_EVERY = 14_000;
+/** Lo último que se supo de un bus (ver `Controller.lastSeen`). */
+export interface LastSeen { label: string; plate: string; routeId: string; fixAt: number; lon: number; lat: number }
 
 /**
  * Conecta el mapa, la flota y la interfaz: selección por toque, vistas por URL, cámara y
@@ -101,11 +107,23 @@ export class Controller {
       else { if (app.following) void this.keepAwake(true); void this.checkData(); }
     });
     // El respaldo por ruta también cambia la flota: conteos y listas al día (como en onData).
-    backup.onChange = () => { app.counts = this.fleet.counts(); app.version++; this.map.triggerRepaint(); };
+    backup.onChange = () => { this.remember(); app.counts = this.fleet.counts(); app.version++; this.map.triggerRepaint(); };
+    // El bus del respaldo que el alimentador empieza a traer cambia de id: la ficha abierta y el aviso
+    // de llegada pasan al id del alimentador.
+    this.fleet.onReplace = (from, to) => {
+      const k = this.known.get(from);
+      if (k) this.known.set(to, k);
+      if (watch.item?.busId === from) watch.item = { ...watch.item, busId: to };
+      if (app.view.kind === 'bus' && app.view.id === from) go({ kind: 'bus', id: to }, true);
+    };
+    let ticks = 0;
     this.clock = window.setInterval(() => {
       app.now = Date.now();
+      this.pulse();
       watch.check(this.net, this.fleet, app.now);
       backup.tick(this.net, this.fleet, app.poll.feedTime, this.backupCodes(), app.now);
+      // Buses del respaldo que ya no se actualizan (cada 5 s basta).
+      if (++ticks % 5 === 0 && this.fleet.prune(app.now)) { app.counts = this.fleet.counts(); app.version++; this.map.triggerRepaint(); }
     }, 1000);
     this.poller.start();
     this.setTheme(themePref());
@@ -203,7 +221,7 @@ export class Controller {
     if (frame && pts.length > 1) {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
-      this.map.fitBounds([[x0, y0], [x1, y1]], { padding: this.padding(48), duration: 800, maxZoom: 16.4, absolutePadding: true });
+      this.map.fitBounds([[x0, y0], [x1, y1]], { padding: this.padding(48, true), duration: 800, maxZoom: 16.4, absolutePadding: true });
     }
     this.map.triggerRepaint();
   }
@@ -237,6 +255,7 @@ export class Controller {
       if (!this.restored) this.frame(v);
       if (app.following) this.startFollow();
     }
+    this.remember();
     app.counts = this.fleet.counts();
     app.version++;
     const n = Object.values(app.counts).reduce((a, b) => a + b, 0);
@@ -244,7 +263,29 @@ export class Controller {
       app.pulse = [...app.pulse.filter((p) => d.t - p.t <= 7200), { t: d.t, n }];
     }
     this.map.triggerRepaint();
-    // Un bus seleccionado que desaparece del alimentador: se informa en su ficha, no se cierra.
+  }
+
+  /**
+   * Lo último que se supo de los buses abiertos en la sesión (etiqueta, ruta, hora). Si el bus sale de
+   * la flota (terminó el viaje o dejó de reportar), su ficha no se queda en blanco ni se pierde la
+   * ruta de la que venía: sigue en foco y la ficha dice qué bus era y ofrece su ruta.
+   */
+  private known = new Map<string, LastSeen>();
+  lastSeen(id: string): LastSeen | undefined { return this.known.get(id); }
+  private remember() {
+    const v = app.view;
+    if (v.kind !== 'bus') return;
+    const b = this.fleet.buses.get(v.id);
+    if (b) {
+      this.known.set(b.id, { label: b.label, plate: b.plate, routeId: b.routeId, fixAt: b.fixAt, lon: b.fixX / KX, lat: b.fixY / KY });
+      if (this.known.size > 40) this.known.delete(this.known.keys().next().value!);
+      // Volvió (o se supo su ruta): la ruta queda en foco otra vez.
+      if (this.fleet.focusRoute !== b.routeId) { this.fleet.focusRoute = b.routeId; this.layers.setFocus(b.routeId); }
+    } else if (app.following && this.fleet.feedTime && this.known.has(v.id)) {
+      // Estaba y ya no está: seguirlo no tiene a dónde ir. (Sin datos todavía, o un enlace a un bus
+      // que aún no aparece, se sigue esperando: al llegar se encuadra y se sigue.)
+      this.stopFollow();
+    }
   }
 
   // ── Vistas ─────────────────────────────────────────────────────────────────────────────────
@@ -262,7 +303,7 @@ export class Controller {
     if (v.kind === 'route') focus = v.id;
     if (v.kind === 'bus') {
       f.selectedId = v.id;
-      focus = f.buses.get(v.id)?.routeId ?? null;
+      focus = f.buses.get(v.id)?.routeId ?? this.known.get(v.id)?.routeId ?? null;
     }
     if (v.kind === 'station') station = v.id;
     if (v.kind === 'stop') station = v.id;
@@ -285,7 +326,7 @@ export class Controller {
       else this.frame(v, initial);
     }
     if (v.kind === 'bus' && this.fleet.buses.has(v.id)) this.framedBus = v.id;
-    if (v.kind === 'bus') this.startFollow();
+    if (v.kind === 'bus') { this.startFollow(); this.remember(); }
   }
 
   /** Lleva la cámara a lo seleccionado, dejando libre el espacio del panel. */
@@ -296,14 +337,14 @@ export class Controller {
     if (v.kind === 'route') {
       const p = this.net.paths.get(v.id);
       if (!p) return;
-      // El trazo se dibuja cuando la cámara llega (R1.13).
-      this.afterMove(() => this.layers.drawFocus(1600), opts.duration);
+      // El trazo se dibuja cuando la cámara llega (R1.13) y después un pulso lo recorre cada tanto.
+      this.afterMove(() => { this.layers.drawFocus(1600); this.pulseAt = performance.now() + 1600; }, opts.duration);
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (let i = 0; i < p.lonlat.length; i += 2) {
         x0 = Math.min(x0, p.lonlat[i]); x1 = Math.max(x1, p.lonlat[i]);
         y0 = Math.min(y0, p.lonlat[i + 1]); y1 = Math.max(y1, p.lonlat[i + 1]);
       }
-      m.fitBounds([[x0, y0], [x1, y1]], { ...opts, maxZoom: 15.5, absolutePadding: true });
+      m.fitBounds([[x0, y0], [x1, y1]], { ...opts, padding: this.padding(48, true), maxZoom: 15.5, absolutePadding: true });
     } else if (v.kind === 'station') {
       const s = this.net.stations.get(v.id);
       if (s) this.flyTo([s.lon, s.lat], Math.max(m.getZoom(), 16), opts);
@@ -311,7 +352,7 @@ export class Controller {
       const s = this.net.streetStops.get(v.id);
       if (s) this.flyTo([s.lon, s.lat], Math.max(m.getZoom(), 16.5), opts);
     } else if (v.kind === 'plan' && this.planBounds) {
-      this.map.fitBounds(this.planBounds, { padding: this.padding(48), duration: 900, maxZoom: 16, absolutePadding: true });
+      this.map.fitBounds(this.planBounds, { padding: this.padding(48, true), duration: 900, maxZoom: 16, absolutePadding: true });
     } else if (v.kind === 'bus') {
       const b = this.fleet.buses.get(v.id);
       // 16,4: la huella del bus ya está formada (entre 15,2 y 16 el punto se transforma).
@@ -341,13 +382,18 @@ export class Controller {
     m.setPadding(this.padding());
   }
 
-  padding(extra = 0): PaddingOptions {
+  /**
+   * `fit`: para encuadrar un recorrido (ruta, viaje, llegadas). En el teléfono, el mapa visible no
+   * incluye la columna de controles de la derecha: sin descontarla, la punta de una ruta ancha quedaba
+   * debajo de los botones. Para centrar un punto (estación, bus) no se descuenta: quedaría corrido.
+   */
+  padding(extra = 0, fit = false): PaddingOptions {
     if (app.narrow) {
       // Con la hoja alta, el relleno no puede comerse la pantalla: si arriba + abajo pasan del alto,
       // `fitBounds` no encuadra nada (le pasaba al viaje planeado). Siempre quedan ≥ 140 px de mapa.
-      const top = 56 + extra;
+      const top = (app.topbarH || 56) + extra;
       const bottom = Math.min(Math.max(120, app.sheetHeight) + extra, innerHeight - top - 140);
-      return { top, bottom: Math.max(0, bottom), left: extra / 2, right: extra / 2 };
+      return { top, bottom: Math.max(0, bottom), left: extra / 2, right: extra / 2 + (fit ? CONTROLS_W : 0) };
     }
     return { top: extra, bottom: extra, left: PANEL_W + 12 + extra, right: 56 + extra };
   }
@@ -407,7 +453,7 @@ export class Controller {
       this.planBounds = [[x0, y0], [x1, y1]];
       // `absolutePadding`: el relleno dado reemplaza al del mapa (si no, MapLibre los suma y con la hoja
       // alta no cabe nada).
-      this.map.fitBounds([[x0, y0], [x1, y1]], { padding: this.padding(48), duration: 900, maxZoom: 16, absolutePadding: true });
+      this.map.fitBounds([[x0, y0], [x1, y1]], { padding: this.padding(48, true), duration: 900, maxZoom: 16, absolutePadding: true });
       this.afterMove(() => this.layers.drawPlan(), 900);
     }
   }
@@ -574,6 +620,17 @@ export class Controller {
     m.triggerRepaint();
   }
 
+  /** Pulso sobre la ruta abierta cada `PULSE_EVERY`: con la pestaña visible y el mapa quieto. */
+  private pulseAt = 0;
+  private pulse() {
+    if (app.view.kind !== 'route') return;
+    const now = performance.now();
+    if (now - this.pulseAt < PULSE_EVERY || document.hidden) return;
+    if (this.map.isMoving() || this.pointers.size > 0 || this.flying) return; // en el próximo segundo
+    this.pulseAt = now;
+    this.layers.pulseFocus();
+  }
+
   /** Ejecuta `fn` cuando termine el movimiento de cámara en curso (o enseguida si no hay). */
   private afterMove(fn: () => void, duration: number) {
     if (duration <= 0) { setTimeout(fn, 60); return; }
@@ -600,7 +657,7 @@ export class Controller {
     this.map.easeTo({ pitch: on ? 55 : 0, bearing: on ? (this.map.getBearing() || -18) : this.map.getBearing(), duration: 700 });
     this.afterMove(() => {
       if (v.kind === 'route' || v.kind === 'plan' || v.kind === 'station' || v.kind === 'stop') this.frame(v);
-      if (v.kind === 'route') this.afterMove(() => this.layers.drawFocus(1600), 900);
+      if (v.kind === 'route') this.afterMove(() => { this.layers.drawFocus(1600); this.pulseAt = performance.now() + 1600; }, 900);
       if (v.kind === 'plan') this.afterMove(() => this.layers.drawPlan(), 900);
     }, 700);
   }
@@ -684,7 +741,7 @@ export class Controller {
   zoom(d: number) { this.map.easeTo({ zoom: this.map.getZoom() + d, duration: 220 }); }
   north() { this.map.easeTo({ bearing: 0, pitch: app.threeD ? this.map.getPitch() : 0, duration: 400 }); }
   overview() {
-    this.map.fitBounds([[-74.23, 4.47], [-74.02, 4.83]], { padding: this.padding(24), duration: 900, absolutePadding: true });
+    this.map.fitBounds([[-74.23, 4.47], [-74.02, 4.83]], { padding: this.padding(24, true), duration: 900, absolutePadding: true });
   }
 
   locate() {

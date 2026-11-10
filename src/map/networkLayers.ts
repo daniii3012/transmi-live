@@ -447,6 +447,24 @@ export class NetworkLayers {
     step();
   }
 
+  /**
+   * Pulso sobre la ruta en foco: un brillo que la recorre de origen a destino, sin borrar el trazo.
+   * Repite, cada tanto, lo que dice el dibujo inicial (por dónde va y hacia dónde).
+   */
+  pulseFocus(duration = 2600) {
+    if (!this.focusId || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    cancelAnimationFrame(this.drawAnim);
+    const color = this.focusColor;
+    const t0 = performance.now();
+    const step = () => {
+      const k = Math.min(1, (performance.now() - t0) / duration);
+      const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      this.map.setPaintProperty('route-focus', 'line-gradient', k < 1 ? comet(color, e) : gradient(color, 1));
+      if (k < 1) this.drawAnim = requestAnimationFrame(step);
+    };
+    step();
+  }
+
   /** Con una ruta en foco, las estaciones donde no para se atenúan. */
   private dimStations(routeId: string | null) {
     for (const s of this.net.stations.values()) {
@@ -598,6 +616,21 @@ function coords(lonlat: Float64Array): [number, number][] {
 }
 
 /** Gradiente que dibuja el trazo hasta `p` (0–1): blanco en la punta, el color de la ruta detrás. */
+/** Trazo completo con un brillo en `p` (0–1): cola de 7 % hacia atrás, frente corto. */
+function comet(color: string, p: number): ExpressionSpecification {
+  const q = -0.02 + 1.1 * p; // entra desde antes del origen y sale después del destino
+  const stops: [number, string][] = [[0, color], [q - 0.07, color], [q, '#ffffff'], [q + 0.012, color], [1, color]];
+  const flat: (number | string)[] = [];
+  let last = -1;
+  for (const [k, c] of stops) {
+    const x = Math.min(1, Math.max(0, k));
+    if (x <= last) continue;
+    flat.push(x, c);
+    last = x;
+  }
+  return ['interpolate', ['linear'], ['line-progress'], ...flat] as ExpressionSpecification;
+}
+
 function gradient(color: string, p: number): ExpressionSpecification {
   const q = Math.max(0.001, Math.min(1, p));
   if (q >= 1) return ['interpolate', ['linear'], ['line-progress'], 0, color, 1, color] as ExpressionSpecification;

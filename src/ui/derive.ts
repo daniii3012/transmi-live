@@ -21,7 +21,12 @@ export function busesByRoute(fleet: Fleet, version: number): Map<string, Bus[]> 
   return map;
 }
 
-export interface Arrival { route: Route; bus: Bus; seconds: number; meters: number; stopId: string }
+export interface Arrival { route: Route; bus: Bus; seconds: number; meters: number; stopId: string; /** Antigüedad de la lectura (s). */ age: number }
+
+/** Con una lectura más vieja que esto no se estima una llegada (el bus dejó de reportar). */
+export const MAX_FIX_AGE = 240;
+/** Si por el horario el bus debió llegar hace más de esto, lo más probable es que ya pasó. */
+export const PASSED_S = 90;
 
 /**
  * Próximas llegadas a un conjunto de paradas (una estación con sus vagones, o un paradero): para cada
@@ -45,10 +50,15 @@ export function arrivals(net: Network, fleet: Fleet, version: number, stopIds: S
       if (!b.onPath) continue;
       const k = idx.find((i) => p.s[i] > b.sFix + 8);
       if (k === undefined) continue;
+      // La lectura tiene su edad (1 a 2 min, más si el alimentador omitió el bus): se descuenta. Si es
+      // demasiado vieja, o por el horario el bus debió llegar hace rato, no se promete un «llegando».
       const fixAge = (now - b.fixAt) / 1000;
-      const sec = Math.max(0, adjust(t[k] - timeAt(p, t, b.sFix), pace(p, t, b.hist)) - fixAge);
+      if (fixAge > MAX_FIX_AGE) continue;
+      const raw = adjust(t[k] - timeAt(p, t, b.sFix), pace(p, t, b.hist)) - fixAge;
+      if (raw < -PASSED_S) continue;
+      const sec = Math.max(0, raw);
       if (sec > 75 * 60) continue;
-      out.push({ route, bus: b, seconds: sec, meters: p.s[k] - b.sFix, stopId: p.stops[k] });
+      out.push({ route, bus: b, seconds: sec, meters: p.s[k] - b.sFix, stopId: p.stops[k], age: fixAge });
     }
   }
   return out.sort((a, b) => a.seconds - b.seconds);

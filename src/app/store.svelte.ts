@@ -47,6 +47,8 @@ class AppState {
   narrow = $state(typeof window !== 'undefined' && window.innerWidth < 760);
   /** Altura de la hoja inferior (móvil) en px, para el relleno de la cámara. */
   sheetHeight = $state(0);
+  /** Alto de la barra superior (móvil) en px; en la app instalada es más alta (la isla). */
+  topbarH = $state(0);
   locating = $state(false);
   threeD = $state(false);
   /** Menú del mapa (mantener presionado o clic derecho): punto y posición en pantalla. */

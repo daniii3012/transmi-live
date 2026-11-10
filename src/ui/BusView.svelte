@@ -2,11 +2,13 @@
   import { app } from '../app/store.svelte';
   import { go } from '../app/router';
   import { ctl } from '../app/instance';
-  import { etas, etaText, bandIndex, bandTimes, pace } from '../domain/eta';
+  import { etas, etaText, bandIndex, bandTimes, pace, nextStopIndex } from '../domain/eta';
+  import { busesByRoute, MAX_FIX_AGE } from './derive';
   import { ago, bogotaSeconds, fmtHM, meters } from '../domain/time';
   import RouteBadge from './RouteBadge.svelte';
   import Back from './Back.svelte';
   import { KIND_NAME } from '../domain/fleetTypes';
+  import { KX, KY } from '../domain/geo';
   import { watch } from '../app/watch.svelte';
 
   /** Avisar cuando el bus esté a 2 min de esa parada (o quitar el aviso). */
@@ -29,10 +31,32 @@
   const progress = $derived(bus && route && route.len ? Math.min(1, Math.max(0, bus.sFix / route.len)) : null);
   const kmh = $derived(bus?.speed != null ? Math.round(bus.speed * 3.6) : null);
 
+  /** Sin lecturas nuevas: el alimentador lo omitió (se conserva unos minutos) o su lectura ya es vieja. */
+  const quiet = $derived(!!bus && (bus.missing || age > 180));
+  /** Con una lectura de más de 4 min no se estiman llegadas: el bus pudo avanzar o detenerse. */
+  const tooOld = $derived(age > MAX_FIX_AGE);
+
+  // El bus ya no está en la flota: lo último que se supo de él (si se abrió en esta sesión), su ruta
+  // y los buses que siguen en ella, del más cercano a donde iba al más lejano.
+  const ghost = $derived.by(() => { void app.version; return bus ? undefined : ctl?.lastSeen(id); });
+  const ghostRoute = $derived(ghost ? net.routes.get(ghost.routeId) : undefined);
+  const others = $derived.by(() => {
+    void app.version;
+    if (!ghost || !app.fleet) return [];
+    const path = net.paths.get(ghost.routeId);
+    const pat = app.patternsReady ? net.pattern(ghost.routeId) : undefined;
+    const s0 = path?.nearest(ghost.lon * KX, ghost.lat * KY, undefined, 0, Infinity, 200)?.s ?? 0;
+    return (busesByRoute(app.fleet, app.version).get(ghost.routeId) ?? [])
+      .filter((b) => b.onPath)
+      .map((b) => { const k = pat ? nextStopIndex(pat, b.sFix) : -1; return { b, d: b.sFix - s0, next: pat && k >= 0 && k < pat.stops.length ? net.placeName(pat.stops[k]) : '' }; })
+      .sort((a, c) => Math.abs(a.d) - Math.abs(c.d))
+      .slice(0, 6);
+  });
+
   const itinerary = $derived.by(() => {
     void app.now;
     void stopsReady;
-    if (!bus || !pattern || !bus.onPath) return [];
+    if (!bus || !pattern || !bus.onPath || tooOld) return [];
     const band = bandIndex(bogotaSeconds(app.now));
     const t = bandTimes(pattern, band);
     const k = t ? pace(pattern, t, bus.hist) : 1;
@@ -87,6 +111,12 @@
       {#if !bus.onPath}<span class="faint note">Fuera de su recorrido: sin estimaciones</span>{/if}
     </div>
 
+    {#if quiet}
+      <p class="notice">Sin lecturas nuevas de este bus desde las <span class="num">{fmtHM(bus.fixAt)}</span>.
+        {tooOld ? 'Sin estimaciones hasta que vuelva a reportar.' : 'Las estimaciones parten de esa lectura.'}
+        <span class="faint">El alimentador omite buses por momentos; se conserva en el mapa unos minutos por si vuelve.</span></p>
+    {/if}
+
     {#if itinerary.length}
       <section class="itin" style:--c={route?.color}>
         <div class="head"><span class="label">Próximas paradas</span><span class="label faint">estimado</span></div>
@@ -114,10 +144,44 @@
       <p class="faint">Cargando paradas…</p>
     {/if}
   </div>
+{:else if ghost}
+  <div class="view">
+    <Back />
+    <header class="title">
+      <RouteBadge route={ghostRoute} size="lg" />
+      <div class="names">
+        <h1>{ghostRoute?.dest ?? 'Ruta sin datos'}</h1>
+        <p class="dim">Bus <span class="num">{ghost.label}</span>{#if ghost.plate}&nbsp;· <span class="num">{ghost.plate}</span>{/if}</p>
+      </div>
+    </header>
+    <p class="notice">Sin lecturas de este bus desde las <span class="num">{fmtHM(ghost.fixAt)}</span> (hace {ago(Math.max(0, (app.now - ghost.fixAt) / 1000))}).
+      <span class="faint">Puede haber terminado su recorrido, entrado a patio o dejado de reportar. Si vuelve a aparecer, la ficha se actualiza sola.</span></p>
+    {#if ghostRoute}
+      <div class="actions">
+        <button class="btn" onclick={() => go({ kind: 'route', id: ghost.routeId })}>Ver la ruta {ghostRoute.code}</button>
+      </div>
+    {/if}
+    {#if others.length}
+      <section class="others">
+        <div class="head"><span class="label">Otros buses de la ruta</span><span class="label faint">del más cercano</span></div>
+        <ul>
+          {#each others as o (o.b.id)}
+            <li>
+              <button class="orow" onclick={() => go({ kind: 'bus', id: o.b.id }, true)}>
+                <span class="num">{o.b.label}</span>
+                <span class="faint where">{o.next ? `antes de ${o.next}` : ''}</span>
+                <span class="num faint">{o.d >= 0 ? `${meters(o.d)} adelante` : `${meters(-o.d)} atrás`}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+  </div>
 {:else}
   <div class="view">
     <Back />
-    <p class="dim">El bus <span class="num">{id}</span> no aparece en la última lectura.</p>
+    <p class="dim">El bus <span class="num">{id.replace(/^ruta:/, '')}</span> no aparece en las lecturas recientes.</p>
     <p class="faint small">Puede haber terminado su recorrido, entrado a patio o dejado de reportar. Si vuelve a aparecer, la ficha se actualiza sola.</p>
   </div>
 {/if}
@@ -168,4 +232,12 @@
   .pace { margin: calc(-1 * var(--sp-2)) 0 var(--sp-2); font-size: var(--fs-small); }
   .foot { margin: var(--sp-3) 0 0; font-size: var(--fs-label); line-height: 1.5; }
   .small { font-size: var(--fs-small); }
+  .notice { margin: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-1); border-left: 2px solid var(--warn); font-size: var(--fs-small); line-height: 1.5; color: var(--fg-1); }
+  .notice .faint { display: block; margin-top: 2px; }
+  .others ul { list-style: none; margin: 0; padding: 0; }
+  .others li { display: block; border-top: 1px solid var(--line-1); }
+  .others li::before { content: none; }
+  .orow { width: 100%; height: 40px; display: grid; grid-template-columns: auto 1fr auto; gap: var(--sp-3); align-items: center; text-align: left; font-size: var(--fs-small); color: var(--fg-1); }
+  .orow:hover { color: var(--fg-0); }
+  .where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

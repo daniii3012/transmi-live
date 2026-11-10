@@ -34,6 +34,7 @@
   const heights = $derived({ peek: PEEK + sb, half: Math.round(vh * 0.5), full: vh - Math.max(64, topbarH + 8) });
   const height = $derived(dragY !== null ? dragY : heights[snap]);
 
+  $effect(() => { app.topbarH = app.narrow ? topbarH : 0; });
   $effect(() => {
     app.sheetHeight = app.narrow ? heights[snap] : 0;
     // Tras la transición de altura, el relleno del mapa sigue a la hoja.

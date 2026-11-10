@@ -3,7 +3,7 @@
   import { go } from '../app/router';
   import { arrivals } from './derive';
   import { etaText } from '../domain/eta';
-  import { meters } from '../domain/time';
+  import { meters, ago } from '../domain/time';
   import { SYSTEM_ORDER, type Route } from '../domain/types';
   import RouteBadge from './RouteBadge.svelte';
   import Back from './Back.svelte';
@@ -107,19 +107,20 @@
       {#if next === null}
         <p class="faint small">Calculando…</p>
       {:else if next.length === 0}
-        <p class="faint small">Ningún bus en camino hacia aquí en este momento.</p>
+        <p class="faint small">{app.poll.status === 'stale' || app.poll.status === 'error' ? 'Sin lecturas recientes de los buses: no hay llegadas que estimar.' : 'Ningún bus en camino hacia aquí en este momento.'}</p>
       {:else}
         <ul class="arrivals">
           {#each next as a (a.bus.id)}
             <li>
               <button onclick={() => go({ kind: 'bus', id: a.bus.id })}>
                 <RouteBadge route={a.route} />
-                <span class="dest">{a.route.dest}<span class="faint">&nbsp;· bus {a.bus.label} · {meters(a.meters)}</span></span>
+                <span class="dest">{a.route.dest}<span class="faint">&nbsp;· bus {a.bus.label} · {meters(a.meters)}{#if a.age > 150}&nbsp;· lectura de hace {ago(a.age)}{/if}</span></span>
                 <span class="eta num" class:soon={a.seconds < 60}>{etaText(a.seconds)}</span>
               </button>
             </li>
           {/each}
         </ul>
+        <p class="faint delay">Las posiciones llegan con 1 a 2 min de retraso. Los tiempos ya lo descuentan, pero un bus «llegando» puede estar en la parada o haber salido.</p>
       {/if}
     </section>
 
@@ -187,4 +188,5 @@
   .platforms li { display: grid; grid-template-columns: 96px 1fr; gap: var(--sp-3); align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line-1); }
   .pname { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--fg-1); line-height: 18px; }
   .pbadges { display: flex; flex-wrap: wrap; gap: 4px; }
+  .delay { margin: var(--sp-3) 0 0; font-size: var(--fs-label); line-height: 1.5; }
 </style>

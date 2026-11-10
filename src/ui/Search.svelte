@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { app } from '../app/store.svelte';
   import { go, type View } from '../app/router';
-  import { norm } from './derive';
+  import { norm, frequencyNow } from './derive';
   import { SYSTEM_ORDER, type Route } from '../domain/types';
   import RouteBadge from './RouteBadge.svelte';
 
@@ -11,7 +11,10 @@
   let input: HTMLInputElement;
   const net = $derived(app.net!);
   let stopsReady = $state(false);
+  // Con el horario se sabe qué variante de una línea sale a esta hora (F63 o su circuito FZ63).
+  let serviceReady = $state(false);
   onMount(() => {
+    void net.loadService().then(() => (serviceReady = true));
     void net.loadStreetStops().then(() => (stopsReady = true));
     tick().then(() => input?.focus());
   });
@@ -30,12 +33,14 @@
     const has = (t: string) => words.every((w) => t.includes(w));
     const out: Item[] = [];
     // Rutas: el código exacto primero, luego prefijo, luego texto. Un código con dos sentidos sale dos veces.
+    const now = Date.now();
     const rs = routeIndex
       .map(({ r, code, text }) => ({ r, s: code === n ? 0 : code.startsWith(n) ? 1 : has(text) ? 2 : 9 }))
       .filter((x) => x.s < 9)
-      .sort((a, b) => a.s - b.s || SYSTEM_ORDER.indexOf(a.r.sys) - SYSTEM_ORDER.indexOf(b.r.sys) || a.r.code.localeCompare(b.r.code, 'es', { numeric: true }))
+      .map((x) => { const f = serviceReady ? frequencyNow(net, x.r.id, now) : null; return { ...x, off: !!f && !f.perHour }; })
+      .sort((a, b) => a.s - b.s || Number(a.off) - Number(b.off) || SYSTEM_ORDER.indexOf(a.r.sys) - SYSTEM_ORDER.indexOf(b.r.sys) || a.r.code.localeCompare(b.r.code, 'es', { numeric: true }))
       .slice(0, 8);
-    for (const { r, s } of rs) out.push({ key: `r${r.id}`, view: { kind: 'route', id: r.id }, group: 'Rutas', title: r.dest, sub: r.loop ? `circuito · ${r.origin}` : `desde ${r.origin ?? '—'}`, route: r, score: s });
+    for (const { r, s, off } of rs) out.push({ key: `r${r.id}`, view: { kind: 'route', id: r.id }, group: 'Rutas', title: r.dest, sub: `${r.loop ? `circuito · ${r.origin}` : `desde ${r.origin ?? '—'}`}${off ? ' · sin salidas a esta hora' : ''}`, route: r, score: s });
     for (const { s } of stationIndex.filter((x) => has(x.text)).slice(0, 6))
       out.push({ key: `s${s.id}`, view: { kind: 'station', id: s.id }, group: 'Estaciones', title: s.short, sub: s.kind === 'portal' ? 'portal' : s.closed ? 'sin servicio' : `${s.routes.length} rutas`, score: 3 });
     for (const { s } of stopIndex.filter((x) => has(x.text)).slice(0, 5))
