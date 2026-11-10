@@ -43,6 +43,14 @@ describe('respaldo: sentido de la lectura', () => {
     expect(resolveReading(net, { routeId: 'R5E', code: '5', dest: 'Portal Americas', sys: 'zonal', ...at(3000, 4), bearing: 270 })).toBe('R5W');
   });
 
+  it('una ruta en par se encuentra por el código de su tramo (A153 → CA153)', () => {
+    const pair = route('RP', 'CA153', 'Centro');
+    (pair as { codes?: string[] }).codes = ['A153', 'C153'];
+    const n2: NetLike = { routes: new Map([['RP', pair]]), paths: new Map([['RP', east]]), resolveRoute: (id) => (id === 'RP' ? id : null) };
+    expect(resolveReading(n2, { routeId: '', code: 'C153', dest: 'Centro', sys: 'zonal', ...at(800), bearing: 90 })).toBe('RP');
+    expect(resolveReading(n2, { routeId: '', code: 'D153', dest: 'Centro', sys: 'zonal', ...at(800), bearing: 90 })).toBeNull();
+  });
+
   it('no cruza sistemas ni inventa: lejos del recorrido, nada', () => {
     expect(resolveReading(net, { routeId: '', code: 'F51', dest: 'Portal Americas', sys: 'zonal', ...at(1000), bearing: -1 })).toBeNull();
     expect(resolveReading(net, { routeId: '', code: '5', dest: 'AV JIMENEZ', sys: 'zonal', ...at(1000, 300), bearing: -1 })).toBeNull();

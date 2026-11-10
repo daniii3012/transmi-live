@@ -20,6 +20,7 @@ misma (src/domain/geo.ts), así que abscisas y longitudes coinciden.
 from __future__ import annotations
 
 import argparse
+import datetime
 import csv
 import hashlib
 import io
@@ -947,14 +948,27 @@ def main():
     t_seq: dict[str, array] = {}
     t_stop: dict[str, array] = {}
     t_arr: dict[str, array] = {}
+    # Letrero del bus en cada parada (`stop_headsign`). En las rutas en par el viaje cambia de código
+    # a mitad de camino («A153» hasta Centro, «C153» de vuelta). Las filas no vienen en orden de
+    # parada: se guarda un índice por fila (2 bytes) y se ordena con el resto.
+    t_head: dict[str, array] = {}
+    head_ix: dict[str, int] = {}
+    head_names: list[str] = []
     n = 0
     for r in rows(z, 'stop_times.txt'):
         tid = r['trip_id']
         a = t_seq.get(tid)
+        h = (r.get('stop_headsign') or '').strip()
+        hi = head_ix.get(h)
+        if hi is None:
+            hi = head_ix[h] = len(head_names)
+            head_names.append(h)
         if a is None:
             a = t_seq[tid] = array('i')
             t_stop[tid] = array('i')
             t_arr[tid] = array('i')
+            t_head[tid] = array('H')
+        t_head[tid].append(hi)
         a.append(int(r['stop_sequence']))
         t_stop[tid].append(stop_ix[r['stop_id']])
         t_arr[tid].append(secs(r['arrival_time'] or r['departure_time']))
@@ -966,6 +980,8 @@ def main():
     # Patrón por ruta: la secuencia de paradas más frecuente; tiempos por franja a lo largo de ella.
     pat_count: dict[int, Counter] = defaultdict(Counter)
     pat_times: dict[tuple, list] = {}
+    # Por patrón, el letrero de su primer viaje: [(índice en el patrón, código)].
+    pat_heads: dict[tuple, list] = {}
     departures: dict[int, dict] = defaultdict(lambda: {k: [0] * 30 for k in DAY_TYPE.values()})
     first_last: dict[int, dict] = defaultdict(dict)
     for tid, seq in t_seq.items():
@@ -977,6 +993,14 @@ def main():
         start = ar[0]
         b = band_of(start)
         key = (ri, st)
+        if key not in pat_heads:
+            hd = t_head[tid]
+            heads = []
+            for k, o in enumerate(order):
+                h = head_names[hd[o]]
+                if not heads or heads[-1][1] != h:
+                    heads.append((k, h))
+            pat_heads[key] = heads
         acc = pat_times.get(key)
         if acc is None:
             acc = pat_times[key] = [[None, 0] for _ in BANDS]
@@ -993,7 +1017,7 @@ def main():
             fl = first_last[ri].setdefault(day, [start, start])
             fl[0] = min(fl[0], start)
             fl[1] = max(fl[1], start)
-    del t_seq, t_stop, t_arr
+    del t_seq, t_stop, t_arr, t_head
 
     # ── Corredores ───────────────────────────────────────────────────────────────────────────
     # Los vagones troncales llevan la letra de su corredor en el código («B096» → Autonorte). Una
@@ -1145,12 +1169,47 @@ def main():
             parts = [nice(strip_code(x, all_codes)) for x in long_name.split('||')]
             dest, origin = parts[0], parts[-1]
         else:
+            parts = []
             dest = nice(strip_code(long_name, all_codes))
             origin = place_of(pat[0]) if pat else None
+        # Tramos con el código que va en el bus (decisión 008 de la app): de los cambios del letrero
+        # en el viaje patrón. Destino de cada tramo: su parte del nombre largo si coinciden en número;
+        # si no, la última parada del tramo. `s`: abscisa de su primera parada; `b`: la de la parada
+        # anterior (desde ahí el bus ya va con el código nuevo).
+        legs = []
+        heads = pat_heads.get((ri, pat), []) if pat else []
+        if heads and stops_s:
+            for k, (i, h) in enumerate(heads):
+                end = heads[k + 1][0] if k + 1 < len(heads) else len(pat)
+                if len(parts) == len(heads):
+                    d = parts[k]
+                elif len(heads) == 1:
+                    d = dest
+                else:
+                    d = place_of(pat[end - 1])
+                legs.append({'c': h or code, 'd': d, 'i': i, 's': stops_s[i] if i < len(stops_s) else 0,
+                             'b': stops_s[i - 1] if 0 < i <= len(stops_s) else 0})
+        # Códigos que lleva el bus: los de las partes del nombre largo («F63 Pradera || Z63 Tibanica»);
+        # si el nombre no los trae, los del letrero. En algunos circuitos el letrero no cambia a mitad
+        # de camino (FZ63 dice F63 todo el viaje): ahí se conocen los códigos, no dónde cambian.
+        codes: list[str] = []
+        if len(legs) > 1:
+            for leg in legs:
+                if leg['c'] not in codes:
+                    codes.append(leg['c'])
+        else:
+            for part in (long_name.split('||') if loop else []):
+                m = re.match(r'^(\S+)\s', part.strip())
+                tok = m.group(1) if m else ''
+                # Un código de verdad («Z63», «H710»), no el comienzo de una dirección («CLL134»).
+                if (tok in all_codes or re.fullmatch(r'[A-Z]{1,2}\d{1,3}[A-Z]?', tok)) and tok not in codes:
+                    codes.append(tok)
         route_info.append({
             'id': rid, 'code': code, 'name': long_name, 'dest': dest, 'origin': origin, **({'loop': True} if loop else {}),
             'sys': sys_key, **({'sub': sub} if sub else {}), **({'zone': zl} if zl else {}),
             'color': color, 'len': length, 'stops': len(pat) if pat else 0,
+            **({'codes': codes} if codes and codes != [code] else {}),
+            **({'legs': legs} if len(legs) > 1 else {}),
         })
         if shp:
             ll = shp[0]
@@ -1569,9 +1628,24 @@ def main():
     # ── Escritura ────────────────────────────────────────────────────────────────────────────
     systems = [{'key': k, **v} for k, v in palette['systems'].items()]
     feed = next(rows(z, 'feed_info.txt'), {})
+    # Festivos y demás días que no siguen su día de la semana (calendar_dates.txt): el tipo de día
+    # del servicio que se agrega ese día. La página y la app eligen el horario con esto.
+    added: dict[str, set] = defaultdict(set)
+    if 'calendar_dates.txt' in z.namelist():
+        for c in rows(z, 'calendar_dates.txt'):
+            if c.get('exception_type') == '1' and c.get('service_id') in DAY_TYPE:
+                added[c['date']].add(DAY_TYPE[c['service_id']])
+    days = {}
+    for d, kinds in sorted(added.items()):
+        kind = 'festivo' if 'festivo' in kinds else 'sabado' if 'sabado' in kinds else 'habil'
+        wd = datetime.date(int(d[:4]), int(d[4:6]), int(d[6:])).weekday()
+        if kind != ('festivo' if wd == 6 else 'sabado' if wd == 5 else 'habil'):
+            days[f'{d[:4]}-{d[4:6]}-{d[6:]}'] = kind
+    log(f'días con otro horario: {len(days)}')
     meta = {
         'v': 1, 'hash': digest, 'built': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
         'feed': {'start': feed.get('feed_start_date'), 'end': feed.get('feed_end_date')},
+        'days': days,
         'bands': [{'from': a, 'to': b, 'key': k} for a, b, k in BANDS],
         'projection': {'lat0': LAT0, 'kx': KX, 'ky': KY},
         'counts': {

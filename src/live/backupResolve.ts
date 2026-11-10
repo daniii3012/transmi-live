@@ -1,5 +1,6 @@
 import type { MetricPath } from '../domain/geo';
 import type { Route } from '../domain/types';
+import { allCodes } from '../domain/legs';
 
 /**
  * Variante (y sentido) de nuestra red para una lectura del respaldo por ruta. El servicio responde por
@@ -47,11 +48,13 @@ export function sameDest(a: string, b: string): boolean {
 
 export function resolveReading(net: NetLike, r: Reading, prevRouteId?: string): string | null {
   const code = r.code.toUpperCase();
+  // Una ruta en par se reconoce también por los códigos de sus tramos (A153 y C153 son la CA153).
+  const matches = (route: Route) => allCodes(route).includes(code);
   const direct = r.routeId ? net.resolveRoute(r.routeId) : null;
   const busAng = r.bearing >= 0 ? ((90 - r.bearing) * Math.PI) / 180 : null;
   let best: { id: string; score: number } | null = null;
   for (const route of net.routes.values()) {
-    if (route.code.toUpperCase() !== code) continue;
+    if (!matches(route)) continue;
     if ((r.sys === 'zonal') !== (route.sys === 'zonal')) continue;
     const path = net.paths.get(route.id);
     const hit = path?.nearest(r.x, r.y, undefined, 0, Infinity, 120);

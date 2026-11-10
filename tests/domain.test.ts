@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { MetricPath, decodeShape, KX, KY } from '../src/domain/geo';
 import { etas, timeAt, pace, bandIndex, nextStopIndex, etaText, setSchedScale } from '../src/domain/eta';
 import { beforeEach } from 'vitest';
-import { textOn, ago, meters, otherDay, fmtDay } from '../src/domain/time';
+import { textOn, ago, meters, otherDay, fmtDay, dayType, setDayExceptions } from '../src/domain/time';
+import { busCode, allCodes, legAtStop, legAtS, destOfCode } from '../src/domain/legs';
+import type { Route } from '../src/domain/types';
 import type { Pattern } from '../src/domain/types';
 import { undeltaPatterns } from '../src/domain/patterns';
 import { busKind } from '../src/domain/fleetTypes';
@@ -130,5 +132,51 @@ describe('tipo de bus', () => {
     expect(busKind('Z70700', 'C15', 'troncal')).toBeNull();
     expect(busKind('S10420', 'C15', 'troncal')).not.toBeNull();
     expect(busKind('X9999', 'C15', 'zonal')).toBeNull();
+  });
+});
+
+describe('códigos del bus (R9)', () => {
+  const leg = (c: string, d: string, i: number, s: number, b: number) => ({ c, d, i, s, b });
+  const ca153 = { id: 'X', code: 'CA153', name: 'A153 Centro || C153 Suba La Gaitana', dest: 'Centro', origin: 'Suba La Gaitana', loop: true, sys: 'zonal', color: '#000000', len: 40000, stops: 103,
+    codes: ['A153', 'C153'], legs: [leg('A153', 'Centro', 0, 0, 0), leg('C153', 'Suba La Gaitana', 68, 26063, 25768)] } as unknown as Route;
+  const fz63 = { id: 'Y', code: 'FZ63', name: 'F63 Pradera || Z63 Tibanica', dest: 'Pradera', origin: 'Tibanica', loop: true, sys: 'dual', color: '#e5483b', len: 24552, stops: 16, codes: ['F63', 'Z63'] } as unknown as Route;
+  const b10 = { id: 'Z', code: 'B10', name: 'Portal Norte', dest: 'Portal Norte', origin: 'Portal 20 de Julio', sys: 'troncal', color: '#7cc242', len: 25800, stops: 16 } as unknown as Route;
+
+  it('sin contexto: los códigos del bus, no el del catálogo', () => {
+    expect(busCode(ca153)).toBe('A153/C153');
+    expect(busCode(fz63)).toBe('F63/Z63');
+    expect(busCode(b10)).toBe('B10');
+    expect(allCodes(ca153)).toEqual(['CA153', 'A153', 'C153']);
+  });
+
+  it('por parada y por posición del bus: el código del tramo', () => {
+    expect(legAtStop(ca153, 10)?.c).toBe('A153');
+    expect(legAtStop(ca153, 68)?.c).toBe('C153');
+    expect(legAtS(ca153, 25_000)?.c).toBe('A153');
+    expect(legAtS(ca153, 25_770)?.c).toBe('A153'); // en la terminal todavía es el A153
+    expect(legAtS(ca153, 25_800)?.c).toBe('C153'); // salió de la terminal: ya es el C153
+    expect(legAtStop(fz63, 3)).toBeNull(); // se conocen los códigos, no dónde cambian
+  });
+
+  it('destino de cada código', () => {
+    expect(destOfCode(ca153, 'C153')).toBe('Suba La Gaitana');
+    expect(destOfCode(fz63, 'Z63')).toBe('Tibanica');
+    expect(destOfCode(fz63, 'F63')).toBe('Pradera');
+    expect(destOfCode(b10, 'B10')).toBe('Portal Norte');
+  });
+});
+
+describe('tipo de día con festivos (R9)', () => {
+  const at = (s: string) => Date.parse(`${s}-05:00`);
+  it('festivo del calendario del GTFS, fin de semana y madrugada del día anterior', () => {
+    setDayExceptions({ '2026-11-16': 'festivo' });
+    expect(dayType(at('2026-11-16T09:00:00'))).toBe('festivo'); // lunes festivo
+    expect(dayType(at('2026-11-17T09:00:00'))).toBe('habil');
+    expect(dayType(at('2026-11-14T09:00:00'))).toBe('sabado');
+    expect(dayType(at('2026-11-15T09:00:00'))).toBe('festivo'); // domingo
+    expect(dayType(at('2026-11-17T01:30:00'))).toBe('festivo'); // madrugada del martes: día de servicio del lunes festivo
+    expect(dayType(at('2026-11-15T02:00:00'))).toBe('sabado');
+    setDayExceptions(undefined);
+    expect(dayType(at('2026-11-16T09:00:00'))).toBe('habil');
   });
 });

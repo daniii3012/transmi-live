@@ -21,7 +21,7 @@ export function busesByRoute(fleet: Fleet, version: number): Map<string, Bus[]> 
   return map;
 }
 
-export interface Arrival { route: Route; bus: Bus; seconds: number; meters: number; stopId: string; /** Antigüedad de la lectura (s). */ age: number }
+export interface Arrival { route: Route; bus: Bus; seconds: number; meters: number; stopId: string; /** Antigüedad de la lectura (s). */ age: number; /** Índice de la parada en el patrón (para el código del tramo). */ index: number }
 
 /** Con una lectura más vieja que esto no se estima una llegada (el bus dejó de reportar). */
 export const MAX_FIX_AGE = 240;
@@ -58,7 +58,7 @@ export function arrivals(net: Network, fleet: Fleet, version: number, stopIds: S
       if (raw < -PASSED_S) continue;
       const sec = Math.max(0, raw);
       if (sec > 75 * 60) continue;
-      out.push({ route, bus: b, seconds: sec, meters: p.s[k] - b.sFix, stopId: p.stops[k], age: fixAge });
+      out.push({ route, bus: b, seconds: sec, meters: p.s[k] - b.sFix, stopId: p.stops[k], age: fixAge, index: k });
     }
   }
   return out.sort((a, b) => a.seconds - b.seconds);

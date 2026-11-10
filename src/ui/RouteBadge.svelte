@@ -1,13 +1,17 @@
 <script lang="ts">
   import type { Route } from '../domain/types';
   import { textOn } from '../domain/time';
+  import { busCode } from '../domain/legs';
 
-  let { route, size = 'md' }: { route: Route | undefined; size?: 'sm' | 'md' | 'lg' } = $props();
+  /** `code`: el del tramo cuando se sabe (bus, llegada a una parada); si no, los códigos del bus. */
+  let { route, size = 'md', code }: { route: Route | undefined; size?: 'sm' | 'md' | 'lg'; code?: string } = $props();
   const bg = $derived(route?.color ?? '#69727d');
+  const label = $derived(code ?? (route ? busCode(route) : '—'));
+  const title = $derived(route ? `${label}${label !== route.code ? ` (en el catálogo, ${route.code})` : ''} · ${route.dest}` : '');
 </script>
 
-<span class="badge {size}" style:background={bg} style:color={textOn(bg)} title={route ? `${route.code} · ${route.dest}` : ''}>
-  {route?.code ?? '—'}
+<span class="badge {size}" style:background={bg} style:color={textOn(bg)} {title}>
+  {label}
 </span>
 
 <style>

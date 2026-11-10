@@ -50,10 +50,27 @@ export function meters(m: number): string {
   return `${(m / 1000).toLocaleString('es-CO', { maximumFractionDigits: 1 })} km`;
 }
 
-/** Tipo de día para el horario: hábil, sábado o festivo (domingo). Los festivos de calendario
- * no se distinguen aquí: el horario de domingo es la mejor aproximación sin calendar_dates. */
-export function dayType(ms = Date.now()): 'habil' | 'sabado' | 'festivo' {
-  const d = new Date(ms - 5 * 3600 * 1000).getUTCDay();
+export type DayKind = 'habil' | 'sabado' | 'festivo';
+
+/** Días que no siguen su día de la semana (festivos), del `calendar_dates.txt` del GTFS: «2026-11-16»
+ * → «festivo». Los pone la red al cargar (`meta.days`). */
+let dayExceptions: Record<string, DayKind> = {};
+export function setDayExceptions(days: Record<string, DayKind> | undefined) { dayExceptions = days ?? {}; }
+
+/** Fecha de Bogotá «AAAA-MM-DD». */
+export function bogotaDate(ms = Date.now()): string {
+  return new Date(ms - 5 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/** Tipo de día para el horario: hábil, sábado o festivo (domingo y los festivos del calendario).
+ * La madrugada (antes de las 4) pertenece al día de servicio anterior. */
+export function dayType(ms = Date.now()): DayKind {
+  const local = ms - 5 * 3600 * 1000;
+  const service = new Date(local).getUTCHours() < 4 ? local - 86_400_000 : local;
+  const date = new Date(service).toISOString().slice(0, 10);
+  const ex = dayExceptions[date];
+  if (ex) return ex;
+  const d = new Date(service).getUTCDay();
   return d === 0 ? 'festivo' : d === 6 ? 'sabado' : 'habil';
 }
 

@@ -8,15 +8,16 @@
   import RouteBadge from './RouteBadge.svelte';
   import Back from './Back.svelte';
   import { KIND_NAME } from '../domain/fleetTypes';
+  import { busCode, legAtS } from '../domain/legs';
   import { KX, KY } from '../domain/geo';
   import { watch } from '../app/watch.svelte';
 
   /** Avisar cuando el bus esté a 2 min de esa parada (o quitar el aviso). */
   function toggleWatch(e: { index: number; name: string; seconds: number }) {
     if (!bus || !route) return;
-    if (watch.is(bus.id, e.index)) { watch.set(null); watch.show(`Aviso de llegada desactivado · ${route.code} en ${e.name}`, null); return; }
-    watch.set({ busId: bus.id, busLabel: bus.label, routeCode: route.code, color: route.color, index: e.index, stopName: e.name, threshold: e.seconds > 180 ? 120 : 30 });
-    watch.show(`Aviso de llegada activado · ${route.code} en ${e.name} · ${e.seconds > 180 ? '2 min antes' : 'al llegar'}`, null);
+    if (watch.is(bus.id, e.index)) { watch.set(null); watch.show(`Aviso de llegada desactivado · ${code} en ${e.name}`, null); return; }
+    watch.set({ busId: bus.id, busLabel: bus.label, routeCode: code, color: route.color, index: e.index, stopName: e.name, threshold: e.seconds > 180 ? 120 : 30 });
+    watch.show(`Aviso de llegada activado · ${code} en ${e.name} · ${e.seconds > 180 ? '2 min antes' : 'al llegar'}`, null);
   }
 
   let { id }: { id: string } = $props();
@@ -24,6 +25,9 @@
   // La ficha se recalcula con cada instantánea y con el reloj de 1 Hz (antigüedad y cuentas).
   const bus = $derived.by(() => { void app.version; return app.fleet?.buses.get(id); });
   const route = $derived(bus?.route);
+  /** Tramo en el que va (en una ruta en par, el código que lleva el bus ahora). */
+  const leg = $derived(route && bus?.onPath ? legAtS(route, bus.sFix) : null);
+  const code = $derived(leg?.c ?? (route ? busCode(route) : ''));
   const pattern = $derived.by(() => (app.patternsReady && bus ? net.pattern(bus.routeId) : undefined));
   let stopsReady = $state(false);
   $effect(() => { void net.loadStreetStops().then(() => (stopsReady = true)); });
@@ -83,9 +87,9 @@
   <div class="view">
     <Back />
     <header class="title">
-      <RouteBadge {route} size="lg" />
+      <RouteBadge {route} code={leg?.c} size="lg" />
       <div class="names">
-        <h1>{route?.dest ?? 'Ruta sin datos'}</h1>
+        <h1>{leg?.d ?? route?.dest ?? 'Ruta sin datos'}</h1>
         <p class="dim">Bus <span class="num">{bus.label}</span>&nbsp;· <span class="num">{bus.plate}</span>{#if bus.kind}&nbsp;· {KIND_NAME[bus.kind]}{:else if bus.sys === 'zonal' && bus.route?.sub}&nbsp;· <span title="Estimado por el tipo de servicio">{bus.route.sub === 'especial' ? 'buseta' : bus.route.sub === 'complementario' ? 'busetón' : 'padrón'}</span>{/if}</p>
       </div>
     </header>
@@ -158,7 +162,7 @@
       <span class="faint">Puede haber terminado su recorrido, entrado a patio o dejado de reportar. Si vuelve a aparecer, la ficha se actualiza sola.</span></p>
     {#if ghostRoute}
       <div class="actions">
-        <button class="btn" onclick={() => go({ kind: 'route', id: ghost.routeId })}>Ver la ruta {ghostRoute.code}</button>
+        <button class="btn" onclick={() => go({ kind: 'route', id: ghost.routeId })}>Ver la ruta {busCode(ghostRoute)}</button>
       </div>
     {/if}
     {#if others.length}

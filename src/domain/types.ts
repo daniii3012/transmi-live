@@ -16,7 +16,15 @@ export interface Route {
   len: number;
   stops: number;
   pair?: string[];
+  /** Códigos que lleva el bus si no son el del catálogo («A153», «C153» en la CA153); ver legs.ts. */
+  codes?: string[];
+  /** Dónde cambia el código a lo largo del recorrido (solo si cambia). */
+  legs?: RouteLeg[];
 }
+
+/** Tramo de una ruta con su código: `i` índice de su primera parada en el patrón, `s` su abscisa,
+ * `b` la de la parada anterior (m). */
+export interface RouteLeg { c: string; d: string; i: number; s: number; b: number }
 
 export interface Platform { id: string; name: string; code: string; lon: number; lat: number; routes: string[] }
 

@@ -6,6 +6,7 @@
   import { meters, ago } from '../domain/time';
   import { SYSTEM_ORDER, type Route } from '../domain/types';
   import RouteBadge from './RouteBadge.svelte';
+  import { legAtStop } from '../domain/legs';
   import Back from './Back.svelte';
   import Star from './Star.svelte';
   import AlertList from './AlertList.svelte';
@@ -59,6 +60,20 @@
   });
   $effect(() => () => ctl?.spotlight(null));
 
+  /** Código del tramo que para aquí (una ruta en par para con uno solo de sus códigos). */
+  function legHere(r: Route) {
+    if (!r.legs || !app.patternsReady) return null;
+    const p = net.pattern(r.id);
+    const k = p ? p.stops.findIndex((s) => stopIds.has(s)) : -1;
+    return k >= 0 ? legAtStop(r, k) : null;
+  }
+
+  function legOn(r: Route, stopId: string) {
+    if (!r.legs || !app.patternsReady) return null;
+    const k = net.pattern(r.id)?.stops.indexOf(stopId) ?? -1;
+    return k >= 0 ? legAtStop(r, k) : null;
+  }
+
   /** Vagones con las rutas que paran en cada uno. */
   const platforms = $derived(
     (station?.platforms ?? []).map((p) => ({ ...p, rs: p.routes.map((r) => net.routes.get(r)).filter((r): r is Route => !!r) })).filter((p) => p.rs.length),
@@ -111,10 +126,11 @@
       {:else}
         <ul class="arrivals">
           {#each next as a (a.bus.id)}
+            {@const leg = legAtStop(a.route, a.index)}
             <li>
               <button onclick={() => go({ kind: 'bus', id: a.bus.id })}>
-                <RouteBadge route={a.route} />
-                <span class="dest">{a.route.dest}<span class="faint">&nbsp;· bus {a.bus.label} · {meters(a.meters)}{#if a.age > 150}&nbsp;· lectura de hace {ago(a.age)}{/if}</span></span>
+                <RouteBadge route={a.route} code={leg?.c} />
+                <span class="dest">{leg?.d ?? a.route.dest}<span class="faint">&nbsp;· bus {a.bus.label} · {meters(a.meters)}{#if a.age > 150}&nbsp;· lectura de hace {ago(a.age)}{/if}</span></span>
                 <span class="eta num" class:soon={a.seconds < 60}>{etaText(a.seconds)}</span>
               </button>
             </li>
@@ -129,9 +145,10 @@
         <div class="head"><span class="label">Rutas que paran</span><span class="label faint">{routes.length}</span></div>
         <div class="badges">
           {#each routes as r (r.id)}
-            <button class="rb" onclick={() => go({ kind: 'route', id: r.id })} title="{r.code} hacia {r.dest}">
-              <RouteBadge route={r} size="sm" />
-              <span class="to">{r.dest}</span>
+            {@const leg = legHere(r)}
+            <button class="rb" onclick={() => go({ kind: 'route', id: r.id })} title="{leg?.c ?? r.code} hacia {leg?.d ?? r.dest}">
+              <RouteBadge route={r} code={leg?.c} size="sm" />
+              <span class="to">{leg?.d ?? r.dest}</span>
             </button>
           {/each}
         </div>
@@ -145,7 +162,7 @@
           {#each platforms as p (p.id)}
             <li>
               <span class="pname">{p.name.replace(station?.short ?? '', '').replace(/^\s*[-–]?\s*/, '') || p.name}</span>
-              <span class="pbadges">{#each p.rs as r (r.id)}<RouteBadge route={r} size="sm" />{/each}</span>
+              <span class="pbadges">{#each p.rs as r (r.id)}<RouteBadge route={r} code={legOn(r, p.id)?.c} size="sm" />{/each}</span>
             </li>
           {/each}
         </ul>

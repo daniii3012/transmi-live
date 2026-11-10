@@ -12,6 +12,7 @@
   import HourBars from './HourBars.svelte';
   import type { Route } from '../domain/types';
   import { backup } from '../live/backup.svelte';
+  import { busCode, busCodes, destOfCode } from '../domain/legs';
 
   let { id }: { id: string } = $props();
   const net = $derived(app.net!);
@@ -91,15 +92,20 @@
    */
   const variants = $derived.by(() => {
     if (!route) return [];
-    const parts = (r: Route) => (r.loop ? r.name.split('||').map((x) => x.trim().split(' ')[0].toUpperCase()) : []);
+    const parts = (r: Route) => (r.codes ?? []).map((c) => c.toUpperCase());
     const mine = parts(route), code = route.code.toUpperCase();
     const out: Route[] = [];
     for (const r of net.routes.values()) {
       if (r.id === route.id || r.sys !== route.sys || route.pair?.includes(r.id)) continue;
+      if (busCode(r) === busCode(route)) continue; // la misma línea con otro id (variante de ciclovía)
       if (mine.includes(r.code.toUpperCase()) || parts(r).includes(code)) out.push(r);
     }
     return out;
   });
+  /** Códigos del bus en esta ruta, con su destino («A153 hasta Centro, C153 hasta Suba La Gaitana»). */
+  const codeLegs = $derived(route && busCodes(route).length > 1 ? busCodes(route).map((c) => ({ c, d: destOfCode(route, c) })) : []);
+  /** Tramo que empieza en cada parada del diagrama (después de la primera). */
+  const legStart = $derived(new Map((route?.legs ?? []).slice(1).map((l) => [l.i, l])));
   /** Sin salidas a esta hora y una variante que sí las tiene: ahí están los buses. */
   const variantNow = $derived.by(() => {
     void app.now;
@@ -162,7 +168,16 @@
 
     <AlertList {alerts} />
 
-    <div class="meta label">{sysName}{route.sub ? ` · ${route.sub}` : ''}{route.zone ? ` · zona ${route.zone}` : ''}</div>
+    <div class="meta label">{sysName}{route.sub ? ` · ${route.sub}` : ''}{route.zone ? ` · zona ${route.zone}` : ''}{busCode(route) !== route.code ? ` · ${route.code} en el catálogo` : ''}</div>
+
+    {#if codeLegs.length}
+      <p class="legs">
+        {#each codeLegs as l, k (l.c)}
+          {k === 0 ? 'Va como' : ' y vuelve como'} <RouteBadge {route} code={l.c} size="sm" /> {k === 0 ? 'hasta' : 'hasta'} {l.d}
+        {/each}
+        {#if !route.legs}<span class="faint">. El letrero del horario no dice dónde cambia.</span>{/if}
+      </p>
+    {/if}
 
     <dl class="stats">
       <div><dt class="label">En vía</dt><dd class="num">{fmtNum(buses.length)}</dd></div>
@@ -177,7 +192,7 @@
       </p>
     {/if}
     {#if variantNow}
-      <p class="notice">A esta hora la línea sale como <button class="link" onclick={() => go({ kind: 'route', id: variantNow.id }, true)}>{variantNow.code}{variantNow.loop ? ' (circuito)' : ` hacia ${variantNow.dest}`}</button>: sus buses van con ese código.</p>
+      <p class="notice">A esta hora la línea sale {variantNow.loop ? 'en circuito' : `hacia ${variantNow.dest}`}: <button class="link" onclick={() => go({ kind: 'route', id: variantNow.id }, true)}>{busCode(variantNow)}{variantNow.loop ? `, ${variantNow.dest} – ${variantNow.origin}` : ''}</button>.</p>
     {:else if silent}
       <p class="notice">Ningún bus de esta ruta reporta ahora, aunque el horario tiene salidas esta hora.
         <span class="faint">El alimentador abierto no trae toda la flota en todo momento.{backup.status === 'off' ? '' : backup.status === 'rejected' ? ' El respaldo por ruta rechazó las credenciales.' : ' El respaldo por ruta tampoco trae buses de esta ruta por ahora.'}</span></p>
@@ -208,13 +223,17 @@
       <div class="pair">
         {#each others as o (o.id)}
           <button class="btn" onclick={() => go({ kind: 'route', id: o.id }, true)}>
-            <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5h9l-3-3M13 11H4l3 3" fill="none" stroke="currentColor" stroke-width="1.4" /></svg>
-            Hacia {o.dest}
+            {#if o.dest === route.dest}
+              Variante · {o.origin ?? o.name}
+            {:else}
+              <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5h9l-3-3M13 11H4l3 3" fill="none" stroke="currentColor" stroke-width="1.4" /></svg>
+              Hacia {o.dest}
+            {/if}
           </button>
         {/each}
         {#each variants as o (o.id)}
           <button class="btn" onclick={() => go({ kind: 'route', id: o.id }, true)}>
-            <span class="num">{o.code}</span>{o.loop ? 'Circuito' : `Hacia ${o.dest}`}
+            <span class="num">{busCode(o)}</span>{o.loop ? 'Circuito' : `Hacia ${o.dest}`}
           </button>
         {/each}
       </div>
@@ -231,7 +250,7 @@
               <li class:end={r.i === rows.length - 1}>
                 <button class="stop" onclick={() => r.station ? go({ kind: 'station', id: r.station.id }) : go({ kind: 'stop', id: r.id })}>
                   <span class="tick" class:terminal={r.i === 0 || r.i === rows.length - 1}></span>
-                  <span class="sname">{r.name}</span>
+                  <span class="sname">{r.name}{#if legStart.has(r.i)}<span class="legmark">sigue como <RouteBadge {route} code={legStart.get(r.i)?.c} size="sm" /></span>{/if}</span>
                 </button>
               </li>
             {/each}
@@ -277,6 +296,8 @@
   .hours[open] summary::before { content: '−'; }
   .hours[open] summary { margin-bottom: var(--sp-3); }
   .pair { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  .legs { margin: -8px 0 0; font-size: var(--fs-small); color: var(--fg-1); line-height: 1.9; }
+  .legmark { margin-left: var(--sp-2); font-size: var(--fs-label); color: var(--fg-2); display: inline-flex; align-items: center; gap: 4px; vertical-align: 1px; }
   .notice { margin: -4px 0 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-1); border-left: 2px solid var(--warn); font-size: var(--fs-small); line-height: 1.5; color: var(--fg-1); }
   .notice .faint { display: block; margin-top: 2px; }
   .link { color: var(--fg-0); text-decoration: underline; text-decoration-color: var(--fg-3); text-underline-offset: 3px; }

@@ -1,6 +1,7 @@
 import { MetricPath, decodeShape } from '../domain/geo';
 import type { Route, Station, StreetStop, SystemInfo, Pattern, RouteService, SystemKey } from '../domain/types';
 import { undeltaPatterns } from '../domain/patterns';
+import { setDayExceptions, type DayKind } from '../domain/time';
 
 const BASE = `${import.meta.env.BASE_URL}data/`;
 
@@ -25,7 +26,7 @@ interface ShapesFile { v: number; hash: string; scale: number; shapes: Record<st
 interface StopsFile { cols: string[]; stops: [string, string, string, number, number, string[]][] }
 interface PatternsFile { v?: number; bands: string[]; patterns: Record<string, Pattern> }
 interface ServiceFile { service: Record<string, RouteService> }
-export interface Meta { hash: string; built: string; bands: { from: number; to: number; key: string }[]; counts: Record<string, unknown> }
+export interface Meta { hash: string; built: string; bands: { from: number; to: number; key: string }[]; counts: Record<string, unknown>; days?: Record<string, DayKind> }
 
 /**
  * La red estática: rutas, estaciones, paraderos, recorridos y patrones. Lo esencial se carga al
@@ -67,6 +68,7 @@ export class Network {
     ]);
     n.corridors = corr.segments;
     n.meta = meta;
+    setDayExceptions(meta.days);
     n.hash = net.hash;
     n.systems = net.systems;
     for (const r of net.routes) n.routes.set(r.id, r);

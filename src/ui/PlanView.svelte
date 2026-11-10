@@ -10,6 +10,7 @@
   import { arrivals } from './derive';
   import PlaceField from './PlaceField.svelte';
   import RouteBadge from './RouteBadge.svelte';
+  import { legAtStop } from '../domain/legs';
   import Back from './Back.svelte';
 
   let { id }: { id: string } = $props();
@@ -51,6 +52,8 @@
   $effect(() => { ctl?.showJourney(sel ?? null, st.from, st.to); });
 
   function legRoute(j: NonNullable<typeof sel>, l: { route: number }) { return net.routes.get(j.routeIds[l.route]); }
+  /** Código y destino del tramo de la ruta donde se sube (CA153 se toma como A153 o como C153). */
+  function boardLeg(j: NonNullable<typeof sel>, l: { route: number; fromPos: number }) { const r = legRoute(j, l); return r ? legAtStop(r, l.fromPos) : null; }
   function stopName(j: NonNullable<typeof sel>, s: number | null, fallback: string) { return s === null ? fallback : net.placeName(j.stopIds[s]); }
 
   /** Próximo bus en vivo para el primer tramo, si el viaje es para ya. */
@@ -119,7 +122,7 @@
               {#each j.legs as l, k (k)}
                 {#if k > 0}<span class="sep">›</span>{/if}
                 {#if l.kind === 'walk'}<span class="walk num"><svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><circle cx="5.5" cy="1.8" r="1.5" /><path d="M5 4 3 7l2 1-1 4M5 4l2 3 2 .5M3.5 5.5 1.5 6.5" stroke="currentColor" stroke-width="1.2" fill="none" /></svg>{Math.max(1, Math.round(l.seconds / 60))}</span>
-                {:else}<RouteBadge route={legRoute(j, l)} size="sm" />{/if}
+                {:else}<RouteBadge route={legRoute(j, l)} code={boardLeg(j, l)?.c} size="sm" />{/if}
               {/each}
             </div>
             <div class="meta faint">{j.rides === 1 ? 'Directo' : `${j.rides} buses`} · {Math.round(j.walkSeconds / 60)} min a pie</div>
@@ -142,11 +145,12 @@
             </li>
           {:else}
             {@const r = legRoute(sel, l)}
+            {@const bl = boardLeg(sel, l)}
             <li class="leg ride" style:--c={r?.color}>
               <span class="t num">{clock(l.board)}</span>
               <span class="rail"></span>
               <div class="body">
-                <div class="board"><RouteBadge route={r} size="sm" /> <span>hacia {r?.dest}</span></div>
+                <div class="board"><RouteBadge route={r} code={bl?.c} size="sm" /> <span>hacia {bl?.d ?? r?.dest}</span></div>
                 <div class="small">Sube en <button class="lk" onclick={() => { const s = net.stationOf.get(sel.stopIds[l.from]); if (s) go({ kind: 'station', id: s.id }); }}>{stopName(sel, l.from, '')}</button></div>
                 <div class="faint small">
                   {#if k === sel.legs.findIndex((x) => x.kind === 'ride') && firstLive}

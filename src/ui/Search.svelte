@@ -3,6 +3,7 @@
   import { app } from '../app/store.svelte';
   import { go, type View } from '../app/router';
   import { norm, frequencyNow } from './derive';
+  import { busCodes, destOfCode } from '../domain/legs';
   import { SYSTEM_ORDER, type Route } from '../domain/types';
   import RouteBadge from './RouteBadge.svelte';
 
@@ -19,10 +20,11 @@
     tick().then(() => input?.focus());
   });
 
-  interface Item { key: string; view: View; group: string; title: string; sub: string; route?: Route; score: number }
+  interface Item { key: string; view: View; group: string; title: string; sub: string; route?: Route; code?: string; score: number }
 
   /** Índices de búsqueda (una vez). */
-  const routeIndex = $derived([...net.routes.values()].map((r) => ({ r, code: norm(r.code), text: norm(`${r.code} ${r.dest} ${r.origin ?? ''} ${r.name}`) })));
+  // Cada ruta se encuentra por su código de catálogo y por los que lleva el bus («a153» → CA153).
+  const routeIndex = $derived([...net.routes.values()].map((r) => ({ r, codes: [r.code, ...busCodes(r)].map((c) => ({ c, n: norm(c) })), text: norm(`${r.code} ${busCodes(r).join(' ')} ${r.dest} ${r.origin ?? ''} ${r.name}`) })));
   const stationIndex = $derived([...net.stations.values()].map((s) => ({ s, text: norm(s.name) })));
   const stopIndex = $derived.by(() => (stopsReady ? [...net.streetStops.values()].map((s) => ({ s, text: norm(`${s.name} ${s.code}`) })) : []));
 
@@ -35,12 +37,20 @@
     // Rutas: el código exacto primero, luego prefijo, luego texto. Un código con dos sentidos sale dos veces.
     const now = Date.now();
     const rs = routeIndex
-      .map(({ r, code, text }) => ({ r, s: code === n ? 0 : code.startsWith(n) ? 1 : has(text) ? 2 : 9 }))
+      .map(({ r, codes, text }) => {
+        const exact = codes.find((x) => x.n === n), prefix = codes.find((x) => x.n.startsWith(n));
+        const hit = exact ?? prefix;
+        return { r, s: exact ? 0 : prefix ? 1 : has(text) ? 2 : 9, code: hit && hit.c !== r.code ? hit.c : undefined };
+      })
       .filter((x) => x.s < 9)
       .map((x) => { const f = serviceReady ? frequencyNow(net, x.r.id, now) : null; return { ...x, off: !!f && !f.perHour }; })
       .sort((a, b) => a.s - b.s || Number(a.off) - Number(b.off) || SYSTEM_ORDER.indexOf(a.r.sys) - SYSTEM_ORDER.indexOf(b.r.sys) || a.r.code.localeCompare(b.r.code, 'es', { numeric: true }))
       .slice(0, 8);
-    for (const { r, s, off } of rs) out.push({ key: `r${r.id}`, view: { kind: 'route', id: r.id }, group: 'Rutas', title: r.dest, sub: `${r.loop ? `circuito · ${r.origin}` : `desde ${r.origin ?? '—'}`}${off ? ' · sin salidas a esta hora' : ''}`, route: r, score: s });
+    for (const { r, s, off, code } of rs) {
+      const codes = busCodes(r);
+      const where = r.loop ? (codes.length > 1 ? `circuito ${codes.join(' / ')}` : `circuito · ${r.origin}`) : `desde ${r.origin ?? '—'}`;
+      out.push({ key: `r${r.id}`, view: { kind: 'route', id: r.id }, group: 'Rutas', title: code ? destOfCode(r, code) : r.dest, sub: `${where}${off ? ' · sin salidas a esta hora' : ''}`, route: r, code, score: s });
+    }
     for (const { s } of stationIndex.filter((x) => has(x.text)).slice(0, 6))
       out.push({ key: `s${s.id}`, view: { kind: 'station', id: s.id }, group: 'Estaciones', title: s.short, sub: s.kind === 'portal' ? 'portal' : s.closed ? 'sin servicio' : `${s.routes.length} rutas`, score: 3 });
     for (const { s } of stopIndex.filter((x) => has(x.text)).slice(0, 5))
@@ -84,7 +94,7 @@
         {#if i === 0 || results[i - 1].group !== r.group}<li class="group label" role="presentation">{r.group}</li>{/if}
         <li role="option" aria-selected={i === active}>
           <button class:active={i === active} onclick={() => pick(r)} onmousemove={() => (active = i)}>
-            {#if r.route}<RouteBadge route={r.route} />{:else}<span class="icon" class:stop={r.group === 'Paraderos'}></span>{/if}
+            {#if r.route}<RouteBadge route={r.route} code={r.code} />{:else}<span class="icon" class:stop={r.group === 'Paraderos'}></span>{/if}
             <span class="t">{r.title}</span>
             <span class="s faint">{r.sub}</span>
           </button>

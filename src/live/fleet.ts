@@ -3,6 +3,7 @@ import type { Route, SystemKey } from '../domain/types';
 import { KX, KY, type MetricPath } from '../domain/geo';
 import { LAT0, LON0, Q, type VehiclesV1 } from './api';
 import { busKind, type BusKind } from '../domain/fleetTypes';
+import { allCodes } from '../domain/legs';
 
 /** Reglas medidas en el simulador sobre 706.281 lecturas troncales (ver decisiones/006). */
 export const MAX_OFF = 60;
@@ -313,7 +314,7 @@ export class Fleet {
   reporting(code: string): number {
     const c = code.toUpperCase();
     let n = 0;
-    for (const b of this.buses.values()) if (b.seenT && !b.missing && b.age <= DROP_AGE && b.route?.code.toUpperCase() === c) n++;
+    for (const b of this.buses.values()) if (b.seenT && !b.missing && b.age <= DROP_AGE && b.route && allCodes(b.route).includes(c)) n++;
     return n;
   }
 
@@ -340,7 +341,7 @@ export class Fleet {
     // Con `replaceCodes`, el respaldo reemplaza a esas rutas: sus buses que no vinieron en él salen.
     if (replaceCodes.length) {
       const codes = new Set(replaceCodes.map((c) => c.toUpperCase()));
-      for (const [id, b] of this.buses) if (!got.has(id) && b.route && codes.has(b.route.code.toUpperCase())) this.buses.delete(id);
+      for (const [id, b] of this.buses) if (!got.has(id) && b.route && allCodes(b.route).some((c) => codes.has(c))) this.buses.delete(id);
     }
     for (const f of this.listeners) f();
   }
