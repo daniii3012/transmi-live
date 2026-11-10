@@ -40,7 +40,7 @@
     {/if}
   {/if}
   {#if !compact && onBackup}
-    <span class="sep" aria-hidden="true">·</span><span class="num backup" title="Posiciones del servicio por ruta mientras el alimentador está detenido">Respaldo {backup.codes.join(' ')}</span>
+    <span class="sep" aria-hidden="true">·</span><span class="num backup" title="Posiciones del servicio por ruta: el alimentador no las trae ahora">Respaldo {backup.codes.join(' ')}</span>
   {/if}
   {#if !compact && p.status === 'error' && p.error}
     <span class="sep">·</span><span class="faint">{p.error}</span>

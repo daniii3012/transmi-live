@@ -32,7 +32,7 @@
   const estado = $derived.by(() => {
     switch (backup.status) {
       case 'off': return 'Respaldo desactivado: sin credenciales.';
-      case 'ready': return 'Credenciales guardadas. El respaldo se usa solo con el alimentador detenido.';
+      case 'ready': return 'Credenciales guardadas. El respaldo se usa cuando el alimentador se detiene o no trae buses de la ruta abierta.';
       case 'active': return `Respaldo en uso: ${backup.codes.join(', ')}${backup.at ? ` · ${fmtHMS(backup.at).slice(0, 5)}` : ''}.`;
       case 'rejected': return 'El servicio rechazó las credenciales. Respaldo detenido hasta cambiarlas.';
       case 'unavailable': return 'Servicio por ruta no disponible por ahora; se reintenta solo.';
@@ -68,9 +68,11 @@
   <section>
     <div class="label">Respaldo por ruta</div>
     <p class="small">
-      Si el alimentador en vivo deja de actualizarse por más de 2 minutos, las posiciones de la ruta
-      abierta, del bus seguido o de los tramos del viaje se consultan al servicio por ruta con estas
-      credenciales: el appid y el UUID del dispositivo, los mismos de la app móvil.
+      Si el alimentador en vivo deja de actualizarse, o no trae ningún bus de la ruta que se mira (trae
+      solo parte de la flota), las posiciones de la ruta abierta, del bus seguido o de los tramos del
+      viaje se consultan al servicio por ruta con estas credenciales: el appid y el UUID del
+      dispositivo, los mismos de la app móvil. Los buses que solo trae el respaldo salen del mapa
+      3 minutos después de dejar de mirar su ruta.
     </p>
     <p class="small faint">
       Se guardan solo en este navegador. El servidor intermedio las reenvía al servicio en cada consulta

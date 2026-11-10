@@ -3,16 +3,22 @@ import type { Fleet } from './fleet';
 import { apiBase, type VehiclesV1 } from './api';
 import { KX, KY } from '../domain/geo';
 import { resolveReading } from './backupResolve';
+import { STALE_FEED_S } from './poller';
 
 /**
- * Respaldo por ruta (ver transmi-live-worker/docs/WORKER.md): cuando el alimentador en vivo deja de
- * actualizarse, las posiciones de las rutas que se están mirando se piden al servicio por ruta con las
- * credenciales de quien usa la página (appid y uuid, como en la app nativa).
+ * Respaldo por ruta (ver transmi-live-worker/docs/WORKER.md): las posiciones de las rutas que se están
+ * mirando se piden al servicio por ruta con las credenciales de quien usa la página (appid y uuid, como
+ * en la app nativa) cuando el alimentador en vivo no las da.
  *
  * - Las credenciales se guardan solo en este navegador (`localStorage`) y viajan en el cuerpo de la
  *   petición al Worker, que las reenvía sin guardarlas. Sin credenciales, no hay respaldo.
- * - Solo con el alimentador quieto (más de 2 min sin datos nuevos) y solo para la ruta abierta, el bus
- *   seguido o los tramos del viaje: a lo sumo 4 rutas, cada 20 s.
+ * - Dos casos: el alimentador quieto (más de `STALE_FEED_S` sin datos nuevos), o en marcha pero sin
+ *   ningún bus de esa ruta (trae solo parte de la flota: el 9 nov. 2026 faltaba entera la del FZ63). En
+ *   el segundo no se reemplaza nada: solo se suman los buses que el alimentador no trae.
+ * - Solo para la ruta abierta, el bus seguido o los tramos del viaje: a lo sumo 4 rutas, cada 20 s. Una
+ *   ruta para la que el respaldo tampoco trae buses se vuelve a consultar a los 2 min.
+ * - Los buses que solo trae el respaldo duran 3 min desde su última lectura (`BACKUP_KEEP` en la flota):
+ *   al dejar de mirar la ruta, salen del mapa.
  * - Credenciales rechazadas: se detiene hasta que se cambien. Servicio caído: espera 1 min.
  */
 export interface Credentials { appid: string; uuid: string }
@@ -24,9 +30,10 @@ interface RouteResponse {
 }
 
 const KEY = 'transmi-live:respaldo:v1';
-const STALE_S = 120;
 const EVERY = 20_000;
 const MAX_ROUTES = 4;
+/** Espera antes de volver a consultar una ruta para la que el respaldo no trajo buses. */
+const EMPTY_WAIT = 120_000;
 
 function load(): Credentials | null {
   try {
@@ -71,17 +78,30 @@ class Backup {
    */
   tick(net: Network | null, fleet: Fleet | null, feedTime: number | null, codes: string[], now = Date.now()) {
     if (!this.creds || !net || !fleet || this.running) return;
-    const stale = !feedTime || now / 1000 - feedTime > STALE_S;
-    if (!stale || !codes.length) {
+    const stale = !feedTime || now / 1000 - feedTime > STALE_FEED_S;
+    // Con el alimentador en marcha, solo las rutas de las que no trae ningún bus.
+    const want = this.wanted(fleet, codes, stale, now);
+    if (!want.length) {
       if (this.status === 'active') { this.status = 'ready'; this.codes = []; }
       return;
     }
     if (this.status === 'rejected' || now < this.pauseUntil || now - this.lastRun < EVERY) return;
     this.lastRun = now;
-    void this.run(net, fleet, [...new Set(codes)].slice(0, MAX_ROUTES));
+    void this.run(net, fleet, want, stale);
   }
 
-  private async run(net: Network, fleet: Fleet, codes: string[]) {
+  /** Rutas que toca consultar ahora (ver los dos casos arriba), sin repetir y a lo sumo `MAX_ROUTES`. */
+  wanted(fleet: Fleet, codes: string[], stale: boolean, now: number): string[] {
+    const out: string[] = [];
+    for (const c of new Set(codes.map((x) => x.toUpperCase()))) {
+      if ((this.emptyUntil.get(c) ?? 0) > now) continue;
+      if (stale || fleet.reporting(c) === 0) out.push(c);
+    }
+    return out.slice(0, MAX_ROUTES);
+  }
+  private emptyUntil = new Map<string, number>();
+
+  private async run(net: Network, fleet: Fleet, codes: string[], replace: boolean) {
     const creds = this.creds;
     if (!creds) return;
     this.running = true;
@@ -99,12 +119,14 @@ class Backup {
         if (res.status === 404) { this.status = 'unavailable'; this.pauseUntil = Date.now() + 10 * 60_000; return; } // respaldo apagado en el Worker
         if (!res.ok) { this.fail(); return; }
         const data = (await res.json()) as RouteResponse;
-        // Reemplaza: los buses del GTFS de este código que no vinieron en el respaldo salen (son de
-        // antes de que el alimentador se detuviera).
-        fleet.merge(this.toSnapshot(net, fleet, data), Date.now(), [code]);
-        got.push(code);
+        // Con el alimentador detenido reemplaza: los buses del GTFS de este código que no vinieron en
+        // el respaldo salen (son de antes de que se detuviera). Con el alimentador en marcha solo suma.
+        const snap = this.toSnapshot(net, fleet, data);
+        fleet.merge(snap, Date.now(), replace ? [code] : []);
+        if (snap.n) { got.push(code); this.emptyUntil.delete(code); }
+        else this.emptyUntil.set(code, Date.now() + EMPTY_WAIT);
       }
-      this.status = 'active';
+      this.status = got.length ? 'active' : 'ready';
       this.codes = got;
       this.at = Date.now();
       this.onChange?.();

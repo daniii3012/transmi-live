@@ -1,13 +1,20 @@
 import { fetchVehicles, type VehiclesV1 } from './api';
 
 export interface PollState {
-  /** `live`: datos al día; `stale`: la última respuesta tiene más de 2 min; `error`: falla; `idle`: pausado. */
+  /** `live`: datos al día; `stale`: la última lectura tiene más de `STALE_FEED_S`; `error`: falla; `idle`: pausado. */
   status: 'connecting' | 'live' | 'stale' | 'error' | 'idle';
   feedTime: number | null;
   receivedAt: number | null;
   error: string | null;
   vehicles: number;
 }
+
+/**
+ * Segundos sin lecturas nuevas para dar el alimentador por detenido. Desde el 9 nov. 2026 sus lecturas
+ * llegan con 25–95 s de antigüedad (se regenera cada ~50 s con lecturas de ~40 s): con 120 s, una sola
+ * vuelta perdida ya lo marcaba «Sin actualizar».
+ */
+export const STALE_FEED_S = 150;
 
 function saveData(): boolean {
   return (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
@@ -74,11 +81,11 @@ export class Poller {
       this.failures = 0;
       this.etag = r.etag;
       this.onData(r.data, now);
-      this.set({ status: now / 1000 - r.data.t > 120 ? 'stale' : 'live', feedTime: r.data.t, receivedAt: now, error: null, vehicles: r.data.n });
+      this.set({ status: now / 1000 - r.data.t > STALE_FEED_S ? 'stale' : 'live', feedTime: r.data.t, receivedAt: now, error: null, vehicles: r.data.n });
     } else if (r.status === 'same') {
       this.failures = 0;
       const t = this.state.feedTime;
-      this.set({ status: t && now / 1000 - t > 120 ? 'stale' : 'live', error: null });
+      this.set({ status: t && now / 1000 - t > STALE_FEED_S ? 'stale' : 'live', error: null });
     } else if (r.message !== 'cancelado') {
       this.failures++;
       this.set({ status: 'error', error: r.message });

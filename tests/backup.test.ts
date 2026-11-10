@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveReading, sameDest, type NetLike } from '../src/live/backupResolve';
 import { Fleet } from '../src/live/fleet';
+import { backup } from '../src/live/backup.svelte';
 import { MetricPath, KX, KY } from '../src/domain/geo';
 import { LAT0, LON0, Q, type VehiclesV1 } from '../src/live/api';
 import type { Network } from '../src/data/network';
@@ -67,8 +68,35 @@ describe('respaldo: reemplaza los buses del GTFS de la ruta consultada', () => {
     // El alimentador detenido entrega otra vez la misma instantánea: no reaparecen G1 ni G2.
     f.ingest(gtfs, T0 * 1000 + 640_000);
     expect([...f.buses.keys()].sort()).toEqual(['F1', 'ruta:X1']);
-    // Vuelve el alimentador (instantánea nueva): manda el GTFS otra vez.
+    // Vuelve el alimentador (instantánea nueva): manda el GTFS otra vez. El bus que solo trajo el
+    // respaldo no sale de golpe: dura 3 min desde su última lectura (el alimentador puede no traerlo).
     f.ingest(snap(T0 + 700, [['G1', 'R5E', 3000], ['F1', 'T', 1600]]), T0 * 1000 + 715_000);
+    expect([...f.buses.keys()].sort()).toEqual(['F1', 'G1', 'ruta:X1']);
+    f.ingest(snap(T0 + 900, [['G1', 'R5E', 3400], ['F1', 'T', 1900]]), T0 * 1000 + 915_000);
     expect([...f.buses.keys()].sort()).toEqual(['F1', 'G1']);
+  });
+});
+
+describe('respaldo: qué rutas se consultan', () => {
+  const fnet = { routes, paths } as unknown as Network;
+  const one = (t: number, id: string, rid: string): VehiclesV1 => ({
+    v: 1, t, n: 1, id: [id], label: [id], plate: [''], route: [rid],
+    lat: [Math.round((lat0 - LAT0) * Q)], lon: [Math.round((lon0 + 800 / KX - LON0) * Q)], age: [0], stop: [''], seq: [0], start: [0],
+  });
+
+  it('alimentador detenido: las rutas abiertas; en marcha: solo las que no trae (trae parte de la flota)', () => {
+    const f = new Fleet(fnet);
+    const T0 = 1_000_000;
+    f.ingest(one(T0, 'F1', 'T'), T0 * 1000 + 40_000); // el alimentador trae un F51 y ningún 5
+    expect(backup.wanted(f, ['F51', '5'], true, 0)).toEqual(['F51', '5']);
+    expect(backup.wanted(f, ['F51', '5', '5'], false, 0)).toEqual(['5']);
+    expect(f.reporting('f51')).toBe(1);
+    // El respaldo trae un bus del 5: no cuenta como «el alimentador lo trae» (se sigue consultando).
+    f.merge(one(T0 + 30, 'ruta:X1', 'R5E'), T0 * 1000 + 60_000);
+    expect(backup.wanted(f, ['5'], false, 0)).toEqual(['5']);
+    // El alimentador omite el F51 en una vuelta: se conserva en el mapa, pero ya no «lo trae».
+    f.ingest({ ...one(T0 + 50, 'F1', 'T'), n: 0, id: [], label: [], plate: [], route: [], lat: [], lon: [], age: [], stop: [], seq: [], start: [] }, T0 * 1000 + 90_000);
+    expect(f.buses.has('F1')).toBe(true);
+    expect(backup.wanted(f, ['F51'], false, 0)).toEqual(['F51']);
   });
 });

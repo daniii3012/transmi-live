@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Fleet, GLIDE, HOLD_BACK, windowSpeed } from '../src/live/fleet';
+import { Fleet, GLIDE, HOLD_BACK, KEEP_S, BACKUP_KEEP, windowSpeed } from '../src/live/fleet';
 import { MetricPath, KX, KY } from '../src/domain/geo';
 import { LAT0, LON0, Q, type VehiclesV1 } from '../src/live/api';
 import type { Network } from '../src/data/network';
@@ -148,11 +148,76 @@ describe('flota', () => {
     expect(f.buses.get('1')!.onPath).toBe(false);
   });
 
-  it('un bus que deja de aparecer en el alimentador sale de la flota', () => {
+  /** Instantánea sin buses a la hora `t`. */
+  const none = (t: number): VehiclesV1 => ({ v: 1, t, n: 0, id: [], label: [], plate: [], route: [], lat: [], lon: [], age: [], stop: [], seq: [], start: [] });
+  /** La misma instantánea de `snap` con otro id y etiqueta. */
+  const as = (d: VehiclesV1, id: string, label: string): VehiclesV1 => ({ ...d, id: [id], label: [label] });
+
+  it(`un bus que falta en una instantánea se conserva (el alimentador lo omite y lo devuelve); a los ${KEEP_S} s sin aparecer, sale`, () => {
     const f = new Fleet(net);
-    f.ingest(snap(1000, 1000), 0);
-    f.ingest({ ...snap(1020, 0), n: 0, id: [], label: [], plate: [], route: [], lat: [], lon: [], age: [], stop: [], seq: [], start: [] }, 20_000);
+    const T0 = 1_000_000;
+    f.ingest(snap(T0, 1000), T0 * 1000 + 50_000);
+    const b = f.buses.get('1')!;
+    const born = b.bornAt;
+    f.ingest(none(T0 + 60), T0 * 1000 + 110_000);
+    expect(f.buses.get('1')).toBe(b); // sigue, marcado como ausente, y su lectura envejece
+    expect(b.missing).toBe(true);
+    expect(b.age).toBe(60);
+    expect(f.counts().troncal).toBe(0); // en el mapa sí; en el conteo de «buses en vía», no
+    // Vuelve en la siguiente, cerca de donde estaba: el mismo bus, sin fundido de aparición.
+    f.ingest(snap(T0 + 120, 1040), T0 * 1000 + 170_000);
+    expect(f.buses.get('1')).toBe(b);
+    expect(b.missing).toBe(false);
+    expect(b.bornAt).toBe(born);
+    expect(b.sFix).toBeCloseTo(1040, -1);
+    // Deja de aparecer del todo: se conserva hasta KEEP_S del reloj del alimentador y sale.
+    f.ingest(none(T0 + 120 + KEEP_S), T0 * 1000 + 400_000);
+    expect(f.buses.size).toBe(1);
+    f.ingest(none(T0 + 121 + KEEP_S), T0 * 1000 + 401_000);
     expect(f.buses.size).toBe(0);
+  });
+
+  it('un bus que solo trae el respaldo por ruta no sale con las instantáneas del alimentador mientras el respaldo lo actualice', () => {
+    const f = new Fleet(net);
+    const T0 = 1_000_000, W0 = T0 * 1000;
+    f.ingest(snap(T0, 1000), W0 + 50_000);
+    f.merge(as(snap(T0 + 40, 3000), 'ruta:Z9', 'Z9'), W0 + 60_000);
+    f.ingest(snap(T0 + 60, 1500), W0 + 110_000); // el alimentador no lo trae
+    expect(f.buses.has('ruta:Z9')).toBe(true);
+    expect(f.reporting('B10')).toBe(1); // del alimentador, solo el bus 1
+    f.merge(as(snap(T0 + 100, 3400), 'ruta:Z9', 'Z9'), W0 + 120_000); // el respaldo lo sigue trayendo
+    f.ingest(snap(T0 + 300, 2500), W0 + 290_000);
+    expect(f.buses.has('ruta:Z9')).toBe(true);
+    // El respaldo deja de traerlo (ya no se mira esa ruta): a los 3 min de su última lectura, sale.
+    f.ingest(snap(T0 + 320, 2600), W0 + 120_000 + BACKUP_KEEP + 1000);
+    expect(f.buses.has('ruta:Z9')).toBe(false);
+    expect(f.buses.has('1')).toBe(true);
+  });
+
+  it('si el alimentador trae después el bus del respaldo (misma etiqueta), queda uno solo y la selección pasa a su id', () => {
+    const f = new Fleet(net);
+    const T0 = 1_000_000, W0 = T0 * 1000;
+    f.ingest(none(T0), W0);
+    f.merge(as(snap(T0 + 10, 3000), 'ruta:A1', 'A1'), W0 + 20_000);
+    f.selectedId = 'ruta:A1';
+    const moved: string[] = [];
+    f.onReplace = (from, to) => moved.push(`${from}>${to}`);
+    f.ingest(snap(T0 + 60, 3200), W0 + 110_000); // el alimentador: id 1, etiqueta A1
+    expect([...f.buses.keys()]).toEqual(['1']);
+    expect(f.selectedId).toBe('1');
+    expect(moved).toEqual(['ruta:A1>1']);
+  });
+
+  it('con el alimentador detenido, los buses del respaldo que ya no se actualizan salen por su cuenta (menos el seleccionado)', () => {
+    const f = new Fleet(net);
+    const T0 = 1_000_000, W0 = T0 * 1000;
+    f.ingest(snap(T0, 1000), W0);
+    f.merge(as(snap(T0 + 10, 3000), 'ruta:Z9', 'Z9'), W0 + 20_000);
+    f.merge(as(snap(T0 + 10, 3500), 'ruta:Z8', 'Z8'), W0 + 20_000);
+    f.selectedId = 'ruta:Z8';
+    expect(f.prune(W0 + 100_000)).toBe(false);
+    expect(f.prune(W0 + 20_000 + BACKUP_KEEP + 1)).toBe(true);
+    expect([...f.buses.keys()].sort()).toEqual(['1', 'ruta:Z8']); // el del alimentador no se toca
   });
 
   it('el buffer de la capa pone al seleccionado al final y marca los atenuados', () => {

@@ -24,6 +24,19 @@ export const GLIDE = 400;
 /** Más viejo que esto, el bus se atenúa; más que `DROP_AGE`, no se dibuja. */
 export const STALE_AGE = 180;
 export const DROP_AGE = 600;
+/**
+ * Un bus que falta en una instantánea no sale enseguida. El alimentador omite buses y los devuelve
+ * unas vueltas después: medido el 9 nov. 2026 (hora pico, 5.300 buses), 27 por minuto faltan y
+ * vuelven, casi siempre con la misma ruta y a ~200 m de donde estaban; el 36 % vuelve en 2 min, el
+ * 65 % en 5 y el 93 % en 10. Sacarlos al instante los hacía desaparecer y reaparecer en el mapa (y
+ * cerraba la ficha del bus que se estaba siguiendo). Se conserva hasta `KEEP_S` segundos del reloj del
+ * alimentador sin aparecer: mientras tanto llega a su última lectura, se queda ahí y se atenúa como
+ * cualquier lectura vieja (`STALE_AGE`).
+ */
+export const KEEP_S = 300;
+/** Un bus que solo trae el respaldo por ruta se conserva este tiempo desde su última lectura de ahí
+ * (el alimentador no lo trae: sus instantáneas no deben sacarlo). */
+export const BACKUP_KEEP = 180_000;
 
 export interface Bus {
   id: string;
@@ -40,6 +53,12 @@ export interface Bus {
   fixY: number;
   fixAt: number;
   age: number;
+  /** Hora del alimentador (s) de la última instantánea que lo trajo; 0 si solo viene del respaldo. */
+  seenT: number;
+  /** Hora (ms) de su última lectura del respaldo por ruta; 0 si nunca. */
+  backupAt: number;
+  /** Falta en la última instantánea del alimentador (se conserva un tiempo; ver `KEEP_S`). */
+  missing: boolean;
   stopId: string;
   seq: number;
   start: number;
@@ -161,8 +180,10 @@ export class Fleet {
   focusRoutes: Set<string> | null = null;
   selectedId: string | null = null;
   hoverId: string | null = null;
-  /** Estelas para toda la flota (si no, solo la ruta en foco y el seleccionado). */
+  /** Estelas de toda la flota (capa opcional). */
   trails = false;
+  /** Largo mínimo de una estela en metros a este zoom (30 px; lo pone la capa antes de `fill`). */
+  tailMin = 60;
   /** Buffer intercalado para la capa WebGL. */
   static readonly STRIDE = 15;
   /** Altura (m) sobre los puentes de la troncal, con la vista 3D (ver map/structures.ts). */
@@ -187,11 +208,21 @@ export class Fleet {
    * (el alimentador se regenera cada ~21 s y se consulta cada 15 s; a veces se detiene un minuto).
    * Para no quedarse sin lecturas justo antes de que llegue la siguiente, cubre el intervalo entre
    * lecturas (mediana de `gaps`) más lo que tardan en llegar (máximo de `delays`): ~43 s con el
-   * alimentador de hoy, lo mismo que el modelo anterior al final de cada tramo. Cambia despacio (±10 %).
-   * Una pausa más larga la absorbe el retraso propio de cada bus (`off`).
+   * alimentador regenerándose cada 21 s; hasta 2 min con el de noviembre de 2026 (ver `lagCap`). Cambia
+   * despacio (±10 %). Una pausa más larga la absorbe el retraso propio de cada bus (`off`).
    */
   lag = 40_000;
   private lagTarget = 40_000;
+  /**
+   * Topes del retraso (ms): del total, de lo que aporta el intervalo entre lecturas y del retraso propio
+   * de un bus antes de reiniciarlo en su lectura. Hasta el 6 nov. 2026 el alimentador se regeneraba cada
+   * ~21 s y bastaban 60 s; desde el 9 nov. trae lecturas de 40–90 s de antigüedad cada 50–65 s. Con el
+   * tope en 60 s cada bus acumulaba el resto como retraso propio (el mismo atraso, ~106 s, pero con
+   * paradas en espera de datos el 18 % del tiempo y 10 reinicios por bus y hora); con 120 s: 6 % y 4.
+   */
+  lagCap = 120_000;
+  gapCap = 60_000;
+  offCap = 90_000;
   /** Movimiento entre lecturas (ver `Motion`) y duración del deslizamiento del modo directo (0 con
    * «reducir movimiento» del sistema: va de una vez). */
   motion: Motion = 'continuo';
@@ -231,7 +262,7 @@ export class Fleet {
       }
       if (this.delays.length) {
         const g = this.gaps.length ? [...this.gaps].sort((a, b) => a - b)[this.gaps.length >> 1] : 20_000;
-        this.lagTarget = Math.min(60_000, Math.max(8_000, Math.min(g, 40_000) + Math.max(...this.delays) + 1000));
+        this.lagTarget = Math.min(this.lagCap, Math.max(8_000, Math.min(g, this.gapCap) + Math.max(...this.delays) + 1000));
         if (!this.lastFeedAt) this.lag = this.lagTarget;
       }
     }
@@ -244,9 +275,59 @@ export class Fleet {
     }
     this.feedTime = d.t;
     const seen = new Set<string>();
-    for (let i = 0; i < d.n; i++) seen.add(this.upsert(d, i, now));
-    for (const id of this.buses.keys()) if (!seen.has(id)) this.buses.delete(id);
+    for (let i = 0; i < d.n; i++) seen.add(this.upsert(d, i, now, false));
+    let byLabel: Map<string, string> | null = null;
+    for (const [id, b] of this.buses) {
+      if (seen.has(id)) continue;
+      // Solo del respaldo por ruta: si el alimentador ya trae ese bus con su propio id, sobra este
+      // (la vista abierta pasa al id del alimentador); si no, dura lo que duren sus lecturas.
+      if (!b.seenT) {
+        if (b.label) {
+          if (!byLabel) { byLabel = new Map(); for (const sid of seen) { const o = this.buses.get(sid); if (o?.label) byLabel.set(o.label, sid); } }
+          const twin = byLabel.get(b.label);
+          if (twin) { this.replace(id, twin); continue; }
+        }
+        if (now - b.backupAt > BACKUP_KEEP) this.buses.delete(id);
+        continue;
+      }
+      // Con lecturas recientes del respaldo, el respaldo manda.
+      if (b.backupAt && now - b.backupAt <= BACKUP_KEEP) continue;
+      // Falta en esta instantánea: su lectura envejece con el reloj del alimentador.
+      b.age = Math.max(b.age, d.t - Math.round(b.fixAt / 1000));
+      if (d.t - b.seenT > KEEP_S || b.age > DROP_AGE) this.buses.delete(id);
+      else b.missing = true;
+    }
     for (const f of this.listeners) f();
+  }
+
+  /** Aviso de que un bus cambió de id (el del respaldo pasó al del alimentador), para la vista abierta. */
+  onReplace: ((from: string, to: string) => void) | null = null;
+  private replace(from: string, to: string) {
+    this.buses.delete(from);
+    if (this.selectedId === from) this.selectedId = to;
+    if (this.hoverId === from) this.hoverId = to;
+    this.onReplace?.(from, to);
+  }
+
+  /** Buses de una ruta (por código) que el alimentador trae ahora: presentes en su última instantánea. */
+  reporting(code: string): number {
+    const c = code.toUpperCase();
+    let n = 0;
+    for (const b of this.buses.values()) if (b.seenT && !b.missing && b.age <= DROP_AGE && b.route?.code.toUpperCase() === c) n++;
+    return n;
+  }
+
+  /** Saca los buses del respaldo por ruta que ya no se actualizan (con el alimentador detenido no hay
+   * instantáneas que lo hagan). Los que también trae el alimentador siguen su regla. */
+  prune(now = Date.now()): boolean {
+    let cut = false;
+    for (const [id, b] of this.buses) {
+      if (b.seenT || now - b.backupAt <= BACKUP_KEEP || id === this.selectedId) continue;
+      this.buses.delete(id);
+      cut = true;
+    }
+    if (cut) for (const f of this.listeners) f();
+    return cut;
   }
 
   /**
@@ -255,7 +336,7 @@ export class Fleet {
    */
   merge(d: VehiclesV1, now = Date.now(), replaceCodes: string[] = []) {
     const got = new Set<string>();
-    for (let i = 0; i < d.n; i++) got.add(this.upsert(d, i, now));
+    for (let i = 0; i < d.n; i++) got.add(this.upsert(d, i, now, true));
     // Con `replaceCodes`, el respaldo reemplaza a esas rutas: sus buses que no vinieron en él salen.
     if (replaceCodes.length) {
       const codes = new Set(replaceCodes.map((c) => c.toUpperCase()));
@@ -265,7 +346,7 @@ export class Fleet {
   }
 
   /** Incorpora la lectura `i` de una instantánea; devuelve el id del bus. */
-  private upsert(d: VehiclesV1, i: number, now: number): string {
+  private upsert(d: VehiclesV1, i: number, now: number, backup: boolean): string {
     const id = d.id[i] || d.label[i];
     const lat = LAT0 + d.lat[i] / Q, lon = LON0 + d.lon[i] / Q;
     const x = lon * KX, y = lat * KY;
@@ -273,23 +354,28 @@ export class Fleet {
     const fixAt = (d.t - age) * 1000;
     const routeId = d.route[i];
     let b = this.buses.get(id);
+    // Presente en esta fuente: del alimentador (su hora) o del respaldo (la hora de llegada).
+    const mark = (x: Bus) => { if (backup) x.backupAt = now; else { x.seenT = d.t; x.missing = false; } };
     if (b && b.fixAt === fixAt && b.routeId === routeId) {
       b.age = age;
+      mark(b);
       return id; // misma lectura: el bus no ha reportado de nuevo
     }
     if (!b || b.routeId !== routeId) {
       const route = this.net.routes.get(routeId);
       const fresh: Bus = {
         id, label: d.label[i], plate: d.plate[i], routeId, route, path: this.net.paths.get(routeId), sys: route?.sys, kind: busKind(d.label[i], route?.code, route?.sys),
-        fixX: x, fixY: y, fixAt, age, stopId: d.stop[i], seq: d.seq[i], start: d.start[i],
+        fixX: x, fixY: y, fixAt, age, seenT: b?.seenT ?? 0, backupAt: b?.backupAt ?? 0, missing: false, stopId: d.stop[i], seq: d.seq[i], start: d.start[i],
         onPath: false, offPath: Infinity, sFix: 0, tt: [], ts: [], tm: [], off: 0, offAt: now, snap: true, suspect: null, glideFrom: 0, glideAt: 0, drawnAt: 0, v: 0, x0: x, y0: y, x1: x, y1: y, t0: now, t1: now,
         speed: null, hist: [], bornAt: b ? b.bornAt : now, pingAt: 0, seed: seedOf(id), x, y, hx: 1, hy: 0, s: 0,
       };
       if (b) { fresh.x = b.x; fresh.y = b.y; fresh.hx = b.hx; fresh.hy = b.hy; }
+      mark(fresh);
       this.place(fresh, x, y, fixAt, now, true);
       this.buses.set(id, fresh);
       return id;
     }
+    mark(b);
     b.label = d.label[i];
     b.plate = d.plate[i];
     b.age = age;
@@ -367,7 +453,7 @@ export class Fleet {
           const tauEq = d > 0 ? Math.min(tau, ahead / d) : 0;
           b.off = off + (tau - tauEq);
           b.offAt = now;
-          if (b.off > 90_000) { b.tt = [fixAt]; b.ts = [hit.s]; b.tm = [NaN]; b.off = 0; b.snap = true; return; }
+          if (b.off > this.offCap) { b.tt = [fixAt]; b.ts = [hit.s]; b.tm = [NaN]; b.off = 0; b.snap = true; return; }
         }
         const sNew = Math.max(hit.s, last); // ruido del GPS (< 30 m atrás): no retrocede
         T.push(fixAt);
@@ -556,7 +642,8 @@ export class Fleet {
    * Llena el buffer de la capa: [mx, my, hx, hy, r, g, b, alfa, tamaño, banderas, onda, rumbo trasero
    * (2), altura, pendiente] por bus, con los
    * atenuados primero y el seleccionado al final (se dibuja encima). Devuelve cuántos hay.
-   * Banderas: 1 atenuado, 2 lectura vieja, 4 seleccionado, 8 bajo el cursor, 16 estela, 32 de la ruta en foco.
+   * Banderas: 1 atenuado, 2 lectura vieja, 4 seleccionado, 8 bajo el cursor, 32 de la ruta en foco, 64
+   * llegando; por encima (×256), el largo de la estela en quinceavos (0: sin estela).
    */
   fill(now = Date.now(), only: 'all' | 'dim' | 'main' = 'all', box?: [number, number, number, number]): { data: Float32Array; count: number } {
     const S = Fleet.STRIDE;
@@ -608,6 +695,9 @@ export class Fleet {
       n++;
     };
     const inView = (b: Bus) => !box || (b.x >= box[0] && b.x <= box[2] && b.y >= box[1] && b.y <= box[3]);
+    // Lectura vieja: por el reloj del alimentador (el bus dejó de reportar) o por el de pared (el
+    // alimentador entero se detuvo: toda la flota se atenúa y el mapa mismo dice que los datos son viejos).
+    const old = (b: Bus) => b.age > STALE_AGE || now - b.fixAt > STALE_AGE * 1000;
     // Pasadas: atenuados abajo; luego zonal y alimentador; encima troncal, dual y cable.
     const major = (b: Bus) => b.sys === 'troncal' || b.sys === 'dual' || b.sys === 'cable';
     for (let pass = only === 'main' ? 1 : 0; pass < (only === 'dim' ? 1 : 3); pass++) {
@@ -619,12 +709,34 @@ export class Fleet {
         const dim = anyFocus && !inFocus(b);
         if ((pass === 0) !== dim) continue;
         if (pass > 0 && (pass === 2) !== major(b)) continue;
-        const trail = !dim && (this.trails || (anyFocus && inFocus(b))) && this.moving(b, now);
-        write(b, (dim ? 1 : 0) | (b.age > STALE_AGE ? 2 : 0) | (b.id === this.hoverId ? 8 : 0) | (trail ? 16 : 0) | (anyFocus && !dim ? 32 : 0) | (this.arriving.has(b.id) ? 64 : 0));
+        // Estela: solo con la capa «Estelas» y fuera del foco. El bus seleccionado y los de la ruta en
+        // foco van sobre el trazo de su ruta: en recta la estela no se veía y en curva salía derecha,
+        // cortando la esquina.
+        const tail = this.trails && !dim && !(anyFocus && inFocus(b)) ? this.tail(b, now) : 0;
+        write(b, (dim ? 1 : 0) | (old(b) ? 2 : 0) | (b.id === this.hoverId ? 8 : 0) | (anyFocus && !dim ? 32 : 0) | (this.arriving.has(b.id) ? 64 : 0) | (tail << 8));
       }
     }
-    if (selected && only !== 'dim') write(selected, 4 | (selected.age > STALE_AGE ? 2 : 0) | (this.moving(selected, now) ? 16 : 0));
+    if (selected && only !== 'dim') write(selected, 4 | (old(selected) ? 2 : 0));
     return { data: out, count: n };
+  }
+
+  /**
+   * Largo de la estela de un bus en movimiento, en quinceavos del largo completo: lo que el recorrido
+   * hacia atrás sigue derecho. La estela es una franja recta tras el bus; en una curva se acorta hasta
+   * donde el recorrido se aparta de esa recta (2,5 m), en vez de atravesar la esquina.
+   */
+  private tail(b: Bus, now: number): number {
+    if (!this.moving(b, now)) return 0;
+    if (!b.onPath || !b.path || b.path.size < 2) return 15;
+    const L = Math.max(this.tailMin, 54 * sizeOf(b));
+    let ok = 0;
+    for (let k = 1; k <= 5; k++) {
+      const p = b.path.pointAt(b.s - (L * k) / 5, this.rp0);
+      const dx = p[0] - b.x, dy = p[1] - b.y;
+      if (Math.abs(dx * b.hy - dy * b.hx) > 2.5 || dx * b.hx + dy * b.hy > 0) break;
+      ok = k;
+    }
+    return ok * 3;
   }
 
   /** Bus más cercano a un punto de pantalla, dentro de `radius` px. */
@@ -639,10 +751,11 @@ export class Fleet {
     return best;
   }
 
-  /** Conteo de buses por sistema (sin filtro). */
+  /** Conteo de buses por sistema (sin filtro): los que reportan ahora. Los que el alimentador omitió en
+   * su última instantánea se conservan en el mapa, pero no se cuentan (la mitad no vuelve: terminó). */
   counts(): Record<SystemKey, number> {
     const c: Record<SystemKey, number> = { troncal: 0, dual: 0, alimentador: 0, zonal: 0, cable: 0 };
-    for (const b of this.buses.values()) if (b.sys && b.age <= DROP_AGE) c[b.sys]++;
+    for (const b of this.buses.values()) if (b.sys && b.age <= DROP_AGE && !b.missing) c[b.sys]++;
     return c;
   }
 }
