@@ -11,7 +11,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "data": "python3 tools/build_data.py",
-    "test:datos": "python3 tools/test_busway.py && python3 tools/test_diff.py && python3 tools/test_fleet.py"
+    "test:datos": "python3 tools/test_busway.py && python3 tools/test_diff.py && python3 tools/test_fleet.py && python3 tools/test_app_db.py"
   },
   "engines": {
     "node": ">=22"

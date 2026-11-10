@@ -43,7 +43,7 @@ jobs:
           test -n "$GTFS_URL" || { echo "::error::Falta el secreto GTFS_URL"; exit 1; }
           test -n "$API_BASE" || { echo "::error::Falta la variable API_BASE"; exit 1; }
       - name: Pruebas de las herramientas de datos
-        run: python3 tools/test_busway.py && python3 tools/test_diff.py && python3 tools/test_fleet.py
+        run: python3 tools/test_busway.py && python3 tools/test_diff.py && python3 tools/test_fleet.py && python3 tools/test_app_db.py
       - name: Datos publicados (para comparar)
         env:
           SITE_URL: ${{ vars.SITE_URL }}
@@ -62,6 +62,35 @@ jobs:
         run: |
           curl -sfL --retry 3 -o "$RUNNER_TEMP/gtfs.zip" "$GTFS_URL"
           python3 tools/build_data.py "$RUNNER_TEMP/gtfs.zip"
+      - name: Paquete de la red para la app
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Base SQLite de la app de iPhone (contrato en transmi-app, docs/DATOS.md §1), en
+          # public/data/app/v1/. Si no pasa la validación, se vuelve a publicar el paquete anterior y se
+          # abre un aviso. Este paso nunca detiene la publicación de la página.
+          site="${SITE_URL:-https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/}"
+          app="${site%/}/data/app/v1"
+          mkdir -p public/data/app/v1 .cache
+          curl -sfL --retry 2 -o .cache/manifest-prev.json "$app/manifest.json" || rm -f .cache/manifest-prev.json
+          if python3 tools/build_app_db.py --gtfs "$RUNNER_TEMP/gtfs.zip" --prev .cache/manifest-prev.json && python3 tools/test_app_db.py; then
+            exit 0
+          fi
+          echo "::warning::El paquete de la app no pasó la validación: se publica el anterior"
+          rm -f public/data/app/v1/*
+          if [ -f .cache/manifest-prev.json ]; then
+            f=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["package"]["file"])' .cache/manifest-prev.json || true)
+            if [ -n "$f" ] && curl -sfL --retry 2 -o "public/data/app/v1/$f" "$app/$f"; then
+              cp .cache/manifest-prev.json public/data/app/v1/manifest.json
+            else
+              rm -f public/data/app/v1/*
+            fi
+          fi
+          title="Paquete de la app sin publicar"
+          body="La validación del paquete de la red para la app falló el $(date +%F); se publicó el anterior. Ver el registro del flujo."
+          n=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number' || true)
+          if [ -n "$n" ]; then gh issue comment "$n" --body "$body" || true; else gh issue create --title "$title" --body "$body" || true; fi
       - name: Series de flota nuevas
         env:
           API_BASE: ${{ vars.API_BASE }}
