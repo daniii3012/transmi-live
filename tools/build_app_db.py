@@ -374,6 +374,14 @@ def build(d: dict, db_path: Path, fare: int, transfer: int, gtfs_version: str | 
         'platforms': sum(1 for r in stop_rows if r[7] == 'vagon'),
         'legs': sum(len(v) for v in legs_of.values()),
     }
+    # Tipos de bus por serie y número de flota (data/curated/fleet.json): la ficha del bus dice si es
+    # articulado, biarticulado o dual. Entra en la huella.
+    fleet_json = None
+    fleet = ROOT / 'data' / 'curated' / 'fleet.json'
+    if fleet.exists():
+        f = json.loads(fleet.read_text())
+        fleet_json = json.dumps({k: f[k] for k in ('types', 'ranges', 'routes') if k in f}, ensure_ascii=False, separators=(',', ':'))
+        h.update(fleet_json.encode())
     content = h.hexdigest()[:16]
     feed = meta.get('feed') or {}
     m = {
@@ -382,13 +390,8 @@ def build(d: dict, db_path: Path, fare: int, transfer: int, gtfs_version: str | 
         'fare_cop': str(fare), 'transfer_s': str(transfer), 'bands': json.dumps(meta.get('bands')),
         'projection': json.dumps(meta.get('projection')), 'counts': json.dumps(counts), 'page_hash': meta.get('hash'),
     }
-    # Tipos de bus por serie y número de flota (data/curated/fleet.json): la ficha del bus dice si es
-    # articulado, biarticulado o dual.
-    fleet = ROOT / 'data' / 'curated' / 'fleet.json'
-    if fleet.exists():
-        f = json.loads(fleet.read_text())
-        m['fleet'] = json.dumps({k: f[k] for k in ('types', 'ranges', 'routes') if k in f}, ensure_ascii=False, separators=(',', ':'))
-        h.update(m['fleet'].encode())
+    if fleet_json:
+        m['fleet'] = fleet_json
     for k, v in sorted(m.items()):
         con.execute('INSERT INTO meta VALUES (?,?)', (k, v))
     con.execute("INSERT INTO search(search) VALUES('optimize')")
