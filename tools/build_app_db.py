@@ -382,6 +382,13 @@ def build(d: dict, db_path: Path, fare: int, transfer: int, gtfs_version: str | 
         'fare_cop': str(fare), 'transfer_s': str(transfer), 'bands': json.dumps(meta.get('bands')),
         'projection': json.dumps(meta.get('projection')), 'counts': json.dumps(counts), 'page_hash': meta.get('hash'),
     }
+    # Tipos de bus por serie y número de flota (data/curated/fleet.json): la ficha del bus dice si es
+    # articulado, biarticulado o dual.
+    fleet = ROOT / 'data' / 'curated' / 'fleet.json'
+    if fleet.exists():
+        f = json.loads(fleet.read_text())
+        m['fleet'] = json.dumps({k: f[k] for k in ('types', 'ranges', 'routes') if k in f}, ensure_ascii=False, separators=(',', ':'))
+        h.update(m['fleet'].encode())
     for k, v in sorted(m.items()):
         con.execute('INSERT INTO meta VALUES (?,?)', (k, v))
     con.execute("INSERT INTO search(search) VALUES('optimize')")
