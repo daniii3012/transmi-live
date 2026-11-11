@@ -45,6 +45,11 @@ export default defineConfig({
         navigateFallbackDenylist: [/\/icons\//, /\.(?:png|jpg|ico|svg|webmanifest|xml|json)$/],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         cleanupOutdatedCaches: true,
+        // Activación inmediata (R10.0): con `injectRegister: false` el complemento no la enciende aunque
+        // `registerType` sea `autoUpdate`, y la versión nueva quedaba en espera hasta cerrar todas las
+        // pestañas y la app instalada. Así se instala, toma la página y `registerSW` recarga.
+        skipWaiting: true,
+        clientsClaim: true,
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.includes('/data/') && url.pathname.endsWith('.json'),
