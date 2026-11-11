@@ -2,7 +2,7 @@
   import { app } from '../app/store.svelte';
   import { go } from '../app/router';
   import { ctl } from '../app/instance';
-  import { SYSTEM_ORDER, type SystemKey } from '../domain/types';
+  import { FILTER_GROUPS, FILTER_KEYS, classOf, groupState, toggle as toggleKeys, solo as soloKeys, type FilterKey, type FilterGroup, type GroupKey } from '../domain/filter';
   import { fmtNum } from '../domain/time';
   import { busesByRoute, arrivals } from './derive';
   import { favorites } from '../app/favorites.svelte';
@@ -32,10 +32,16 @@
     const last = list.map((e) => e.date).sort().at(-1)!;
     return { when: new Date(`${last}T12:00:00-05:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }), parts };
   });
-  const total = $derived(SYSTEM_ORDER.reduce((a, k) => a + app.counts[k], 0));
-  const visible = $derived(SYSTEM_ORDER.reduce((a, k) => a + (app.hidden.includes(k) ? 0 : app.counts[k]), 0));
-  const max = $derived(Math.max(1, ...SYSTEM_ORDER.map((k) => app.counts[k])));
-  const systems = $derived(net ? SYSTEM_ORDER.map((k) => net.systems.find((s) => s.key === k)!).filter(Boolean) : []);
+  const total = $derived(FILTER_KEYS.reduce((a, k) => a + app.counts[k], 0));
+  const visible = $derived(FILTER_KEYS.reduce((a, k) => a + (app.hidden.includes(k) ? 0 : app.counts[k]), 0));
+  /** Sistemas (R10.2): cuatro grupos, con su nombre y color del paquete de la red. */
+  const groups = $derived(net ? FILTER_GROUPS.map((g) => {
+    const sys = net.systems.find((s) => s.key === g.sys);
+    const classes = g.classes.map((c) => ({ ...c, color: net.systems.find((s) => s.key === c.sys)?.color ?? sys?.color ?? '#8b939e', n: app.counts[c.key] }));
+    return { g, name: sys?.name ?? g.classes[0].name, color: sys?.color ?? '#8b939e', classes, n: classes.reduce((a, c) => a + c.n, 0), shown: classes.reduce((a, c) => a + (app.hidden.includes(c.key) ? 0 : c.n), 0) };
+  }) : []);
+  const max = $derived(Math.max(1, ...groups.map((x) => x.n)));
+  let open = $state<GroupKey[]>([]);
 
   const top = $derived.by(() => {
     void app.version;
@@ -45,7 +51,8 @@
     const byCode = new Map<string, { id: string; n: number }>();
     for (const [rid, list] of by) {
       const r = net.routes.get(rid);
-      if (!r || app.hidden.includes(r.sys)) continue;
+      const cls = r ? classOf(r.sys, r.sub) : undefined;
+      if (!r || (cls && app.hidden.includes(cls))) continue;
       const key = `${r.sys}:${r.code}`;
       const cur = byCode.get(key);
       if (!cur) byCode.set(key, { id: rid, n: list.length });
@@ -83,19 +90,19 @@
     return places.slice(0, 6).map((p) => ({ ...p, next: app.patternsReady ? arrivals(net, app.fleet!, app.version, p.stopIds, p.routes, app.now)[0] : undefined }));
   });
 
-  function toggle(k: SystemKey) {
-    const h = new Set(app.hidden);
-    if (h.has(k)) h.delete(k); else h.add(k);
-    // Ocultarlos todos no tiene sentido: el último visible no se apaga.
-    if (h.size === SYSTEM_ORDER.length) return;
-    app.hidden = [...h];
+  // Ocultarlos todos no tiene sentido: lo último visible no se apaga (`toggle` devuelve null).
+  function toggle(keys: FilterKey[]) {
+    const h = toggleKeys(app.hidden, keys);
+    if (!h) return;
+    app.hidden = h;
+    ctl?.setHidden(h);
+  }
+  function solo(keys: FilterKey[]) {
+    app.hidden = soloKeys(app.hidden, keys);
     ctl?.setHidden(app.hidden);
   }
-  function solo(k: SystemKey) {
-    const all = SYSTEM_ORDER.filter((x) => x !== k);
-    app.hidden = app.hidden.length === all.length && !app.hidden.includes(k) ? [] : all;
-    ctl?.setHidden(app.hidden);
-  }
+  const keysOf = (g: FilterGroup) => g.classes.map((c) => c.key);
+  function expand(k: GroupKey) { open = open.includes(k) ? open.filter((x) => x !== k) : [...open, k]; }
 </script>
 
 <div class="home">
@@ -175,16 +182,39 @@
   <section class="block">
     <div class="head"><span class="label">Sistemas</span><span class="label hint">mostrar u ocultar</span></div>
     <ul class="systems">
-      {#each systems as s (s.key)}
-        {@const n = app.counts[s.key]}
-        {@const off = app.hidden.includes(s.key)}
+      {#each groups as x (x.g.key)}
+        {@const st = groupState(app.hidden, x.g)}
+        {@const many = x.classes.length > 1}
+        {@const isOpen = many && open.includes(x.g.key)}
         <li>
-          <button class="sys" class:off onclick={() => toggle(s.key)} ondblclick={() => solo(s.key)} aria-pressed={!off}>
-            <span class="swatch" style:background={s.color}></span>
-            <span class="name">{s.name}</span>
-            <span class="bar"><span style:width="{(n / max) * 100}%" style:background={s.color}></span></span>
-            <span class="n num">{fmtNum(n)}</span>
-          </button>
+          <div class="grp">
+            <button class="sys" class:off={st === 'off'} onclick={() => toggle(keysOf(x.g))} ondblclick={() => solo(keysOf(x.g))} aria-pressed={st === 'on' ? true : st === 'off' ? false : 'mixed'} title={st === 'part' ? 'Visible en parte' : undefined}>
+              <span class="swatch" class:part={st === 'part'} style:--c={x.color}></span>
+              <span class="name">{x.name}</span>
+              <span class="bar"><span style:width="{(x.shown / max) * 100}%" style:background={x.color}></span></span>
+              <span class="n num">{fmtNum(x.shown)}</span>
+            </button>
+            {#if many}
+              <button class="more" class:open={isOpen} onclick={() => expand(x.g.key)} aria-expanded={isOpen} aria-label={`Clases de ${x.name}`}>
+                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.4" /></svg>
+              </button>
+            {:else}<span class="more" aria-hidden="true"></span>{/if}
+          </div>
+          {#if isOpen}
+            <ul class="classes">
+              {#each x.classes as c (c.key)}
+                {@const off = app.hidden.includes(c.key)}
+                <li>
+                  <button class="sys cls" class:off onclick={() => toggle([c.key])} ondblclick={() => solo([c.key])} aria-pressed={!off}>
+                    <span class="swatch" style:--c={c.color}></span>
+                    <span class="name">{c.name}</span>
+                    <span class="bar"><span style:width="{(c.n / max) * 100}%" style:background={c.color}></span></span>
+                    <span class="n num">{fmtNum(c.n)}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -257,7 +287,19 @@
     text-align: left;
     transition: opacity var(--t-out);
   }
-  .swatch { width: 10px; height: 10px; }
+  .swatch { width: 10px; height: 10px; background: var(--c); }
+  .swatch.part { background: linear-gradient(135deg, var(--c) 50%, transparent 50%); box-shadow: inset 0 0 0 1px var(--c); }
+  .grp { display: grid; grid-template-columns: 1fr 28px; border-bottom: 1px solid var(--line-1); }
+  .grp .sys { border-bottom: 0; }
+  .more { display: flex; align-items: center; justify-content: center; color: var(--fg-2); }
+  button.more:hover { color: var(--fg-0); }
+  .more svg { transition: transform 200ms var(--ease-out); }
+  .more.open svg { transform: rotate(180deg); }
+  .classes { display: grid; border-bottom: 1px solid var(--line-1); }
+  .sys.cls { height: 32px; border-bottom: 0; padding-left: var(--sp-4); grid-template-columns: 8px 88px 1fr 52px; margin-right: 28px; width: calc(100% - 28px); }
+  .sys.cls .swatch { width: 8px; height: 8px; }
+  .sys.cls .name { font-size: var(--fs-small); color: var(--fg-1); }
+  @media (pointer: coarse) { .grp { grid-template-columns: 1fr 44px; } .sys.cls { margin-right: 44px; width: calc(100% - 44px); height: 40px; } }
   .name { font-size: var(--fs-body); }
   .bar { height: 2px; background: var(--line-1); position: relative; }
   .bar span { position: absolute; left: 0; top: 0; bottom: 0; transition: width 600ms var(--ease-out); }

@@ -1,5 +1,6 @@
 import type { Network } from '../data/network';
 import type { Route, SystemKey } from '../domain/types';
+import { classOf, type FilterKey } from '../domain/filter';
 import { KX, KY, type MetricPath } from '../domain/geo';
 import { LAT0, LON0, Q, type VehiclesV1 } from './api';
 import { busKind, type BusKind } from '../domain/fleetTypes';
@@ -171,7 +172,14 @@ export class Fleet {
   feedTime = 0;
   /** Intervalo esperado entre lecturas nuevas (ms), estimado de las instantáneas recibidas. */
   interval = 20_000;
-  hidden = new Set<SystemKey>();
+  /** Clases ocultas por el filtro de sistemas (R10.2). */
+  hidden = new Set<FilterKey>();
+  /** Si el filtro oculta este bus. */
+  isHidden(b: Bus): boolean {
+    if (!this.hidden.size || !b.sys) return false;
+    const c = classOf(b.sys, b.route?.sub);
+    return !!c && this.hidden.has(c);
+  }
   focusRoute: string | null = null;
   /** Toda la flota atenuada (capa de velocidad encendida). */
   allDim = false;
@@ -704,7 +712,7 @@ export class Fleet {
     for (let pass = only === 'main' ? 1 : 0; pass < (only === 'dim' ? 1 : 3); pass++) {
       for (const b of this.buses.values()) {
         if (b.age > DROP_AGE) continue;
-        if (b.sys && this.hidden.has(b.sys)) continue;
+        if (this.isHidden(b)) continue;
         if (b.id === this.selectedId) { selected = b; continue; }
         if (!inView(b)) continue;
         const dim = anyFocus && !inFocus(b);
@@ -744,7 +752,7 @@ export class Fleet {
   pick(project: (lon: number, lat: number) => { x: number; y: number }, px: number, py: number, radius: number): Bus | null {
     let best: Bus | null = null, bd = radius * radius;
     for (const b of this.buses.values()) {
-      if (b.age > DROP_AGE || (b.sys && this.hidden.has(b.sys))) continue;
+      if (b.age > DROP_AGE || this.isHidden(b)) continue;
       const p = project(b.x / KX, b.y / KY);
       const d = (p.x - px) ** 2 + (p.y - py) ** 2;
       if (d < bd) { bd = d; best = b; }
@@ -754,9 +762,13 @@ export class Fleet {
 
   /** Conteo de buses por sistema (sin filtro): los que reportan ahora. Los que el alimentador omitió en
    * su última instantánea se conservan en el mapa, pero no se cuentan (la mitad no vuelve: terminó). */
-  counts(): Record<SystemKey, number> {
-    const c: Record<SystemKey, number> = { troncal: 0, dual: 0, alimentador: 0, zonal: 0, cable: 0 };
-    for (const b of this.buses.values()) if (b.sys && b.age <= DROP_AGE && !b.missing) c[b.sys]++;
+  counts(): Record<FilterKey, number> {
+    const c: Record<FilterKey, number> = { troncal: 0, dual: 0, alimentador: 0, cable: 0, 'zonal-urbano': 0, 'zonal-complementario': 0, 'zonal-especial': 0 };
+    for (const b of this.buses.values()) {
+      if (!b.sys || b.age > DROP_AGE || b.missing) continue;
+      const k = classOf(b.sys, b.route?.sub);
+      if (k) c[k]++;
+    }
     return c;
   }
 }

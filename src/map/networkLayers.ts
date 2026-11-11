@@ -1,6 +1,7 @@
 import type { Map as MLMap, GeoJSONSource, ExpressionSpecification } from 'maplibre-gl';
 import type { Network } from '../data/network';
 import type { SystemKey } from '../domain/types';
+import { classOf, type FilterKey } from '../domain/filter';
 import palette from '../../data/curated/palette.json';
 
 type FC = GeoJSON.FeatureCollection;
@@ -40,7 +41,7 @@ const ZONE_ORDER = 'ZSJPKMELGDCHFBA';
  */
 export class NetworkLayers {
   private focusId: string | null = null;
-  private hidden = new Set<SystemKey>();
+  private hidden = new Set<FilterKey>();
   private drawAnim = 0;
 
   private theme: Theme = 'dark';
@@ -399,7 +400,7 @@ export class NetworkLayers {
   }
 
   /** Sistemas ocultos por el filtro. */
-  setHidden(hidden: Set<SystemKey>) {
+  setHidden(hidden: Set<FilterKey>) {
     this.hidden = hidden;
     this.applyFilters();
   }
@@ -477,7 +478,7 @@ export class NetworkLayers {
   private applyFilters() {
     const m = this.map;
     const hidden = [...this.hidden];
-    const visible: ExpressionSpecification = ['!', ['in', ['get', 'sys'], ['literal', hidden]]];
+    const visible: ExpressionSpecification = ['!', ['in', ['get', 'cls'], ['literal', hidden]]];
     // La troncal se dibuja como corredores; aquí quedan el cable (siempre, es su propio corredor) y
     // los recorridos duales solo si la persona los pidió en Capas.
     const coreVisible: ExpressionSpecification = ['all', visible, this.dual ? ['!=', ['get', 'sys'], 'troncal'] : ['==', ['get', 'sys'], 'cable']];
@@ -501,7 +502,7 @@ export class NetworkLayers {
       const zi = r.zone ? ZONE_ORDER.indexOf(r.zone) + 1 : 0;
       features.push({
         type: 'Feature',
-        properties: { id: r.id, code: r.code, color: r.color, dcolor: mix(r.color, 0.5), sys: r.sys, z: (r.sys === 'troncal' ? 100 : r.sys === 'dual' ? 50 : 10) + zi },
+        properties: { id: r.id, code: r.code, color: r.color, dcolor: mix(r.color, 0.5), sys: r.sys, cls: classOf(r.sys, r.sub), z: (r.sys === 'troncal' ? 100 : r.sys === 'dual' ? 50 : 10) + zi },
         geometry: { type: 'LineString', coordinates: coords(path.lonlat) },
       });
     }
