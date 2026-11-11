@@ -2,6 +2,7 @@ import type { CustomLayerInterface, CustomRenderMethodInput, Map as MLMap } from
 import { Fleet, ORIGIN } from '../live/fleet';
 import { KX, KY } from '../domain/geo';
 import { BusBodies } from './busBodies';
+import { TrailBuilder, TRAIL_STRIDE } from './trails';
 
 /**
  * Buses en una capa WebGL propia (decisiones/005), revisión R2:
@@ -228,6 +229,31 @@ void main() {
   frag = acc;
 }`;
 
+// Estelas sobre el recorrido (trails.ts): tiras de triángulos con el borde suavizado.
+const TVS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_pos;
+layout(location=1) in vec4 a_color;
+layout(location=2) in float a_side;
+uniform mat4 u_matrix;
+out vec4 v_color;
+out float v_side;
+void main() {
+  gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
+  v_color = a_color;
+  v_side = a_side;
+}`;
+const TFS = `#version 300 es
+precision highp float;
+in vec4 v_color;
+in float v_side;
+out vec4 frag;
+void main() {
+  float a = v_color.a * (1.0 - smoothstep(0.45, 1.0, abs(v_side)));
+  if (a < 0.003) discard;
+  frag = vec4(v_color.rgb * a, a);
+}`;
+
 export class BusLayer implements CustomLayerInterface {
   readonly id: string;
   readonly type = 'custom' as const;
@@ -255,6 +281,11 @@ export class BusLayer implements CustomLayerInterface {
   private fleet: Fleet;
   private only: 'all' | 'dim' | 'main';
   private bodies = new BusBodies();
+  private trails = new TrailBuilder();
+  private tprog!: WebGLProgram;
+  private tvao!: WebGLVertexArrayObject;
+  private tbuf!: WebGLBuffer;
+  private tmatrix: WebGLUniformLocation | null = null;
 
   /** `main`: todos salvo los atenuados; `dim`: solo los atenuados (van debajo de la ruta en foco). */
   constructor(fleet: Fleet, only: 'all' | 'dim' | 'main' = 'all') {
@@ -274,12 +305,27 @@ export class BusLayer implements CustomLayerInterface {
       if (!g.getShaderParameter(s, g.COMPILE_STATUS)) throw new Error(g.getShaderInfoLog(s) ?? 'shader');
       return s;
     };
-    const p = g.createProgram()!;
-    g.attachShader(p, sh(g.VERTEX_SHADER, VS));
-    g.attachShader(p, sh(g.FRAGMENT_SHADER, FS));
-    g.linkProgram(p);
-    if (!g.getProgramParameter(p, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(p) ?? 'link');
+    const link = (vs: string, fs: string) => {
+      const q = g.createProgram()!;
+      g.attachShader(q, sh(g.VERTEX_SHADER, vs));
+      g.attachShader(q, sh(g.FRAGMENT_SHADER, fs));
+      g.linkProgram(q);
+      if (!g.getProgramParameter(q, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(q) ?? 'link');
+      return q;
+    };
+    const p = link(VS, FS);
     this.prog = p;
+    this.tprog = link(TVS, TFS);
+    this.tmatrix = g.getUniformLocation(this.tprog, 'u_matrix');
+    this.tvao = g.createVertexArray()!;
+    g.bindVertexArray(this.tvao);
+    this.tbuf = g.createBuffer()!;
+    g.bindBuffer(g.ARRAY_BUFFER, this.tbuf);
+    const TS = TRAIL_STRIDE * 4;
+    g.enableVertexAttribArray(0); g.vertexAttribPointer(0, 2, g.FLOAT, false, TS, 0);
+    g.enableVertexAttribArray(1); g.vertexAttribPointer(1, 4, g.FLOAT, false, TS, 8);
+    g.enableVertexAttribArray(2); g.vertexAttribPointer(2, 1, g.FLOAT, false, TS, 24);
+    g.bindVertexArray(null);
     for (const n of ['u_matrix', 'u_mpp', 'u_ppm', 'u_zf', 'u_el', 'u_time', 'u_motion', 'u_shadow', 'u_bodies', 'u_rim', 'u_light', 'u_mute']) this.u[n] = g.getUniformLocation(p, n);
     this.bodies.init(g);
 
@@ -327,19 +373,36 @@ export class BusLayer implements CustomLayerInterface {
     const bodies = pitch > 10 && zoom >= 16.3;
     const rise = Math.min(1, (zoom - 16.3) / 0.5) * Math.min(1, (pitch - 10) / 15);
     this.fleet.rearDirs = bodies;
-    // 30 px de estela en metros, a este zoom (para acortarla en las curvas).
-    this.fleet.tailMin = (30 * 40_075_016.686 * Math.cos((this.map.getCenter().lat * Math.PI) / 180)) / (512 * Math.pow(2, zoom));
     const { data, count } = this.fleet.fill(now, this.only, box);
+    const m = opts.defaultProjectionData.mainMatrix as unknown as ArrayLike<number>;
+    const [ox, oy] = ORIGIN;
+    const mm = new Float32Array(16);
+    for (let i = 0; i < 16; i++) mm[i] = m[i];
+    for (let r = 0; r < 4; r++) mm[12 + r] = m[r] * ox + m[4 + r] * oy + m[12 + r];
+    const worldPx = 512 * Math.pow(2, zoom);
+    const lat = (this.map.getCenter().lat * Math.PI) / 180;
+    // Estelas (debajo de los buses): la del seleccionado y, con la capa, la larga exposición.
+    if (this.only !== 'dim') {
+      const mpp = (40_075_016.686 * Math.cos(lat)) / worldPx;
+      const tr = this.trails.build(this.fleet, now, { mpp, exposure: this.fleet.trails, box });
+      if (tr.count > 2) {
+        g.useProgram(this.tprog);
+        g.uniformMatrix4fv(this.tmatrix, false, mm);
+        g.bindBuffer(g.ARRAY_BUFFER, this.tbuf);
+        g.bufferData(g.ARRAY_BUFFER, tr.data.subarray(0, tr.count * TRAIL_STRIDE), g.DYNAMIC_DRAW);
+        g.bindVertexArray(this.tvao);
+        g.enable(g.BLEND);
+        g.blendFunc(g.ONE, g.ONE_MINUS_SRC_ALPHA);
+        g.enable(g.DEPTH_TEST);
+        g.depthFunc(g.LEQUAL);
+        g.depthMask(false);
+        g.drawArrays(g.TRIANGLE_STRIP, 0, tr.count);
+        g.bindVertexArray(null);
+      }
+    }
     if (count) {
       g.useProgram(this.prog);
-      const m = opts.defaultProjectionData.mainMatrix as unknown as ArrayLike<number>;
-      const [ox, oy] = ORIGIN;
-      const mm = new Float32Array(16);
-      for (let i = 0; i < 16; i++) mm[i] = m[i];
-      for (let r = 0; r < 4; r++) mm[12 + r] = m[r] * ox + m[4 + r] * oy + m[12 + r];
       g.uniformMatrix4fv(this.u.u_matrix, false, mm);
-      const worldPx = 512 * Math.pow(2, zoom);
-      const lat = (this.map.getCenter().lat * Math.PI) / 180;
       g.uniform1f(this.u.u_mpp, 1 / worldPx);
       g.uniform1f(this.u.u_ppm, worldPx / (40_075_016.686 * Math.cos(lat)));
       g.uniform1f(this.u.u_zf, Math.min(1, Math.max(0, (zoom - 10) / 5)));
@@ -392,6 +455,9 @@ export class BusLayer implements CustomLayerInterface {
   onRemove() {
     clearTimeout(this.timer);
     this.gl.deleteProgram(this.prog);
+    this.gl.deleteProgram(this.tprog);
+    this.gl.deleteBuffer(this.tbuf);
+    this.gl.deleteVertexArray(this.tvao);
     this.gl.deleteBuffer(this.inst);
     this.gl.deleteVertexArray(this.vao);
   }

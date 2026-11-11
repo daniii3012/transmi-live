@@ -189,10 +189,8 @@ export class Fleet {
   focusRoutes: Set<string> | null = null;
   selectedId: string | null = null;
   hoverId: string | null = null;
-  /** Estelas de toda la flota (capa opcional). */
+  /** Larga exposición (capa opcional, R10.6): estelas de minutos sobre el recorrido (map/trails.ts). */
   trails = false;
-  /** Largo mínimo de una estela en metros a este zoom (30 px; lo pone la capa antes de `fill`). */
-  tailMin = 60;
   /** Buffer intercalado para la capa WebGL. */
   static readonly STRIDE = 15;
   /** Altura (m) sobre los puentes de la troncal, con la vista 3D (ver map/structures.ts). */
@@ -718,34 +716,45 @@ export class Fleet {
         const dim = anyFocus && !inFocus(b);
         if ((pass === 0) !== dim) continue;
         if (pass > 0 && (pass === 2) !== major(b)) continue;
-        // Estela: solo con la capa «Estelas» y fuera del foco. El bus seleccionado y los de la ruta en
-        // foco van sobre el trazo de su ruta: en recta la estela no se veía y en curva salía derecha,
-        // cortando la esquina.
-        const tail = this.trails && !dim && !(anyFocus && inFocus(b)) ? this.tail(b, now) : 0;
-        write(b, (dim ? 1 : 0) | (old(b) ? 2 : 0) | (b.id === this.hoverId ? 8 : 0) | (anyFocus && !dim ? 32 : 0) | (this.arriving.has(b.id) ? 64 : 0) | (tail << 8));
+        // Las estelas van aparte, sobre el recorrido (map/trails.ts, R10.5–R10.6).
+        write(b, (dim ? 1 : 0) | (old(b) ? 2 : 0) | (b.id === this.hoverId ? 8 : 0) | (anyFocus && !dim ? 32 : 0) | (this.arriving.has(b.id) ? 64 : 0));
       }
     }
     if (selected && only !== 'dim') write(selected, 4 | (old(selected) ? 2 : 0));
     return { data: out, count: n };
   }
 
-  /**
-   * Largo de la estela de un bus en movimiento, en quinceavos del largo completo: lo que el recorrido
-   * hacia atrás sigue derecho. La estela es una franja recta tras el bus; en una curva se acorta hasta
-   * donde el recorrido se aparta de esa recta (2,5 m), en vez de atravesar la esquina.
-   */
-  private tail(b: Bus, now: number): number {
-    if (!this.moving(b, now)) return 0;
-    if (!b.onPath || !b.path || b.path.size < 2) return 15;
-    const L = Math.max(this.tailMin, 54 * sizeOf(b));
-    let ok = 0;
-    for (let k = 1; k <= 5; k++) {
-      const p = b.path.pointAt(b.s - (L * k) / 5, this.rp0);
-      const dx = p[0] - b.x, dy = p[1] - b.y;
-      if (Math.abs(dx * b.hy - dy * b.hx) > 2.5 || dx * b.hx + dy * b.hy > 0) break;
-      ok = k;
+  /** Dónde iba el bus hace `ms` (abscisa sobre su recorrido): con el movimiento continuo, la misma
+   * curva que lo dibuja; con el directo, sus lecturas recientes. Nunca adelante de donde está. */
+  sAgo(b: Bus, now: number, ms: number): number {
+    if (!b.onPath) return b.s;
+    if (this.motion === 'continuo' && b.tt.length) return Math.min(b.s, this.curve(b, now - this.lag - this.offOf(b, now) - ms));
+    const h = b.hist, t = now - ms;
+    if (!h.length || t <= h[0].at) return Math.min(b.s, h.length ? h[0].s : b.s);
+    for (let k = h.length - 1; k > 0; k--) {
+      if (h[k - 1].at <= t) {
+        const a = h[k - 1], c = h[k];
+        const f = c.at > a.at ? Math.min(1, (t - a.at) / (c.at - a.at)) : 1;
+        return Math.min(b.s, a.s + (c.s - a.s) * f);
+      }
     }
-    return ok * 3;
+    return b.s;
+  }
+
+  /** Color de la ruta del bus (0–1). */
+  rgbOf(b: Bus): [number, number, number] { return this.colorOf(b); }
+
+  /** Buses para la larga exposición: en marcha, sobre su recorrido, visibles y sin atenuar. */
+  *exposureBuses(now: number, box?: [number, number, number, number]): Generator<Bus> {
+    const focus = this.focusRoute, set = this.focusRoutes, fb = this.focusBuses;
+    const anyFocus = !!fb || !!set || !!focus || this.allDim;
+    for (const b of this.buses.values()) {
+      if (!b.onPath || !b.path || b.age > STALE_AGE || this.isHidden(b)) continue;
+      if (box && (b.x < box[0] || b.x > box[2] || b.y < box[1] || b.y > box[3])) continue;
+      if (anyFocus && !(fb ? fb.has(b.id) : set ? set.has(b.routeId) : focus ? b.routeId === focus : false)) continue;
+      if (now - b.drawnAt > 1000) continue; // fuera de la vista: no se ha calculado
+      yield b;
+    }
   }
 
   /** Bus más cercano a un punto de pantalla, dentro de `radius` px. */

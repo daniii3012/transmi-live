@@ -8,7 +8,7 @@
     { key: 'stops', name: 'Paraderos', note: 'desde zoom de calle' },
     { key: 'metro', name: 'Metro · Línea 1', note: 'en obra · vista previa' },
     { key: 'obras', name: 'Troncales en obra', note: 'Av. 68, Séptima, Soacha, Calle 13 · vista previa' },
-    { key: 'trails', name: 'Estelas de toda la flota', note: 'rastro de los buses en marcha' },
+    { key: 'trails', name: 'Larga exposición', note: 'lo recorrido en 3 min · sistemas visibles' },
   ];
 </script>
 

@@ -423,6 +423,7 @@ export class NetworkLayers {
       return;
     }
     this.focusColor = r.color;
+    this.traveled = null;
     src.setData({
       type: 'FeatureCollection',
       features: [{ type: 'Feature', properties: { color: r.color }, geometry: { type: 'LineString', coordinates: coords(path.lonlat) } }],
@@ -464,6 +465,21 @@ export class NetworkLayers {
       if (k < 1) this.drawAnim = requestAnimationFrame(step);
     };
     step();
+  }
+
+  /**
+   * Con un bus abierto (R10.5): lo que su ruta ya recorrió va más apagado que lo que le falta. `p` es
+   * la fracción del recorrido (0–1); `null` vuelve al trazo entero.
+   */
+  private traveled: number | null = null;
+  setTraveled(p: number | null) {
+    if (!this.focusId) { this.traveled = null; return; }
+    if (p === null ? this.traveled === null : this.traveled !== null && Math.abs(p - this.traveled) < 0.0015) return;
+    this.traveled = p;
+    const c = this.focusColor;
+    if (p === null || p <= 0.001) { this.map.setPaintProperty('route-focus', 'line-gradient', gradient(c, 1)); return; }
+    const q = Math.min(0.999, p), d = mix(c, 0.38);
+    this.map.setPaintProperty('route-focus', 'line-gradient', ['interpolate', ['linear'], ['line-progress'], 0, d, q, d, Math.min(1, q + 0.0008), c, 1, c] as ExpressionSpecification);
   }
 
   /** Con una ruta en foco, las estaciones donde no para se atenúan. */
