@@ -14,9 +14,9 @@ import { BusBodies } from './busBodies';
  *    El paso entre punto y huella es un morfismo de distancias con signo, no un fundido.
  *  - Separación del trazado: halo del color del fondo y una sombra corta; la línea de la ruta no
  *    tapa al bus aunque sea del mismo color.
- *  - Ondas breves y lentas (HIG: «movimiento breve y preciso», nada en lo que pasa cada rato): solo
- *    el bus seguido, los próximos en llegar a la estación abierta y, al llegar una lectura, los de la
- *    ruta en foco. Nada con `prefers-reduced-motion`.
+ *  - Ondas breves, lentas y redondas (HIG: «movimiento breve y preciso», nada en lo que pasa cada
+ *    rato): solo el bus seguido, los próximos en llegar a la estación abierta y, al llegar una lectura,
+ *    los de la ruta en foco. Nada con `prefers-reduced-motion`.
  *  - Prueba de profundidad compartida: edificios y viaducto los tapan.
  *
  * Rendimiento: cuadros según el zoom (a escala de ciudad un bus avanza menos de un píxel por cuadro) y
@@ -72,6 +72,8 @@ void main() {
   float front = max(r, foot.x) + pad;
   float back = max(r, foot.x) + max(pad, tail);
   float side = max(r, foot.y) + pad;
+  // Las ondas son redondas (R10.1): el cuadro también las cubre a los lados del bus.
+  if (pad > 6.0) side = max(side, max(r, foot.x) + pad);
   float lx = a_corner.x < 0.0 ? -back : front;
   float ly = a_corner.y * side;
   vec2 fwd = normalize(a_dir);
@@ -187,16 +189,22 @@ void main() {
   }
   float w = 0.0;
   if (u_motion > 0.5 && !dim) {
+    // Ondas redondas (R10.1, variante elegida por Daniel): círculos centrados en el bus que nacen a la
+    // altura de su cuerpo y crecen hasta pasar sus extremos. De lejos (punto) es el mismo círculo de
+    // antes; de cerca ya no toman la forma del bus.
+    float rin = mix(v_r, v_foot.y, u_el), span = mix(v_r, v_foot.x, u_el) - rin;
+    float wd = length(v_local) - rin;
+    float wa = max(fwidth(wd), 0.35);
     if (selected) {
       float k = fract(u_time / 3.2);
-      w = ring(d, halo + 3.0 + 15.0 * (1.0 - pow(1.0 - k, 3.0)), 1.1, aa) * 0.34 * pow(1.0 - k, 2.0);
+      w = ring(wd, halo + 3.0 + (15.0 + span) * (1.0 - pow(1.0 - k, 3.0)), 1.1, wa) * 0.34 * pow(1.0 - k, 2.0);
     } else if (arriving) {
       float k = fract(u_time / 3.6 + fract(v_color.r * 7.0) * 0.5);
-      w = ring(d, halo + 2.0 + 10.0 * (1.0 - pow(1.0 - k, 3.0)), 1.0, aa) * 0.28 * pow(1.0 - k, 2.0);
+      w = ring(wd, halo + 2.0 + (10.0 + span) * (1.0 - pow(1.0 - k, 3.0)), 1.0, wa) * 0.28 * pow(1.0 - k, 2.0);
     }
     if (v_ping >= 0.0 && v_ping < 1.0) {
       float k = v_ping;
-      w = max(w, ring(d, halo + 2.0 + 12.0 * (1.0 - pow(1.0 - k, 3.0)), 1.0, aa) * 0.3 * pow(1.0 - k, 2.0));
+      w = max(w, ring(wd, halo + 2.0 + (12.0 + span) * (1.0 - pow(1.0 - k, 3.0)), 1.0, wa) * 0.3 * pow(1.0 - k, 2.0));
     }
   }
   if (w > 0.0) {
