@@ -55,6 +55,8 @@ export class Tour {
   private reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   private lastFrame = 0;
   private last: string | null = null;
+  /** Ejes de cada troncal (metros) con su rectángulo, para saber qué buses van por ella. */
+  private axes = new Map<string, { pts: Float64Array; box: [number, number, number, number] }[]>();
 
   constructor(
     private map: MLMap,
@@ -68,7 +70,43 @@ export class Tour {
 
   start() {
     this.stopped = false;
+    if (!this.axes.size) {
+      for (const seg of this.net.corridors) {
+        if (!seg.z || seg.c.length < 2) continue;
+        const pts = new Float64Array(seg.c.length * 2);
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        seg.c.forEach(([lo, la], i) => { const x = lo * KX, y = la * KY; pts[2 * i] = x; pts[2 * i + 1] = y; x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); });
+        let l = this.axes.get(seg.z);
+        if (!l) this.axes.set(seg.z, (l = []));
+        l.push({ pts, box: [x0 - 60, y0 - 60, x1 + 60, y1 + 60] });
+      }
+    }
     this.next();
+  }
+
+  /** Buses troncales y duales que van ahora por la troncal `z` (a menos de 60 m de su eje), sea cual sea
+   * la zona de su ruta: una ruta de la Calle 26 puede ir por la Autonorte. */
+  private busesOn(z: string): Bus[] {
+    const axes = this.axes.get(z);
+    if (!axes) return [];
+    const out: Bus[] = [];
+    for (const b of this.fleet.buses.values()) {
+      if ((b.sys !== 'troncal' && b.sys !== 'dual') || b.missing || b.age > 300 || this.fleet.isHidden(b)) continue;
+      const x = b.fixX, y = b.fixY;
+      let on = false;
+      for (const a of axes) {
+        if (x < a.box[0] || x > a.box[2] || y < a.box[1] || y > a.box[3]) continue;
+        const p = a.pts;
+        for (let i = 2; i < p.length && !on; i += 2) {
+          const ax = p[i - 2], ay = p[i - 1], dx = p[i] - ax, dy = p[i + 1] - ay, l2 = dx * dx + dy * dy;
+          const t = l2 > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+          on = (ax + dx * t - x) ** 2 + (ay + dy * t - y) ** 2 < 3600;
+        }
+        if (on) break;
+      }
+      if (on) out.push(b);
+    }
+    return out;
   }
 
   stop() {
@@ -86,9 +124,10 @@ export class Tour {
 
   /** Pasos posibles ahora, barajados; el primero no repite el último de la vuelta anterior. */
   private plan(): Step[] {
-    const with_ = new Set<string>();
-    for (const b of this.fleet.buses.values()) if (b.sys === 'troncal' && b.route?.zone && !b.missing && b.age < 300 && !this.fleet.isHidden(b)) with_.add(b.route.zone);
-    const letters = Object.keys(this.zones).filter((z) => with_.size === 0 || with_.has(z));
+    // Troncales con eje en el mapa y, si hay buses en vivo, con alguno sobre ella ahora.
+    const live = [...this.fleet.buses.values()].some((b) => b.sys === 'troncal' && !b.missing && b.age < 300);
+    const letters = Object.keys(this.zones).filter((z) => this.axes.has(z) && (!live || this.busesOn(z).length > 0));
+    const with_ = live ? new Set(letters) : new Set<string>();
     const out: Step[] = [{ kind: 'overview', key: '' }, ...letters.map((z) => ({ kind: 'corridor' as const, key: z }))];
     if (with_.size) out.push({ kind: 'station', key: '' }, { kind: 'slow', key: '' });
     const portals = [...this.net.stations.values()].filter((s) => s.kind === 'portal' && !s.closed);
@@ -151,9 +190,9 @@ export class Tour {
   /** Una troncal: sigue a uno de sus buses en movimiento; sin buses, la troncal entera. */
   private corridor(z: string, ms: number) {
     const zinfo = { letter: z, ...this.zones[z] };
-    let buses = 0;
-    for (const b of this.fleet.buses.values()) if (b.sys === 'troncal' && !b.missing && b.age <= 300 && b.route?.zone === z) buses++;
-    const bus = this.pickBus(z);
+    const on = this.busesOn(z);
+    const buses = on.length;
+    const bus = this.pickBus(on);
     const leg = bus?.route && bus.onPath ? legAtS(bus.route, bus.sFix) : null;
     this.publish('corridor', ms, {
       title: `Troncal ${zinfo.name}`, color: zinfo.color, zone: zinfo, buses,
@@ -228,12 +267,13 @@ export class Tour {
     });
   }
 
-  /** Un bus de la troncal en movimiento, lejos de las puntas de su recorrido (que no termine en el paso). */
-  private pickBus(z: string): Bus | null {
+  /** De los buses sobre la troncal, uno en movimiento y lejos del final de su recorrido (que no termine
+   * en el paso). */
+  private pickBus(on: Bus[]): Bus | null {
     let best: Bus | null = null, score = -Infinity;
-    for (const b of this.fleet.buses.values()) {
+    for (const b of on) {
       const r = b.route;
-      if (b.sys !== 'troncal' || r?.zone !== z || !b.onPath || b.missing || b.age > 150) continue;
+      if (!r || !b.onPath || b.age > 150) continue;
       const left = r.len - b.sFix;
       if (left < 1500) continue;
       const s = (b.speed ?? 0) * 2 + Math.min(left, 6000) / 1000 + Math.random() * 3;

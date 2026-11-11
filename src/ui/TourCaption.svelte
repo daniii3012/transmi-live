@@ -30,7 +30,7 @@
     {#if t.kind === 'corridor' && t.zone}
       <h2><span class="chip" style:background={t.zone.color}></span>Troncal {t.zone.name}</h2>
       <p class="dim">
-        <span class="num">{fmtNum(t.buses)}</span> {t.buses === 1 ? 'bus troncal en vía' : 'buses troncales en vía'}
+        <span class="num">{fmtNum(t.buses)}</span> {t.buses === 1 ? 'bus va por ella' : 'buses van por ella'}
         {#if t.bus}· siguiendo el <span class="code num" style:background={t.bus.color}>{t.bus.code}</span> hacia {t.bus.dest} <span class="faint">· bus <span class="num">{t.bus.label}</span></span>{:else}<span class="faint"> · sin buses en vivo para seguir</span>{/if}
       </p>
     {:else}
