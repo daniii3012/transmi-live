@@ -5,7 +5,7 @@
   import StatusLine from './StatusLine.svelte';
   import Brand from './Brand.svelte';
 
-  /** Rótulo del recorrido automático (app/tour.ts): qué troncal, cuántos buses, a quién se sigue. */
+  /** Rótulo del recorrido automático (app/tour.ts): qué se muestra, con sus cifras de ahora. */
   const t = $derived(app.tour);
   let now = $state(performance.now());
   $effect(() => {
@@ -15,7 +15,6 @@
     return () => cancelAnimationFrame(raf);
   });
   const progress = $derived(t ? Math.min(1, (now - t.startedAt) / t.duration) : 0);
-  const total = $derived(Object.values(app.counts).reduce((a, b) => a + b, 0));
 </script>
 
 <aside class="caption" class:narrow={app.narrow} aria-live="polite">
@@ -28,15 +27,15 @@
   <StatusLine compact={app.narrow} />
   {#if t}
     <div class="step label">Recorrido · <span class="num">{t.step + 1}/{t.total}</span></div>
-    {#if t.kind === 'overview'}
-      <h2>Bogotá</h2>
-      <p class="dim"><span class="num">{fmtNum(total)}</span> buses en vía en todo el sistema</p>
-    {:else if t.zone}
+    {#if t.kind === 'corridor' && t.zone}
       <h2><span class="chip" style:background={t.zone.color}></span>Troncal {t.zone.name}</h2>
       <p class="dim">
         <span class="num">{fmtNum(t.buses)}</span> {t.buses === 1 ? 'bus troncal en vía' : 'buses troncales en vía'}
         {#if t.bus}· siguiendo el <span class="code num" style:background={t.bus.color}>{t.bus.code}</span> hacia {t.bus.dest} <span class="faint">· bus <span class="num">{t.bus.label}</span></span>{:else}<span class="faint"> · sin buses en vivo para seguir</span>{/if}
       </p>
+    {:else}
+      <h2>{#if t.color}<span class="chip" style:background={t.color}></span>{/if}{t.title}</h2>
+      <p class="dim">{t.detail}</p>
     {/if}
     <div class="bar" aria-hidden="true"><span style:width="{progress * 100}%"></span></div>
   {/if}

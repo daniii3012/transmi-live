@@ -2,6 +2,9 @@
   import { app } from '../app/store.svelte';
   import { ctl } from '../app/instance';
   let { bearing = 0 }: { bearing?: number } = $props();
+  // Siguiendo un bus, la brújula alterna norte arriba y rumbo arriba (R10.3).
+  const heading = $derived(app.following && app.followHeading);
+  const label = $derived(app.following ? (heading ? 'Norte arriba' : 'Rumbo arriba: el mapa gira con el bus') : 'Norte arriba');
 </script>
 
 <div class="controls" class:narrow={app.narrow} style:--sheet="{app.sheetHeight}px">
@@ -14,7 +17,7 @@
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 2 15 5.5 8 9 1 5.5Z" /><path d="M1 8.5 8 12l7-3.5" /><path d="M1 11.5 8 15l7-3.5" /></svg>
     </button>
     <button class="d3" class:on={app.threeD} onclick={() => ctl?.set3d(!app.threeD)} aria-pressed={app.threeD} aria-label="Vista 3D" title="Vista 3D">3D</button>
-    <button onclick={() => ctl?.north()} aria-label="Norte arriba" title="Norte arriba">
+    <button class:on={heading} onclick={() => ctl?.compass()} aria-label={label} title={label} aria-pressed={app.following ? heading : undefined}>
       <svg width="16" height="16" viewBox="0 0 16 16" style:transform="rotate({-bearing}deg)"><path d="M8 1 L11 8 H5 Z" fill="#e5483b" /><path d="M8 15 L5 8 H11 Z" fill="currentColor" /></svg>
     </button>
     <button onclick={() => ctl?.overview()} aria-label="Toda la ciudad" title="Toda la ciudad">

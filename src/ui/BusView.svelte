@@ -72,6 +72,8 @@
       at: app.now + e.seconds * 1000,
     }));
   });
+  /** Franja «a bordo» (R10.4): siguiendo el bus, la próxima parada y su tiempo, como la pantalla del bus. */
+  const aboard = $derived(app.following && itinerary.length ? itinerary[0] : null);
   const paceNote = $derived.by(() => {
     if (!bus || !pattern) return null;
     const t = bandTimes(pattern, bandIndex(bogotaSeconds(app.now)));
@@ -97,7 +99,11 @@
     {#if progress != null}
       <div class="progress" style:--c={route?.color}>
         <div class="track"><span style:width="{progress * 100}%"></span><i style:left="{progress * 100}%"></i></div>
-        <div class="ends label"><span>{route?.origin ?? ''}</span><span class="num">{Math.round(progress * 100)} %</span></div>
+        {#if aboard}
+          <div class="aboard" aria-live="polite"><span class="next"><span class="label">Próxima</span> {aboard.name}</span><span class="num">{etaText(aboard.seconds)} <span class="faint">estimado</span></span></div>
+        {:else}
+          <div class="ends label"><span>{route?.origin ?? ''}</span><span class="num">{Math.round(progress * 100)} %</span></div>
+        {/if}
       </div>
     {/if}
 
@@ -201,6 +207,10 @@
   .track span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c); transition: width 1s linear; }
   .track i { position: absolute; top: -4px; width: 2px; height: 10px; background: var(--fg-0); transform: translateX(-1px); transition: left 1s linear; }
   .ends { display: flex; justify-content: space-between; }
+  .aboard { display: flex; justify-content: space-between; gap: var(--sp-3); font-size: var(--fs-small); color: var(--fg-0); white-space: nowrap; }
+  .aboard .next { overflow: hidden; text-overflow: ellipsis; }
+  .aboard .label { color: var(--fg-2); margin-right: 4px; }
+  .aboard .faint { font-size: var(--fs-label); }
   .stats { margin: 0; display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line-1); }
   .stats div { padding: var(--sp-2) var(--sp-3); display: grid; gap: 2px; }
   .stats div + div { border-left: 1px solid var(--line-1); }

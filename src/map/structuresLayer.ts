@@ -142,13 +142,14 @@ layout(location=1) in vec3 a_norm;
 layout(location=2) in float a_mat;
 uniform mat4 u_matrix;
 uniform vec4 u_colors[${MATS}];
+uniform vec3 u_tint;   // luz según la hora (daylight.ts); blanco si está apagada
 out vec4 v_color;
 void main() {
   gl_Position = u_matrix * vec4(a_pos, 1.0);
   vec3 L = normalize(vec3(-0.35, -0.45, 0.82));
   float shade = 0.62 + 0.38 * max(dot(normalize(a_norm), L), 0.0);
   vec4 c = u_colors[int(a_mat + 0.5)];
-  v_color = vec4(c.rgb * shade, c.a);
+  v_color = vec4(c.rgb * shade * u_tint, c.a);
 }`;
 const FS = `#version 300 es
 precision mediump float;
@@ -424,6 +425,9 @@ export class StructuresLayer implements CustomLayerInterface {
     this.id = pass === 'solid' ? 'structures' : 'structures-glass';
   }
 
+  tint: [number, number, number] = [1, 1, 1];
+  setTint(t: [number, number, number]) { this.tint = t; this.map?.triggerRepaint(); }
+
   setTheme(theme: 'dark' | 'light') {
     STRUCT_THEMES[theme].forEach(([hex, a], i) => {
       for (let k = 0; k < 3; k++) this.colors[i * 4 + k] = parseInt(hex.slice(1 + 2 * k, 3 + 2 * k), 16) / 255;
@@ -462,7 +466,7 @@ export class StructuresLayer implements CustomLayerInterface {
     g.linkProgram(p);
     if (!g.getProgramParameter(p, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(p) ?? 'link');
     this.prog = p;
-    for (const n of ['u_matrix', 'u_colors']) this.u[n] = g.getUniformLocation(p, n);
+    for (const n of ['u_matrix', 'u_colors', 'u_tint']) this.u[n] = g.getUniformLocation(p, n);
   }
 
   /** Sube a la GPU los grupos nuevos o cambiados (en el cuadro, con el contexto listo). */
@@ -499,6 +503,7 @@ export class StructuresLayer implements CustomLayerInterface {
     for (let r = 0; r < 4; r++) mm[12 + r] = m[r] * ox + m[4 + r] * oy + m[12 + r];
     g.uniformMatrix4fv(this.u.u_matrix, false, mm);
     g.uniform4fv(this.u.u_colors, this.colors);
+    g.uniform3fv(this.u.u_tint, this.tint);
     g.enable(g.DEPTH_TEST);
     g.depthFunc(g.LEQUAL);
     if (this.pass === 'solid') {
@@ -546,5 +551,10 @@ export class Structures {
   setTheme(t: 'dark' | 'light') {
     this.solid.setTheme(t);
     this.glass.setTheme(t);
+  }
+
+  setTint(t: [number, number, number]) {
+    this.solid.setTint(t);
+    this.glass.setTint(t);
   }
 }

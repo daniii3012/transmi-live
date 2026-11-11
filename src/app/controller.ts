@@ -9,7 +9,8 @@ import { apiBase } from '../live/api';
 import { fetchAlerts } from '../live/alerts';
 import { KX, KY } from '../domain/geo';
 import { watch } from './watch.svelte';
-import type { Route, SystemKey } from '../domain/types';
+import type { Route } from '../domain/types';
+import type { FilterKey } from '../domain/filter';
 import { busCodes, legAtS } from '../domain/legs';
 import { app, saveLayers, savePrefs, loadPrefs } from './store.svelte';
 import { loadMetro, setMetro, setMetroTheme } from '../map/metroLayers';
@@ -17,6 +18,7 @@ import { buildObras, loadObras, setObras, setObrasTheme } from '../map/obras';
 import { Elevation } from '../map/structures';
 import { buildBridges, buildFootbridges, buildStations, buildTrenches, type Structures } from '../map/structuresLayer';
 import { buildMetro, type MetroStats } from '../map/metro3d';
+import { applyDaylight } from '../map/daylight';
 import { buildCable, loadCable } from '../map/cable3d';
 import { applyBaseTheme } from '../map/style';
 import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
@@ -82,6 +84,10 @@ export class Controller {
     addEventListener('pointerup', up, { passive: true });
     addEventListener('pointercancel', up, { passive: true });
     m.on('movestart', (e) => { if ((e as { originalEvent?: Event }).originalEvent) this.gesture = true; });
+    // Inactividad (R10.7): cualquier toque, movimiento del ratón, rueda o tecla en la página.
+    const touched = () => { this.lastInput = Date.now(); if (this.orbiting) this.stopOrbit(true); };
+    for (const ev of ['pointerdown', 'wheel', 'keydown', 'touchstart'] as const) addEventListener(ev, touched, { passive: true, capture: true });
+    addEventListener('pointermove', (e) => { if ((e as PointerEvent).pointerType === 'mouse') touched(); }, { passive: true, capture: true });
     m.on('moveend', () => {
       if (!this.gesture) return;
       this.gesture = false;
@@ -124,6 +130,10 @@ export class Controller {
       app.now = Date.now();
       this.pulse();
       watch.check(this.net, this.fleet, app.now);
+      this.traveled();
+      this.idleCheck();
+      // La luz según la hora cambia despacio: una vez por minuto basta.
+      if (ticks % 60 === 0) this.daylight();
       backup.tick(this.net, this.fleet, app.poll.feedTime, this.backupCodes(), app.now);
       // Buses del respaldo que ya no se actualizan (cada 5 s basta).
       if (++ticks % 5 === 0 && this.fleet.prune(app.now)) { app.counts = this.fleet.counts(); app.version++; this.map.triggerRepaint(); }
@@ -238,7 +248,7 @@ export class Controller {
   }
 
   /** Filtro por sistema: buses y trazados. */
-  setHidden(list: SystemKey[]) {
+  setHidden(list: FilterKey[]) {
     savePrefs({ hidden: list });
     this.fleet.hidden = new Set(list);
     this.layers.setHidden(this.fleet.hidden);
@@ -297,8 +307,10 @@ export class Controller {
     if (v.kind === 'route' && !this.net.routes.has(v.id)) {
       void this.net.loadChanges().then(() => { const r = this.net.resolveRoute(v.id); if (r && r !== v.id) go({ kind: 'route', id: r }, true); });
     }
+    if (this.keepNext) { keepCamera = true; this.keepNext = false; }
     app.view = v;
     if (!keepCamera) this.restored = false;
+    this.stopOrbit(false);
     // Recorrido automático: toma la cámara; cualquier otra vista lo termina.
     if (v.kind === 'tour') { this.startTour(); return; }
     this.endTour();
@@ -320,7 +332,7 @@ export class Controller {
       void this.net.loadZonalShapes().then(() => { if (this.fleet.focusRoute === focus) { this.layers.setFocus(null); this.layers.setFocus(focus); this.frame(v); } });
     }
     this.layers.setSelectedPlace(station);
-    if (v.kind !== 'bus') this.stopFollow();
+    if (v.kind !== 'bus') { this.stopFollow(); this.layers.setTraveled(null); }
     if (v.kind !== 'plan') this.showJourney(null, null, null);
     if (v.kind === 'plan') void this.net.loadPatterns().then(() => (app.patternsReady = true));
     this.map.triggerRepaint();
@@ -361,8 +373,13 @@ export class Controller {
       this.map.fitBounds(this.planBounds, { padding: this.padding(48, true), duration: 900, maxZoom: 16, absolutePadding: true });
     } else if (v.kind === 'bus') {
       const b = this.fleet.buses.get(v.id);
-      // 16,4: la huella del bus ya está formada (entre 15,2 y 16 el punto se transforma).
-      if (b) this.flyTo([b.x / KX, b.y / KY], Math.max(m.getZoom(), 16.4), opts);
+      // 16,4: la huella del bus ya está formada (entre 15,2 y 16 el punto se transforma). En 3D, el
+      // vuelo llega directo detrás del bus (R10.3).
+      if (b && app.threeD) {
+        this.flying = true;
+        m.flyTo({ center: [b.x / KX, b.y / KY], zoom: Math.max(m.getZoom(), 16.9), bearing: this.bearingOf(b), pitch: 62, offset: this.headingOffset(), padding, duration: opts.duration, essential: true, curve: 1.3 });
+        m.once('moveend', () => (this.flying = false));
+      } else if (b) this.flyTo([b.x / KX, b.y / KY], Math.max(m.getZoom(), 16.4), opts);
     }
   }
 
@@ -474,25 +491,83 @@ export class Controller {
     try { this.wake = await wl.request('screen'); } catch { this.wake = null; }
   }
 
+  /**
+   * Cámaras del seguimiento (R10.3), sin botones nuevos: la brújula alterna norte arriba y rumbo
+   * arriba (el mapa gira y el bus va siempre hacia arriba, algo por debajo del centro); con la vista
+   * 3D, rumbo arriba es la cámara detrás del bus (inclinada, el bus en el tercio inferior). El rumbo se
+   * suaviza (las curvas giran la cámara despacio) y los gestos no cortan el seguimiento (R2.1).
+   */
+  private heading2d = false;
+  private heading3dPrev: boolean | null = null;
+  /** Rumbo de brújula de un bus (grados). */
+  private bearingOf(b: Bus) { return (Math.atan2(b.hx, b.hy) * 180) / Math.PI; }
+  /** Desfase del bus respecto al centro con rumbo arriba: más abajo en 3D (se ve el camino por delante). */
+  private headingOffset(): [number, number] {
+    const pad = this.padding();
+    const h = this.map.getContainer().clientHeight - (pad.top ?? 0) - (pad.bottom ?? 0);
+    return [0, Math.round(h * (app.threeD ? 0.24 : 0.14))];
+  }
+  setFollowHeading(on: boolean, animate = true) {
+    app.followHeading = on;
+    if (!app.threeD) this.heading2d = on;
+    const m = this.map;
+    const b = this.selectedBus();
+    this.followOffset = on ? this.headingOffset() : [0, 0];
+    if (!animate || !b) return;
+    // `offset`: el bus queda desplazado del centro lo que pide el modo; el tick siguiente corrige lo
+    // que se haya movido durante el giro.
+    this.flying = true;
+    m.easeTo({
+      center: [b.x / KX, b.y / KY],
+      bearing: on ? this.bearingOf(b) : 0,
+      pitch: app.threeD ? (on ? 62 : 55) : 0,
+      zoom: on && app.threeD ? Math.max(m.getZoom(), 16.9) : m.getZoom(),
+      offset: [this.followOffset[0], this.followOffset[1]],
+      duration: 700,
+      essential: true,
+    });
+    m.once('moveend', () => (this.flying = false));
+  }
+  /** Brújula: siguiendo un bus, alterna norte arriba y rumbo arriba; si no, norte arriba. */
+  compass() {
+    if (app.following && this.selectedBus()) this.setFollowHeading(!app.followHeading);
+    else this.north();
+  }
+
   startFollow() {
     app.following = true;
     void this.keepAwake(true);
-    this.followOffset = [0, 0];
+    // En 3D, seguir es ir detrás del bus; en 2D, lo último que eligió la persona en la sesión.
+    app.followHeading = app.threeD || this.heading2d;
+    this.followOffset = app.followHeading ? this.headingOffset() : [0, 0];
     cancelAnimationFrame(this.followRaf);
     let last = 0, lx = 0, ly = 0;
     const tick = (t: number) => {
       if (!app.following) return;
       const b = this.selectedBus();
-      // Solo si el bus se movió: la cámara no fuerza cuadros de más (R1.17).
+      // Solo si el bus se movió (o falta girar): la cámara no fuerza cuadros de más (R1.17).
       const busy = this.flying || this.gesture || this.pointers.size > 0 || this.map.isMoving();
-      // 20 cuadros por segundo bastan bajo z17,5 (el mapa avanza < 0,5 px por paso); 30 más cerca.
-      if (b && !busy && t - last > (this.map.getZoom() >= 17.5 ? 30 : 48)) {
+      // 20 cuadros por segundo bastan bajo z17,5 (el mapa avanza < 0,5 px por paso); 30 más cerca y
+      // con rumbo arriba (un giro a 20 cuadros se ve a saltos).
+      const heading = app.followHeading;
+      if (b && !busy && t - last > (heading || this.map.getZoom() >= 17.5 ? 30 : 48)) {
         this.fleet.update(Date.now());
-        if (Math.abs(b.x - lx) + Math.abs(b.y - ly) > 0.05) {
+        const m = this.map;
+        let bearing = m.getBearing();
+        let turn = 0;
+        if (heading) {
+          const d = ((this.bearingOf(b) - bearing + 540) % 360) - 180;
+          // Constante de tiempo ~1 s: las curvas giran la cámara despacio; el zigzag del GPS no se nota.
+          turn = d * Math.min(1, (t - (last || t - 33)) / 1000);
+          if (Math.abs(turn) < 0.02) turn = 0;
+        }
+        if (Math.abs(b.x - lx) + Math.abs(b.y - ly) > 0.05 || turn) {
           lx = b.x; ly = b.y; last = t;
-          const m = this.map;
+          bearing += turn;
+          // El centro se calcula con el rumbo nuevo: el desfase en pantalla gira con la cámara.
+          if (turn) m.setBearing(bearing);
           const c = m.unproject(m.project([b.x / KX, b.y / KY]).sub(new Point(this.followOffset[0], this.followOffset[1])));
-          m.jumpTo({ center: c });
+          m.jumpTo({ center: c, bearing });
         }
       }
       this.followRaf = requestAnimationFrame(tick);
@@ -522,6 +597,7 @@ export class Controller {
 
   stopFollow() {
     app.following = false;
+    app.followHeading = false;
     void this.keepAwake(false);
     cancelAnimationFrame(this.followRaf);
   }
@@ -530,8 +606,9 @@ export class Controller {
     if (app.following) this.stopFollow();
     else {
       const b = this.selectedBus();
-      if (b) this.flyTo([b.x / KX, b.y / KY], Math.max(this.map.getZoom(), 16.4), { padding: this.padding(), duration: 600 });
       this.startFollow();
+      if (b && app.followHeading) this.setFollowHeading(true);
+      else if (b) this.flyTo([b.x / KX, b.y / KY], Math.max(this.map.getZoom(), 16.4), { padding: this.padding(), duration: 600 });
     }
   }
 
@@ -542,6 +619,63 @@ export class Controller {
   // ── Recorrido automático ───────────────────────────────────────────────────────────────────
   private tour: Tour | null = null;
   private tourExit: (() => void) | null = null;
+  /** Recorrido arrancado por inactividad: a dónde volver (vista y cámara) al primer toque. */
+  private idleReturn: { view: View; camera: { center: [number, number]; zoom: number; bearing: number; pitch: number } } | null = null;
+  private lastInput = Date.now();
+  /** La próxima vista se aplica sin mover la cámara (vuelta del recorrido por inactividad). */
+  private keepNext = false;
+  private orbiting = false;
+  private orbitFrom: { center: [number, number]; zoom: number; bearing: number; pitch: number } | null = null;
+
+  private camera() {
+    const m = this.map, c = m.getCenter();
+    return { center: [c.lng, c.lat] as [number, number], zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() };
+  }
+
+  /**
+   * Al dejar la página quieta (R10.7, Configuración; 30 s por defecto, también en el teléfono): con
+   * una estación o un paradero abiertos, la cámara gira despacio a su alrededor (la ficha sigue a la
+   * vista); en el inicio y las demás vistas pasivas, arranca el recorrido. Nunca mientras se sigue un
+   * bus, se planea un viaje, se busca o se escribe. Al primer toque, todo vuelve a como estaba.
+   */
+  private idleCheck() {
+    const ms = app.idleMs;
+    if (!ms || document.hidden || this.tour || this.orbiting) return;
+    if (Date.now() - this.lastInput < ms) return;
+    const v = app.view.kind;
+    if (app.following || app.searchOpen || app.layersOpen || app.ctxMenu || v === 'plan' || v === 'settings' || v === 'bus' || v === 'tour') return;
+    const a = document.activeElement;
+    if (a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement || a instanceof HTMLSelectElement) return;
+    if (!this.fleet.buses.size || this.map.isMoving() || this.flying || this.pointers.size) return;
+    if (v === 'station' || v === 'stop') { this.startOrbit(); return; }
+    this.idleReturn = { view: app.view, camera: this.camera() };
+    go({ kind: 'tour', id: '' }, true);
+  }
+
+  private startOrbit() {
+    const v = app.view;
+    const p = v.kind === 'station' ? this.net.stations.get(v.id) : v.kind === 'stop' ? this.net.streetStops.get(v.id) : undefined;
+    if (!p || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    this.orbiting = true;
+    this.orbitFrom = this.camera();
+    const m = this.map;
+    const lap = () => {
+      if (!this.orbiting) return;
+      // Una vuelta cada 2 min, sin aceleración; al terminar, otra.
+      m.easeTo({ center: [p.lon, p.lat], bearing: m.getBearing() + 90, pitch: app.threeD ? 60 : m.getPitch(), duration: 30_000, easing: (t) => t, essential: true });
+      m.once('moveend', () => { if (this.orbiting) lap(); });
+    };
+    lap();
+  }
+
+  private stopOrbit(restore: boolean) {
+    if (!this.orbiting) return;
+    this.orbiting = false;
+    this.map.stop();
+    if (restore && this.orbitFrom) this.map.easeTo({ ...this.orbitFrom, duration: 500 });
+    this.orbitFrom = null;
+  }
+
   private startTour() {
     if (this.tour) return;
     this.stopFollow();
@@ -551,12 +685,20 @@ export class Controller {
     // en el centro de lo que queda.
     app.sheetHeight = 0;
     this.map.setPadding({ top: 0, bottom: app.narrow ? 200 : 0, left: 0, right: 0 });
-    this.tour = new Tour(this.map, this.net, this.fleet, this.layers, palette.zones as Record<string, { name: string; color: string }>);
-    void this.keepAwake(true);
-    // Cualquier toque, rueda o tecla termina el recorrido (al inicio). Se arma un instante después
-    // para que el toque que lo abrió no lo cierre.
+    const cable = () => loadCable().then((d) => d.lines.flatMap((l) => l.points)).catch(() => null);
+    this.tour = new Tour(this.map, this.net, this.fleet, this.layers, palette.zones as Record<string, { name: string; color: string }>, this.speed, cable);
+    // Pantalla encendida solo si la persona lo abrió; arrancado por inactividad, el sistema decide.
+    if (!this.idleReturn) void this.keepAwake(true);
+    // Cualquier toque, rueda o tecla termina el recorrido: al inicio o, si arrancó por inactividad, a
+    // la vista y la cámara de antes. Se arma un instante después para que el toque que lo abrió no lo
+    // cierre.
     const el = this.map.getCanvasContainer();
-    const exit = () => { if (app.view.kind === 'tour') go({ kind: 'home' }); };
+    const exit = () => {
+      if (app.view.kind !== 'tour') return;
+      const back = this.idleReturn;
+      // La vista de antes vuelve sin reencuadrar: la cámara la pone `endTour`.
+      if (back) { this.keepNext = true; go(back.view, true); } else go({ kind: 'home' });
+    };
     const key = (e: KeyboardEvent) => { if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) exit(); };
     const arm = window.setTimeout(() => {
       el.addEventListener('pointerdown', exit, { passive: true });
@@ -573,8 +715,12 @@ export class Controller {
     this.tour = null;
     this.tourExit?.();
     this.tourExit = null;
+    this.lastInput = Date.now();
     if (app.view.kind !== 'bus') void this.keepAwake(false);
-    this.map.easeTo({ pitch: app.threeD ? 55 : 0, duration: 500 });
+    const back = this.idleReturn;
+    this.idleReturn = null;
+    if (back) this.map.jumpTo(back.camera);
+    else this.map.easeTo({ pitch: app.threeD ? 55 : 0, duration: 500 });
     setTimeout(() => this.syncPadding(), 300);
   }
 
@@ -587,7 +733,7 @@ export class Controller {
     const b = this.fleet.pick(project, e.point.x, e.point.y, r);
     if (b) return go({ kind: 'bus', id: b.id });
     const box: [[number, number], [number, number]] = [[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]];
-    const st = this.map.queryRenderedFeatures(box, { layers: ['stations', 'station-fp', 'station-fp-3d', 'station-fp-roof'].filter((l) => this.map.getLayoutProperty(l, 'visibility') !== 'none') })[0];
+    const st = this.map.queryRenderedFeatures(box, { layers: ['stations', 'station-fp', 'station-fp-3d', 'station-fp-roof'].filter((l) => this.map.getLayer(l) && this.map.getLayoutProperty(l, 'visibility') !== 'none') })[0];
     if (st) return go({ kind: 'station', id: String(st.properties.id) });
     const sp = this.map.getLayer('street-stops') && this.map.queryRenderedFeatures(box, { layers: ['street-stops'] })[0];
     if (sp) return go({ kind: 'stop', id: String(sp.properties.id) });
@@ -631,7 +777,29 @@ export class Controller {
     const shadow = t === 'light' ? 0.22 : 0.55;
     this.buses.setColors(rim, ring, mute, shadow);
     this.dimBuses?.setColors(rim, ring, mute, shadow);
+    this.daylight();
     this.map.triggerRepaint();
+  }
+
+  /** Luz según la hora (R10.10): solo con la opción encendida y la vista 3D; si no, la del tema. */
+  private daylightOn = false;
+  daylight(now = Date.now()) {
+    const t = effective(app.themePref);
+    const on = app.daylight && app.threeD;
+    if (!on && !this.daylightOn) return;
+    this.daylightOn = on;
+    applyDaylight(this.map, t, on, (tint) => this.structs?.setTint(tint), () => applyBaseTheme(this.map, t), now);
+    this.map.triggerRepaint();
+  }
+  setDaylight(on: boolean) {
+    app.daylight = on;
+    savePrefs({ daylight: on });
+    this.daylight();
+  }
+  setIdle(ms: number) {
+    app.idleMs = ms;
+    savePrefs({ idleMs: ms });
+    this.lastInput = Date.now();
   }
 
   dimBuses?: BusLayer;
@@ -666,6 +834,14 @@ export class Controller {
     m.triggerRepaint();
   }
 
+  /** Bus abierto: lo recorrido de su ruta, más apagado (R10.5). Una vez por segundo basta. */
+  private traveled() {
+    const b = this.selectedBus();
+    if (!b || !b.onPath || !b.path || b.routeId !== this.fleet.focusRoute) { this.layers.setTraveled(null); return; }
+    const len = b.path.cum[b.path.cum.length - 1];
+    this.layers.setTraveled(len > 0 ? Math.min(1, Math.max(0, b.s / len)) : null);
+  }
+
   /** Pulso sobre la ruta abierta cada `PULSE_EVERY`: con la pestaña visible y el mapa quieto. */
   private pulseAt = 0;
   private pulse() {
@@ -698,8 +874,14 @@ export class Controller {
     this.map.setLayoutProperty('building', 'visibility', on ? 'none' : 'visible');
     this.layers.set3d(on);
     this.structures();
+    this.daylight();
     if (instant) { this.map.jumpTo({ pitch: on ? 55 : 0 }); return; }
     const v = app.view;
+    if (app.following && this.selectedBus()) {
+      if (on) { this.heading3dPrev = app.followHeading; this.setFollowHeading(true); }
+      else { const prev = this.heading3dPrev ?? this.heading2d; this.heading3dPrev = null; this.setFollowHeading(prev); }
+      return;
+    }
     this.map.easeTo({ pitch: on ? 55 : 0, bearing: on ? (this.map.getBearing() || -18) : this.map.getBearing(), duration: 700 });
     this.afterMove(() => {
       if (v.kind === 'route' || v.kind === 'plan' || v.kind === 'station' || v.kind === 'stop') this.frame(v);
@@ -785,6 +967,15 @@ export class Controller {
     if (v.kind === 'bus') { const b = this.fleet.buses.get(v.id); const leg = b?.route && b.onPath ? legAtS(b.route, b.sFix) : null; return leg ? [leg.c] : of(b?.route); }
     if (v.kind === 'plan' && this.fleet.focusRoutes) return [...this.fleet.focusRoutes].flatMap((id) => of(this.net.routes.get(id)));
     return [];
+  }
+
+  /** Encuadra una troncal entera (desde «Ahora»). */
+  showCorridor(z: string) {
+    const segs = this.net.corridors.filter((c) => c.z === z);
+    if (!segs.length) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const c of segs) for (const [x, y] of c.c) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    this.map.fitBounds([[x0, y0], [x1, y1]], { padding: this.padding(48, true), duration: 900, absolutePadding: true });
   }
 
   zoom(d: number) { this.map.easeTo({ zoom: this.map.getZoom() + d, duration: 220 }); }

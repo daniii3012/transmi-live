@@ -17,7 +17,7 @@ const NEAR_M = 35;
 const FORGET_MS = 10 * 60_000;
 const G = 60;
 
-interface Bin { coords: [number, number][]; v: number | null; seen: number }
+interface Bin { coords: [number, number][]; v: number | null; seen: number; n: number }
 
 export class SpeedLayer {
   private bins: Bin[] = [];
@@ -26,11 +26,15 @@ export class SpeedLayer {
   private map: MLMap;
   private fleet: Fleet;
   private stations: [number, number][] = [];
+  private portals: [number, number][] = [];
 
   constructor(map: MLMap, net: Network, fleet: Fleet) {
     this.map = map;
     this.fleet = fleet;
-    for (const s of net.stations.values()) this.stations.push([s.lon * KX, s.lat * KY]);
+    for (const s of net.stations.values()) {
+      this.stations.push([s.lon * KX, s.lat * KY]);
+      if (s.kind === 'portal') this.portals.push([s.lon * KX, s.lat * KY]);
+    }
     for (const seg of net.corridors) {
       if (seg.street) continue;
       const pts = seg.c.map(([lo, la]) => [lo * KX, la * KY] as [number, number]);
@@ -51,7 +55,7 @@ export class SpeedLayer {
         cur.push(seg.c[i]);
         acc += l;
         if (acc >= BIN_M || i === pts.length - 1) {
-          this.bins.push({ coords: cur, v: null, seen: 0 });
+          this.bins.push({ coords: cur, v: null, seen: 0, n: 0 });
           cur = [seg.c[i]];
           acc = 0;
         }
@@ -75,6 +79,23 @@ export class SpeedLayer {
   }
 
   setTheme(theme: Theme) { if (this.map.getLayer('speed')) this.map.setPaintProperty('speed', 'line-color', this.color(theme)); }
+
+  /** Tramo más lento con dato reciente y al menos `minBuses` buses en la última lectura (para «Ahora» y
+   * el recorrido): su punto medio (lon, lat) y la velocidad media (km/h). */
+  slowest(now = Date.now(), minBuses = 3): { lon: number; lat: number; v: number; n: number } | null {
+    let best: Bin | null = null;
+    for (const bin of this.bins) {
+      if (bin.v == null || bin.v < 1 || now - bin.seen > 5 * 60_000 || bin.n < minBuses) continue;
+      // Junto a un portal los buses esperan o se estacionan: eso no es trancón.
+      const [lo, la] = bin.coords[Math.floor(bin.coords.length / 2)];
+      const x = lo * KX, y = la * KY;
+      if (this.portals.some(([px, py]) => (px - x) ** 2 + (py - y) ** 2 < 300 * 300)) continue;
+      if (!best || bin.v < best.v!) best = bin;
+    }
+    if (!best) return null;
+    const [lon, lat] = best.coords[Math.floor(best.coords.length / 2)];
+    return { lon, lat, v: best.v!, n: best.n };
+  }
 
   /** Tramos con dato en la última actualización: sin ellos, la flota no se atenúa (sería un mapa vacío). */
   private shown = 0;
@@ -113,6 +134,7 @@ export class SpeedLayer {
       const v = a.s / a.n;
       bin.v = bin.v == null ? v : bin.v * 0.6 + v * 0.4;
       bin.seen = now;
+      bin.n = a.n;
     }
     if (!this.on) return;
     const features: GeoJSON.Feature[] = [];

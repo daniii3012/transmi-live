@@ -66,6 +66,27 @@
   </section>
 
   <section>
+    <div class="label">Al dejar la página quieta</div>
+    <div class="seg" role="radiogroup" aria-label="Al dejar la página quieta">
+      {#each [[0, 'Nunca'], [30_000, '30 s'], [120_000, '2 min'], [300_000, '5 min']] as [ms, name] (ms)}
+        <button role="radio" aria-checked={app.idleMs === ms} class:on={app.idleMs === ms} onclick={() => ctl?.setIdle(ms as number)}>{name}</button>
+      {/each}
+    </div>
+    <p class="small faint">
+      Sin tocar nada durante ese tiempo, arranca el recorrido por las troncales; con una estación o un
+      paradero abiertos, la cámara gira despacio a su alrededor. Cualquier toque vuelve a donde estaba.
+    </p>
+  </section>
+
+  <section>
+    <div class="label">Luz según la hora</div>
+    <label class="check">
+      <input type="checkbox" checked={app.daylight} onchange={(e) => ctl?.setDaylight(e.currentTarget.checked)} />
+      <span class="small">Cielo y luz de la hora de Bogotá en la vista 3D</span>
+    </label>
+  </section>
+
+  <section>
     <div class="label">Respaldo por ruta</div>
     <p class="small">
       Si el alimentador en vivo deja de actualizarse, o no trae ningún bus de la ruta que se mira (trae
@@ -125,6 +146,11 @@
   }
   input:not([type='checkbox']):focus-visible { border-color: var(--fg-2); }
   .check { display: flex; align-items: center; gap: var(--sp-2); }
+  .seg { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line-2); }
+  .seg button { height: 32px; font-size: var(--fs-small); color: var(--fg-1); }
+  .seg button + button { border-left: 1px solid var(--line-2); }
+  .seg button:hover { color: var(--fg-0); }
+  .seg button.on { background: var(--fg-0); color: var(--bg-1); }
   .row { display: flex; gap: var(--sp-2); }
   .btn { height: 36px; padding: 0 var(--sp-4); border: 1px solid var(--line-2); font-size: var(--fs-small); color: var(--fg-1); }
   .btn:hover:not(:disabled) { color: var(--fg-0); background: var(--bg-2); }

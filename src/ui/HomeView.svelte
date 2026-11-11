@@ -12,6 +12,7 @@
   import RouteBadge from './RouteBadge.svelte';
   import { legAtStop } from '../domain/legs';
   import Pulse from './Pulse.svelte';
+  import { nowFacts } from '../app/now';
 
   const net = $derived(app.net);
   /** Cambios recientes en la red (troncal, dual, cable y estaciones) para el resumen del inicio. */
@@ -43,22 +44,19 @@
   const max = $derived(Math.max(1, ...groups.map((x) => x.n)));
   let open = $state<GroupKey[]>([]);
 
-  const top = $derived.by(() => {
+  /** «Ahora» (R10.9): datos del momento con las lecturas recientes, de los sistemas visibles. Las
+   * llegadas por estación necesitan los patrones de parada: se piden unos segundos después de abrir. */
+  $effect(() => {
+    if (!net || app.patternsReady) return;
+    const t = setTimeout(() => void net.loadPatterns().then(() => (app.patternsReady = true)), 4000);
+    return () => clearTimeout(t);
+  });
+  const facts = $derived.by(() => {
     void app.version;
-    if (!net || !app.fleet) return [];
-    const by = busesByRoute(app.fleet, app.version);
-    // Por código (los dos sentidos juntos): una ruta es lo que la gente reconoce.
-    const byCode = new Map<string, { id: string; n: number }>();
-    for (const [rid, list] of by) {
-      const r = net.routes.get(rid);
-      const cls = r ? classOf(r.sys, r.sub) : undefined;
-      if (!r || (cls && app.hidden.includes(cls))) continue;
-      const key = `${r.sys}:${r.code}`;
-      const cur = byCode.get(key);
-      if (!cur) byCode.set(key, { id: rid, n: list.length });
-      else { cur.n += list.length; }
-    }
-    return [...byCode.values()].sort((a, b) => b.n - a.n).slice(0, 8).map((x) => ({ route: net.routes.get(x.id)!, n: x.n }));
+    void app.hidden;
+    void app.patternsReady;
+    if (!net || !app.fleet) return null;
+    return nowFacts(net, app.fleet, app.version, Date.now());
   });
 
   /** Favoritos: rutas con su número de buses; lugares con su próxima llegada. */
@@ -220,19 +218,46 @@
     </ul>
   </section>
 
-  {#if top.length}
+  {#if facts && (facts.route || facts.station || facts.queue || facts.slowZone)}
     <section class="block">
-      <div class="head"><span class="label">Más buses en vía</span></div>
+      <div class="head"><span class="label">Ahora</span><span class="label hint">lecturas recientes</span></div>
       <ul class="routes">
-        {#each top as t (t.route.id)}
+        {#if facts.route}
           <li>
-            <button class="row" onclick={() => go({ kind: 'route', id: t.route.id })}>
-              <RouteBadge route={t.route} />
-              <span class="dest">{t.route.dest}</span>
-              <span class="n num">{t.n}</span>
+            <button class="row" onclick={() => go({ kind: 'route', id: facts.route!.route.id })}>
+              <RouteBadge route={facts.route.route} />
+              <span class="dest">Más buses en vía<span class="faint">&nbsp;· {facts.route.route.dest}</span></span>
+              <span class="n num">{facts.route.n}</span>
             </button>
           </li>
-        {/each}
+        {/if}
+        {#if facts.station}
+          <li>
+            <button class="row" onclick={() => go({ kind: 'station', id: facts.station!.station.id })} title="Buses que llegan en los próximos 5 min (estimado)">
+              <span class="place"></span>
+              <span class="dest">Más llegadas en 5 min<span class="faint">&nbsp;· {facts.station.station.short}</span></span>
+              <span class="n num">{facts.station.n}<span class="faint unit">&nbsp;est.</span></span>
+            </button>
+          </li>
+        {/if}
+        {#if facts.queue}
+          <li>
+            <button class="row" onclick={() => go({ kind: 'station', id: facts.queue!.station.id })} title="Buses troncales casi quietos a menos de 200 m de la estación">
+              <span class="place"></span>
+              <span class="dest">Fila de buses más larga<span class="faint">&nbsp;· {facts.queue.station.short}</span></span>
+              <span class="n num">{facts.queue.n}</span>
+            </button>
+          </li>
+        {/if}
+        {#if facts.slowZone}
+          <li>
+            <button class="row" onclick={() => ctl?.showCorridor(facts.slowZone!.zone)} title={`Velocidad media de ${facts.slowZone.n} buses en marcha, medida con sus lecturas`}>
+              <span class="place zone"><i style:background={facts.slowZone.color}></i></span>
+              <span class="dest">Troncal más lenta<span class="faint">&nbsp;· {facts.slowZone.name}</span></span>
+              <span class="n num">{Math.round(facts.slowZone.kmh)}<span class="faint unit">&nbsp;km/h</span></span>
+            </button>
+          </li>
+        {/if}
       </ul>
     </section>
   {/if}
@@ -326,6 +351,9 @@
   .place { width: 38px; height: 22px; display: inline-flex; align-items: center; justify-content: center; }
   .place::before { content: ''; width: 9px; height: 9px; background: var(--station); }
   .place.stop::before { border-radius: 50%; background: var(--bg-1); border: 1.5px solid var(--stop); }
+  .place.zone::before { content: none; }
+  .place.zone i { width: 10px; height: 10px; }
+  .unit { font-size: var(--fs-label); }
   .nx { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); }
   .empty { margin: 0; font-size: var(--fs-small); }
   .changes { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: var(--sp-3); align-items: center; padding: var(--sp-3); border: 1px solid var(--line-1); text-align: left; font-size: var(--fs-small); color: var(--fg-1); line-height: 1.4; }
