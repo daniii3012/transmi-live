@@ -18,7 +18,6 @@ import { buildObras, loadObras, setObras, setObrasTheme } from '../map/obras';
 import { Elevation } from '../map/structures';
 import { buildBridges, buildFootbridges, buildStations, buildTrenches, type Structures } from '../map/structuresLayer';
 import { buildMetro, type MetroStats } from '../map/metro3d';
-import { applyDaylight } from '../map/daylight';
 import { buildCable, loadCable } from '../map/cable3d';
 import { applyBaseTheme } from '../map/style';
 import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
@@ -132,8 +131,6 @@ export class Controller {
       watch.check(this.net, this.fleet, app.now);
       this.traveled();
       this.idleCheck();
-      // La luz según la hora cambia despacio: una vez por minuto basta.
-      if (ticks % 60 === 0) this.daylight();
       backup.tick(this.net, this.fleet, app.poll.feedTime, this.backupCodes(), app.now);
       // Buses del respaldo que ya no se actualizan (cada 5 s basta).
       if (++ticks % 5 === 0 && this.fleet.prune(app.now)) { app.counts = this.fleet.counts(); app.version++; this.map.triggerRepaint(); }
@@ -777,25 +774,9 @@ export class Controller {
     const shadow = t === 'light' ? 0.22 : 0.55;
     this.buses.setColors(rim, ring, mute, shadow);
     this.dimBuses?.setColors(rim, ring, mute, shadow);
-    this.daylight();
     this.map.triggerRepaint();
   }
 
-  /** Luz según la hora (R10.10): solo con la opción encendida y la vista 3D; si no, la del tema. */
-  private daylightOn = false;
-  daylight(now = Date.now()) {
-    const t = effective(app.themePref);
-    const on = app.daylight && app.threeD;
-    if (!on && !this.daylightOn) return;
-    this.daylightOn = on;
-    applyDaylight(this.map, t, on, (tint) => this.structs?.setTint(tint), () => applyBaseTheme(this.map, t), now);
-    this.map.triggerRepaint();
-  }
-  setDaylight(on: boolean) {
-    app.daylight = on;
-    savePrefs({ daylight: on });
-    this.daylight();
-  }
   setIdle(ms: number) {
     app.idleMs = ms;
     savePrefs({ idleMs: ms });
@@ -874,7 +855,6 @@ export class Controller {
     this.map.setLayoutProperty('building', 'visibility', on ? 'none' : 'visible');
     this.layers.set3d(on);
     this.structures();
-    this.daylight();
     if (instant) { this.map.jumpTo({ pitch: on ? 55 : 0 }); return; }
     const v = app.view;
     if (app.following && this.selectedBus()) {

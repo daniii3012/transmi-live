@@ -79,14 +79,6 @@
   </section>
 
   <section>
-    <div class="label">Luz según la hora</div>
-    <label class="check">
-      <input type="checkbox" checked={app.daylight} onchange={(e) => ctl?.setDaylight(e.currentTarget.checked)} />
-      <span class="small">Cielo y luz de la hora de Bogotá en la vista 3D</span>
-    </label>
-  </section>
-
-  <section>
     <div class="label">Respaldo por ruta</div>
     <p class="small">
       Si el alimentador en vivo deja de actualizarse, o no trae ningún bus de la ruta que se mira (trae

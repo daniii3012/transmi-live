@@ -4,7 +4,6 @@ import { MetricPath, KX, KY } from '../src/domain/geo';
 import { LAT0, LON0, Q, type VehiclesV1 } from '../src/live/api';
 import type { Network } from '../src/data/network';
 import { TrailBuilder, TRAIL_STRIDE, SELECTED_MAX } from '../src/map/trails';
-import { daylightAt, bogotaMinutes } from '../src/map/daylight';
 
 const lon0 = -74.1, lat0 = 4.65;
 // Recorrido en L: 2 km al este y 2 km al norte (la estela tiene que doblar la esquina).
@@ -73,20 +72,5 @@ describe('estelas sobre el recorrido (R10.5, R10.6)', () => {
     expect(new TrailBuilder().build(f, now, { mpp: 5, exposure: true }).count).toBeGreaterThan(0);
     f.hidden = new Set(['troncal']);
     expect(new TrailBuilder().build(f, now + 200, { mpp: 5, exposure: true }).count).toBe(0);
-  });
-});
-
-describe('luz según la hora (R10.10)', () => {
-  it('hora de Bogotá en minutos', () => {
-    expect(bogotaMinutes(Date.UTC(2026, 10, 11, 2, 51))).toBe(21 * 60 + 51);
-    expect(bogotaMinutes(Date.UTC(2026, 10, 10, 4, 30))).toBe(23 * 60 + 30);
-  });
-  it('noche tenue, día pleno, atardecer cálido; el sol sale por el oriente y se pone por el occidente', () => {
-    const night = daylightAt(23 * 60, 'dark'), noon = daylightAt(12 * 60, 'dark'), dusk = daylightAt(17 * 60 + 55, 'dark');
-    expect(night.intensity).toBeLessThan(noon.intensity);
-    expect(noon.tint[0]).toBeGreaterThanOrEqual(1);
-    expect(dusk.tint[0]).toBeGreaterThan(dusk.tint[2]);
-    expect(daylightAt(7 * 60, 'light').azimuth).toBeLessThan(180);
-    expect(daylightAt(17 * 60, 'light').azimuth).toBeGreaterThan(180);
   });
 });

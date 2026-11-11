@@ -18,7 +18,7 @@ function loadLayers() {
   try { return { ...base, ...JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '{}') }; } catch { return base; }
 }
 const PREFS_KEY = 'transmi-live:preferencias:v1';
-export interface Prefs { hidden: string[]; idleMs?: number; daylight?: boolean; threeD: boolean; motion?: 'continuo' | 'directo'; camera?: { center: [number, number]; zoom: number; bearing: number; pitch: number; hash: string; at: number } }
+export interface Prefs { hidden: string[]; idleMs?: number; threeD: boolean; motion?: 'continuo' | 'directo'; camera?: { center: [number, number]; zoom: number; bearing: number; pitch: number; hash: string; at: number } }
 export function loadPrefs(): Prefs {
   try { return { hidden: [], threeD: false, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') }; } catch { return { hidden: [], threeD: false }; }
 }
@@ -44,8 +44,6 @@ class AppState {
   now = $state(Date.now());
   /** Recorrido u órbita al dejar la página quieta (R10.7): ms sin tocar nada; 0, nunca. */
   idleMs = $state<number>(typeof localStorage !== 'undefined' ? loadPrefs().idleMs ?? 30_000 : 30_000);
-  /** Luz según la hora en la vista 3D (R10.10): opcional, apagada por defecto. */
-  daylight = $state<boolean>(typeof localStorage !== 'undefined' ? loadPrefs().daylight ?? false : false);
   following = $state(false);
   /** Siguiendo con rumbo arriba (en 3D, detrás del bus); R10.3. */
   followHeading = $state(false);
