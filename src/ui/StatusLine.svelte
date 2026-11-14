@@ -16,7 +16,7 @@
   const shortBar = $derived(compact && p.status === 'stale');
   // En la barra compacta del teléfono no cabe un segmento más: con el respaldo en uso, la etiqueta lo dice.
   const label = $derived(
-    compact && onBackup ? 'Respaldo' : p.status === 'live' ? 'En vivo' : p.status === 'stale' ? 'Sin actualizar' : p.status === 'error' ? 'Sin conexión' : p.status === 'idle' ? 'En pausa' : 'Conectando',
+    compact && onBackup ? (backup.forced ? 'Por ruta' : 'Respaldo') : p.status === 'live' ? 'En vivo' : p.status === 'stale' ? 'Sin actualizar' : p.status === 'error' ? 'Sin conexión' : p.status === 'idle' ? 'En pausa' : 'Conectando',
   );
 </script>
 
@@ -40,7 +40,7 @@
     {/if}
   {/if}
   {#if !compact && onBackup}
-    <span class="sep" aria-hidden="true">·</span><span class="num backup" title="Posiciones del servicio por ruta: el alimentador no las trae ahora">Respaldo {backup.codes.join(' ')}</span>
+    <span class="sep" aria-hidden="true">·</span><span class="num backup" title={backup.forced ? 'Posiciones del servicio por ruta: fuente elegida en la ruta' : 'Posiciones del servicio por ruta: el alimentador no las trae ahora'}>{backup.forced ? 'Por ruta' : 'Respaldo'} {backup.codes.join(' ')}</span>
   {/if}
   {#if !compact && p.status === 'error' && p.error}
     <span class="sep">·</span><span class="faint">{p.error}</span>

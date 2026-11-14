@@ -11,7 +11,8 @@ import { KX, KY } from '../domain/geo';
 import { watch } from './watch.svelte';
 import type { Route } from '../domain/types';
 import type { FilterKey } from '../domain/filter';
-import { busCodes, legAtS } from '../domain/legs';
+import { busCodes, destOfCode, legAtS } from '../domain/legs';
+import { normName } from '../live/backupResolve';
 import { app, saveLayers, savePrefs, loadPrefs } from './store.svelte';
 import { loadMetro, setMetro, setMetroTheme } from '../map/metroLayers';
 import { buildObras, loadObras, setObras, setObrasTheme } from '../map/obras';
@@ -22,7 +23,7 @@ import { buildCable, loadCable } from '../map/cable3d';
 import { applyBaseTheme } from '../map/style';
 import { applyTheme, effective, saveThemePref, themePref, onSystemChange, type ThemePref } from './theme';
 import { go, parse, type View } from './router';
-import { backup } from '../live/backup.svelte';
+import { backup, type Target } from '../live/backup.svelte';
 import { Tour } from './tour';
 import palette from '../../data/curated/palette.json';
 
@@ -138,7 +139,7 @@ export class Controller {
       watch.check(this.net, this.fleet, app.now);
       this.traveled();
       this.idleCheck();
-      backup.tick(this.net, this.fleet, app.poll.feedTime, this.backupCodes(), app.now);
+      backup.tick(this.net, this.fleet, app.poll.feedTime, this.backupTargets(), app.view.kind === 'route' || app.view.kind === 'bus', app.now);
       // Buses del respaldo que ya no se actualizan (cada 5 s basta).
       if (++ticks % 5 === 0 && this.fleet.prune(app.now)) { app.counts = this.fleet.counts(); app.version++; this.map.triggerRepaint(); }
     }, 1000);
@@ -944,14 +945,21 @@ export class Controller {
     void this.obrasBuilt.then(() => { this.structs?.show('obras', app.layersOn.obras && app.threeD); this.map.triggerRepaint(); });
   }
 
-  /** Rutas para el respaldo por ruta: la abierta, la del bus abierto o las de los tramos del viaje. */
-  private backupCodes(): string[] {
+  /**
+   * Rutas para el respaldo por ruta: la abierta, la del bus abierto o las de los tramos del viaje. Por
+   * los códigos que lleva el bus (A153, C153), no por el del catálogo (CA153), que el servicio por ruta
+   * puede no conocer; cada uno con su destino, su sistema y si es la variante de ciclovía (el servicio
+   * separa por destino: el C15 troncal va a Portal Suba y el zonal a Chapinero).
+   */
+  private backupTargets(): Target[] {
     const v = app.view;
-    // Por los códigos que lleva el bus (A153, C153), no por el del catálogo (CA153), que el servicio
-    // por ruta puede no conocer.
-    const of = (r: Route | undefined) => (r ? busCodes(r) : []);
+    const of = (r: Route | undefined, only?: string): Target[] => {
+      if (!r) return [];
+      const ciclovia = /ciclov/.test(normName(`${r.origin ?? ''} ${r.name} ${r.dest}`));
+      return busCodes(r).filter((c) => !only || c === only).map((c) => ({ code: c, dest: destOfCode(r, c), zonal: r.sys === 'zonal', ciclovia }));
+    };
     if (v.kind === 'route') return of(this.net.routes.get(v.id));
-    if (v.kind === 'bus') { const b = this.fleet.buses.get(v.id); const leg = b?.route && b.onPath ? legAtS(b.route, b.sFix) : null; return leg ? [leg.c] : of(b?.route); }
+    if (v.kind === 'bus') { const b = this.fleet.buses.get(v.id); const leg = b?.route && b.onPath ? legAtS(b.route, b.sFix) : null; return of(b?.route, leg?.c); }
     if (v.kind === 'plan' && this.fleet.focusRoutes) return [...this.fleet.focusRoutes].flatMap((id) => of(this.net.routes.get(id)));
     return [];
   }

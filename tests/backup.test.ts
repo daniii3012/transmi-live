@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resolveReading, sameDest, type NetLike } from '../src/live/backupResolve';
 import { Fleet } from '../src/live/fleet';
 import { backup } from '../src/live/backup.svelte';
@@ -106,5 +106,100 @@ describe('respaldo: qué rutas se consultan', () => {
     f.ingest({ ...one(T0 + 50, 'F1', 'T'), n: 0, id: [], label: [], plate: [], route: [], lat: [], lon: [], age: [], stop: [], seq: [], start: [] }, T0 * 1000 + 90_000);
     expect(f.buses.has('F1')).toBe(true);
     expect(backup.wanted(f, ['F51'], false, 0)).toEqual(['F51']);
+  });
+});
+
+describe('respaldo: fuente «por ruta» elegida en la ficha de la ruta', () => {
+  const tnet = { routes, paths, resolveRoute: (id: string) => (routes.has(id) ? id : null) } as unknown as Network;
+  const creds = { appid: 'abcd1234', uuid: 'UUID-0001' };
+  const target = { code: '5', dest: 'Av. Jiménez', zonal: true, ciclovia: false };
+  const gtfs = (t: number, id: string, m: number): VehiclesV1 => ({
+    v: 1, t, n: 1, id: [id], label: [id], plate: [''], route: ['R5E'],
+    lat: [Math.round((lat0 + 4 / KY - LAT0) * Q)], lon: [Math.round((lon0 + m / KX - LON0) * Q)], age: [0], stop: [''], seq: [0], start: [0],
+  });
+  // Respuesta del Worker: un bus del 5 hacia Av. Jiménez (otro que el del alimentador).
+  const fromRoute = (t: number) => ({
+    v: 1, code: '5', t, n: 1, id: ['fleet:X1'], label: ['X1'], route: [''], rcode: ['5'], dest: ['AV JIMENEZ'], sys: ['zonal'],
+    lat: [Math.round((lat0 + 4 / KY - LAT0) * Q)], lon: [Math.round((lon0 + 2500 / KX - LON0) * Q)], bearing: [90], age: [5], occ: [''],
+  });
+  const store = new Map<string, string>();
+
+  beforeEach(() => {
+    store.clear();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, String(v)), removeItem: (k: string) => void store.delete(k) });
+    vi.stubGlobal('location', { search: '?api=http://api', hostname: 'localhost' });
+  });
+  afterEach(() => {
+    backup.setSource('gtfs');
+    backup.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it('sin UUID no hay respaldo; lo guardado se conserva para completarlo', () => {
+    backup.save({ appid: 'abcd1234', uuid: '' });
+    expect(backup.creds).toBeNull();
+    expect(backup.status).toBe('off');
+    expect(backup.stored?.appid).toBe('abcd1234');
+    backup.save(creds);
+    expect(backup.creds).toEqual(creds);
+    expect(backup.status).toBe('ready');
+  });
+
+  it('consulta aunque el alimentador traiga la ruta, con su destino; sus buses salen solo del servicio y con GTFS vuelven', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', async (_u: string, init: RequestInit) => { bodies.push(JSON.parse(String(init.body))); return new Response(JSON.stringify(fromRoute(Math.floor(Date.now() / 1000))), { status: 200 }); });
+    backup.save(creds);
+    const f = new Fleet(tnet);
+    const T0 = Math.floor(Date.now() / 1000);
+    f.ingest(gtfs(T0, 'G1', 500), T0 * 1000 + 5_000); // el alimentador, al día, trae un 5
+    // Con GTFS y el alimentador trayendo la ruta: no se consulta.
+    backup.tick(tnet, f, T0, [target], true, T0 * 1000 + 6_000);
+    await Promise.resolve();
+    expect(bodies).toHaveLength(0);
+    // «Por ruta»: se consulta enseguida, con el destino, el sistema y la marca de ciclovía.
+    backup.setSource('ruta');
+    backup.tick(tnet, f, T0, [target], true, T0 * 1000 + 7_000);
+    await vi.waitFor(() => expect(backup.owned).toEqual(['5']));
+    expect(bodies[0]).toEqual({ ruta: '5', destino: 'Av. Jiménez', zonal: true, ciclovia: false, ...creds });
+    expect(backup.forced).toBe(true);
+    expect([...f.buses.keys()]).toEqual(['ruta:X1']); // el del alimentador sale
+    // La siguiente instantánea del alimentador no lo devuelve mientras la ruta sea «por ruta».
+    f.ingest(gtfs(T0 + 30, 'G1', 700), T0 * 1000 + 35_000);
+    expect(f.buses.has('G1')).toBe(false);
+    // De vuelta a GTFS: con la siguiente instantánea vuelve.
+    backup.setSource('gtfs');
+    expect(backup.owned).toEqual([]);
+    f.ingest(gtfs(T0 + 60, 'G1', 900), T0 * 1000 + 65_000);
+    expect(f.buses.has('G1')).toBe(true);
+  });
+
+  it('al dejar de mirar la ruta, vuelve al alimentador aunque la fuente siga en «por ruta»', async () => {
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify(fromRoute(Math.floor(Date.now() / 1000))), { status: 200 }));
+    backup.save(creds);
+    backup.setSource('ruta');
+    const f = new Fleet(tnet);
+    const now = Date.now();
+    backup.tick(tnet, f, now / 1000, [target], true, now);
+    await vi.waitFor(() => expect(backup.owned).toEqual(['5']));
+    backup.tick(tnet, f, now / 1000, [], false, now + 1_000); // la página ya no mira la ruta
+    expect(backup.owned).toEqual([]);
+    expect(backup.forced).toBe(false);
+  });
+
+  it('si el servicio rechaza todas las consultas (503 con retry-after), vuelve al GTFS y espera lo que diga el Worker', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls++; return new Response('{"error":"el servicio por ruta rechaza las consultas"}', { status: 503, headers: { 'retry-after': '300' } }); });
+    backup.save(creds);
+    backup.setSource('ruta');
+    const f = new Fleet(tnet);
+    const now = Date.now();
+    backup.tick(tnet, f, now / 1000, [target], true, now);
+    await vi.waitFor(() => expect(backup.status).toBe('unavailable'));
+    expect(backup.owned).toEqual([]);
+    backup.tick(tnet, f, now / 1000, [target], true, now + 60_000);
+    await Promise.resolve();
+    expect(calls).toBe(1); // en pausa: 5 min
+    backup.tick(tnet, f, now / 1000, [target], true, now + 301_000);
+    await vi.waitFor(() => expect(calls).toBe(2));
   });
 });

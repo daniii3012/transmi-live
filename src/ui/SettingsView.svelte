@@ -10,12 +10,13 @@
    * servicio por ruta (appid y UUID del dispositivo, las mismas de la app móvil). Se guardan solo en
    * este navegador; el Worker las reenvía en cada consulta y no las guarda.
    */
-  let appid = $state(backup.creds?.appid ?? '');
-  let uuid = $state(backup.creds?.uuid ?? '');
+  let appid = $state(backup.stored?.appid ?? '');
+  let uuid = $state(backup.stored?.uuid ?? '');
   let show = $state(false);
   let saved = $state(false);
-  const dirty = $derived(appid.trim() !== (backup.creds?.appid ?? '') || uuid.trim() !== (backup.creds?.uuid ?? ''));
-  const valid = $derived(/^[\x21-\x7e]{4,200}$/.test(appid.trim()) && (!uuid.trim() || /^[\x21-\x7e]{4,200}$/.test(uuid.trim())));
+  const dirty = $derived(appid.trim() !== (backup.stored?.appid ?? '') || uuid.trim() !== (backup.stored?.uuid ?? ''));
+  // Las dos son obligatorias.
+  const valid = $derived(/^[\x21-\x7e]{4,200}$/.test(appid.trim()) && /^[\x21-\x7e]{4,200}$/.test(uuid.trim()));
 
   function save() {
     if (!valid) return;
@@ -31,7 +32,7 @@
 
   const estado = $derived.by(() => {
     switch (backup.status) {
-      case 'off': return 'Respaldo desactivado: sin credenciales.';
+      case 'off': return backup.stored ? 'Respaldo desactivado: falta el UUID del dispositivo.' : 'Respaldo desactivado: sin credenciales.';
       case 'ready': return 'Credenciales guardadas. El respaldo se usa cuando el alimentador se detiene o no trae buses de la ruta abierta.';
       case 'active': return `Respaldo en uso: ${backup.codes.join(', ')}${backup.at ? ` · ${fmtHMS(backup.at).slice(0, 5)}` : ''}.`;
       case 'rejected': return 'El servicio rechazó las credenciales. Respaldo detenido hasta cambiarlas.';
@@ -87,10 +88,14 @@
       dispositivo, los mismos de la app móvil. Los buses que solo trae el respaldo salen del mapa
       3 minutos después de dejar de mirar su ruta.
     </p>
+    <p class="small">
+      Con las dos guardadas, la ficha de cada ruta permite elegir de dónde salen sus posiciones: del GTFS
+      (con este respaldo cuando falla) o siempre del servicio por ruta.
+    </p>
     <p class="small faint">
       Se guardan solo en este navegador. El servidor intermedio las reenvía al servicio en cada consulta
-      y no las guarda. Cada consulta usa la cuota de estas credenciales. Sin credenciales, el respaldo
-      queda desactivado.
+      y no las guarda. Cada consulta usa la cuota de estas credenciales. Sin las dos, el respaldo queda
+      desactivado.
     </p>
 
     <form onsubmit={(e) => { e.preventDefault(); save(); }}>
@@ -99,7 +104,7 @@
         <input type={show ? 'text' : 'password'} bind:value={appid} autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="estado-respaldo" />
       </label>
       <label>
-        <span class="label">UUID del dispositivo <span class="faint">(opcional)</span></span>
+        <span class="label">UUID del dispositivo</span>
         <input type={show ? 'text' : 'password'} bind:value={uuid} autocomplete="off" spellcheck="false" autocapitalize="off" />
       </label>
       <label class="check">
@@ -108,7 +113,7 @@
       </label>
       <div class="row">
         <button class="btn primary" type="submit" disabled={!valid || !dirty}>{saved ? 'Guardado' : 'Guardar'}</button>
-        {#if backup.creds}
+        {#if backup.stored}
           <button class="btn" type="button" onclick={clear}>Borrar credenciales</button>
         {/if}
       </div>

@@ -112,6 +112,19 @@
     if (!serviceReady || !freq || freq.perHour) return null;
     return variants.find((r) => (frequencyNow(net, r.id, app.now)?.perHour ?? 0) > 0) ?? null;
   });
+  /**
+   * Fuente de las posiciones (solo con appid y UUID guardados): GTFS (el alimentador, con el respaldo
+   * por ruta si falla) o «por ruta» (siempre el servicio por ruta). Si con «por ruta» se ven los del
+   * GTFS, la nota dice por qué.
+   */
+  const sourceNote = $derived.by(() => {
+    if (!route || backup.source !== 'ruta') return '';
+    if (backup.status === 'rejected') return 'El servicio por ruta rechazó las credenciales: se muestran las posiciones del GTFS.';
+    if (backup.status === 'unavailable') return 'El servicio por ruta no responde: se muestran las posiciones del GTFS mientras tanto.';
+    const mine = busCodes(route).map((c) => c.toUpperCase());
+    if (mine.some((c) => backup.asked.includes(c)) && !mine.some((c) => backup.owned.includes(c))) return 'El servicio por ruta no trae buses de esta ruta ahora: se muestran los del GTFS.';
+    return '';
+  });
   /** Con salidas programadas y el alimentador al día, ningún bus de la ruta reporta. */
   const silent = $derived(!!freq?.perHour && buses.length === 0 && app.poll.status === 'live');
   const alerts = $derived(app.alerts.filter((a) => a.routes.includes(id)));
@@ -191,11 +204,21 @@
         {#if expected}· el horario espera <span class="num">~{expected}</span> en vía{/if}
       </p>
     {/if}
+    {#if backup.creds}
+      <div class="source">
+        <span class="label" id="fuente">Posiciones</span>
+        <div class="seg" role="radiogroup" aria-labelledby="fuente">
+          <button role="radio" aria-checked={backup.source === 'gtfs'} class:on={backup.source === 'gtfs'} onclick={() => backup.setSource('gtfs')}>GTFS</button>
+          <button role="radio" aria-checked={backup.source === 'ruta'} class:on={backup.source === 'ruta'} onclick={() => backup.setSource('ruta')}>Por ruta</button>
+        </div>
+      </div>
+      {#if sourceNote}<p class="sched faint" role="status">{sourceNote}</p>{/if}
+    {/if}
     {#if variantNow}
       <p class="notice">A esta hora la línea sale {variantNow.loop ? 'en circuito' : `hacia ${variantNow.dest}`}: <button class="link" onclick={() => go({ kind: 'route', id: variantNow.id }, true)}>{busCode(variantNow)}{variantNow.loop ? `, ${variantNow.dest} – ${variantNow.origin}` : ''}</button>.</p>
     {:else if silent}
       <p class="notice">Ningún bus de esta ruta reporta ahora, aunque el horario tiene salidas esta hora.
-        <span class="faint">El alimentador abierto no trae toda la flota en todo momento.{backup.status === 'off' ? '' : backup.status === 'rejected' ? ' El respaldo por ruta rechazó las credenciales.' : ' El respaldo por ruta tampoco trae buses de esta ruta por ahora.'}</span></p>
+        <span class="faint">El alimentador abierto no trae toda la flota en todo momento.{backup.status === 'off' ? '' : backup.status === 'rejected' ? ' El respaldo por ruta rechazó las credenciales.' : backup.status === 'unavailable' ? ' El servicio por ruta no responde por ahora.' : ' El respaldo por ruta tampoco trae buses de esta ruta por ahora.'}</span></p>
     {/if}
     {#if routeChanges.length}
       <div class="changed">
@@ -298,6 +321,12 @@
   .pair { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
   .legs { margin: -8px 0 0; font-size: var(--fs-small); color: var(--fg-1); line-height: 1.9; }
   .legmark { margin-left: var(--sp-2); font-size: var(--fs-label); color: var(--fg-2); display: inline-flex; align-items: center; gap: 4px; vertical-align: 1px; }
+  .source { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line-2); }
+  .seg button { height: 28px; padding: 0 var(--sp-3); font-size: var(--fs-small); color: var(--fg-1); }
+  .seg button + button { border-left: 1px solid var(--line-2); }
+  .seg button:hover { color: var(--fg-0); }
+  .seg button.on { background: var(--fg-0); color: var(--bg-1); }
   .notice { margin: -4px 0 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-1); border-left: 2px solid var(--warn); font-size: var(--fs-small); line-height: 1.5; color: var(--fg-1); }
   .notice .faint { display: block; margin-top: 2px; }
   .link { color: var(--fg-0); text-decoration: underline; text-decoration-color: var(--fg-3); text-underline-offset: 3px; }

@@ -282,7 +282,11 @@ export class Fleet {
     }
     this.feedTime = d.t;
     const seen = new Set<string>();
-    for (let i = 0; i < d.n; i++) seen.add(this.upsert(d, i, now, false));
+    for (let i = 0; i < d.n; i++) {
+      // Rutas con la fuente «por ruta» (ver `setOwned`): sus buses salen solo del servicio por ruta.
+      if (this.owned.size && this.isOwned(d.route[i])) continue;
+      seen.add(this.upsert(d, i, now, false));
+    }
     let byLabel: Map<string, string> | null = null;
     for (const [id, b] of this.buses) {
       if (seen.has(id)) continue;
@@ -305,6 +309,16 @@ export class Fleet {
       else b.missing = true;
     }
     for (const f of this.listeners) f();
+  }
+
+  /** Rutas (códigos, en mayúsculas) cuyas posiciones salen solo del servicio por ruta: la fuente
+   * elegida en la ficha de la ruta. Las lecturas del alimentador de esas rutas no se incorporan; al
+   * soltarlas, vuelven con su siguiente instantánea. */
+  private owned = new Set<string>();
+  setOwned(codes: string[]) { this.owned = new Set(codes.map((c) => c.toUpperCase())); }
+  private isOwned(routeId: string): boolean {
+    const r = this.net.routes.get(routeId);
+    return !!r && allCodes(r).some((c) => this.owned.has(c));
   }
 
   /** Aviso de que un bus cambió de id (el del respaldo pasó al del alimentador), para la vista abierta. */
