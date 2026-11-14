@@ -111,9 +111,12 @@ export class Controller {
     });
     addEventListener('resize', () => (app.narrow = innerWidth < 760));
     document.addEventListener('visibilitychange', () => {
+      // La inactividad cuenta solo con la página a la vista: al ocultarla y al volver, empieza de cero.
+      this.lastInput = Date.now();
       if (document.hidden) this.wake = null;
       else { if (app.following || this.tour) void this.keepAwake(true); void this.checkData(); }
     });
+    addEventListener('pageshow', () => (this.lastInput = Date.now()));
     // El respaldo por ruta también cambia la flota: conteos y listas al día (como en onData).
     backup.onChange = () => { this.remember(); app.counts = this.fleet.counts(); app.version++; this.map.triggerRepaint(); };
     // El bus del respaldo que el alimentador empieza a traer cambia de id: la ficha abierta y el aviso
@@ -124,9 +127,13 @@ export class Controller {
       if (watch.item?.busId === from) watch.item = { ...watch.item, busId: to };
       if (app.view.kind === 'bus' && app.view.id === from) go({ kind: 'bus', id: to }, true);
     };
-    let ticks = 0;
+    let ticks = 0, lastClock = Date.now();
     this.clock = window.setInterval(() => {
       app.now = Date.now();
+      // Oculta, o un salto del reloj de este temporizador (un iPhone congela la app en segundo plano y
+      // al volver puede no avisar): ese tiempo no cuenta como inactividad.
+      if (document.hidden || app.now - lastClock > 5000) this.lastInput = app.now;
+      lastClock = app.now;
       this.pulse();
       watch.check(this.net, this.fleet, app.now);
       this.traveled();

@@ -4,11 +4,13 @@
 import { decodePositions } from './positions';
 import { compact } from './compact';
 
-self.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+// Cada petición lleva su número y la respuesta lo devuelve (ver `decodePb` en api.ts).
+self.onmessage = (e: MessageEvent<{ id: number; buf: ArrayBuffer }>) => {
+  const { id, buf } = e.data;
   try {
-    const data = compact(decodePositions(new Uint8Array(e.data)).vehicles);
-    (self as DedicatedWorkerGlobalScope).postMessage({ ok: true, data });
+    const data = compact(decodePositions(new Uint8Array(buf)).vehicles);
+    (self as DedicatedWorkerGlobalScope).postMessage({ id, ok: true, data });
   } catch (err) {
-    (self as DedicatedWorkerGlobalScope).postMessage({ ok: false, message: err instanceof Error ? err.message : String(err) });
+    (self as DedicatedWorkerGlobalScope).postMessage({ id, ok: false, message: err instanceof Error ? err.message : String(err) });
   }
 };
