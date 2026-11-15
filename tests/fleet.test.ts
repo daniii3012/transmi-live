@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Fleet, GLIDE, HOLD_BACK, KEEP_S, BACKUP_KEEP, windowSpeed } from '../src/live/fleet';
+import { Fleet, GLIDE_MAX, GLIDE_MIN, GLIDE_SPREAD, HOLD_BACK, KEEP_S, BACKUP_KEEP, windowSpeed } from '../src/live/fleet';
 import { MetricPath, KX, KY } from '../src/domain/geo';
 import { LAT0, LON0, Q, type VehiclesV1 } from '../src/live/api';
 import type { Network } from '../src/data/network';
@@ -20,9 +20,16 @@ function snap(t: number, m: number, off = 0, route = 'R'): VehiclesV1 {
   };
 }
 
+/** Flota con el movimiento continuo (reproducción con retraso); el directo es el valor por defecto. */
+function continuous(): Fleet {
+  const f = new Fleet(net);
+  f.motion = 'continuo';
+  return f;
+}
+
 describe('flota', () => {
   it('ubica la lectura sobre el recorrido y la reproduce entre lecturas, con retraso', () => {
-    const f = new Fleet(net);
+    const f = continuous();
     f.ingest(snap(1000, 1000), 1_020_000); // llega 20 s después de la lectura
     const b = f.buses.get('1')!;
     expect(b.onPath).toBe(true);
@@ -36,7 +43,7 @@ describe('flota', () => {
   });
 
   it('se mueve sin paradas ni tirones aunque las lecturas lleguen a destiempo (cada 21 s, consulta cada 15 s)', () => {
-    const f = new Fleet(net);
+    const f = continuous();
     const v = 10; // m/s
     let ingested = -1;
     let prev = NaN, prevAt = 0;
@@ -59,7 +66,7 @@ describe('flota', () => {
   });
 
   it('tras una pausa del alimentador sigue desde donde se ve, sin saltar', () => {
-    const f = new Fleet(net);
+    const f = continuous();
     // Lecturas cada 21 s a 10 m/s; una pausa de 54 s; cada una llega 15 s después de generarse.
     const feed: [number, number][] = [[0, 100], [21, 310], [42, 520], [96, 1060], [117, 1270], [138, 1480]];
     const T0 = 1_000_000;
@@ -79,7 +86,7 @@ describe('flota', () => {
   });
 
   it(`un retroceso de menos de ${HOLD_BACK} m es ruido: el bus no retrocede`, () => {
-    const f = new Fleet(net);
+    const f = continuous();
     f.ingest(snap(1000, 2000), 1_020_000);
     f.update(1_020_001);
     f.ingest(snap(1020, 1985), 1_040_000);
@@ -89,7 +96,7 @@ describe('flota', () => {
   });
 
   it('una lectura imposible aislada se descarta; si la siguiente la confirma, el bus se reubica', () => {
-    const f = new Fleet(net);
+    const f = continuous();
     const T0 = 1_000_000;
     f.ingest(snap(T0, 1000), T0 * 1000 + 15_000);
     f.ingest(snap(T0 + 21, 1210), T0 * 1000 + 36_000);
@@ -128,7 +135,7 @@ describe('flota', () => {
   });
 
   it('velocidad: una lectura imposible no la contamina; un error del GPS en pocos segundos se diluye', () => {
-    const f = new Fleet(net);
+    const f = continuous();
     const T0 = 1_000_000;
     f.ingest(snap(T0, 1000), T0 * 1000 + 15_000);
     f.ingest(snap(T0 + 21, 1210), T0 * 1000 + 36_000);
@@ -143,7 +150,7 @@ describe('flota', () => {
   });
 
   it('a más de 60 m del recorrido se dibuja en su punto', () => {
-    const f = new Fleet(net);
+    const f = continuous();
     f.ingest(snap(1000, 1000, 150), 0);
     expect(f.buses.get('1')!.onPath).toBe(false);
   });
@@ -241,34 +248,103 @@ describe('flota', () => {
       return moving;
     }
 
-    it('va en ~0,4 s por el recorrido a la última lectura, suave, y se queda ahí', () => {
+    it('es el movimiento por defecto', () => {
+      expect(new Fleet(net).motion).toBe('directo');
+    });
+
+    it('dura según lo que recorre: rápido, pero sin salto', () => {
       const f = new Fleet(net);
-      f.motion = 'directo';
+      expect(f.glideMs(50)).toBe(GLIDE_MIN);
+      expect(f.glideMs(200)).toBe(1000);
+      expect(f.glideMs(400)).toBe(2000);
+      expect(f.glideMs(3000)).toBe(GLIDE_MAX);
+      f.glide = 0;
+      expect(f.glideMs(400)).toBe(0);
+    });
+
+    it('va rápido por el recorrido a la última lectura, después de su desfase, suave, y se queda ahí', () => {
+      const f = new Fleet(net);
       f.ingest(snap(T0, 1000), T0 * 1000 + 10_000);
       const b = f.buses.get('1')!;
       run(f, T0 * 1000 + 10_000, T0 * 1000 + 10_500);
       expect(b.s).toBeCloseTo(1000, -1); // la primera lectura: directo, sin retraso
-      f.ingest(snap(T0 + 20, 1200), T0 * 1000 + 30_000);
       const t = T0 * 1000 + 30_000;
+      f.ingest(snap(T0 + 20, 1200), t);
+      const start = b.glideAt, dur = f.glideMs(200);
+      expect(start - t).toBeGreaterThanOrEqual(0);
+      expect(start - t).toBeLessThan(GLIDE_SPREAD);
       f.update(t);
-      f.update(t + GLIDE / 4);
-      const q1 = b.s;
-      f.update(t + GLIDE / 2);
-      const half = b.s;
-      expect(q1).toBeGreaterThan(1000);
-      expect(half - 1000).toBeGreaterThan(q1 - 1000); // acelera al principio…
-      expect(half).toBeCloseTo(1100, -1); // …y va por la mitad a mitad de tiempo
-      run(f, t + GLIDE / 2, t + GLIDE + 50);
+      // En espera de su desfase: quieto, pero los cuadros siguen para que arranque a tiempo.
+      expect(f.update(Math.max(t + 5, start - 5))).toBe(true);
+      expect(b.s).toBeCloseTo(1000, -1);
+      f.update(start + dur / 4);
+      const q1 = b.s - 1000;
+      f.update(start + dur / 2);
+      const half = b.s - 1000;
+      expect(q1).toBeGreaterThan(0);
+      expect(q1).toBeLessThan(half / 2); // acelera al principio…
+      expect(half).toBeCloseTo(100, -1); // …y va por la mitad a mitad de tiempo
+      run(f, start + dur / 2, start + dur + 50);
       const last = b.ts[b.ts.length - 1];
       expect(Math.abs(last - 1200)).toBeLessThan(1.5); // (la lectura viene redondeada a ~1 m)
       expect(b.s).toBeCloseTo(last, 6); // llega exacto a la lectura
-      expect(run(f, t + GLIDE + 50, t + 15_000, 100)).toBe(false); // y espera quieta: no pide cuadros
+      expect(run(f, start + dur + 50, t + 15_000, 100)).toBe(false); // y espera quieta: no pide cuadros
       expect(b.s).toBeCloseTo(last, 6);
+    });
+
+    it('los buses de una misma instantánea no arrancan todos a la vez', () => {
+      const f = new Fleet(net);
+      const two = (t: number, m: number) => {
+        const a = snap(t, m), c = snap(t, m + 500);
+        return { ...a, n: 2, id: ['1', '2'], label: ['A1', 'A2'], plate: ['X', 'Y'], route: ['R', 'R'], lat: [...a.lat, ...c.lat], lon: [...a.lon, ...c.lon], age: [0, 0], stop: ['s', 's'], seq: [1, 1], start: [300, 300] };
+      };
+      f.ingest(two(T0, 1000), T0 * 1000);
+      run(f, T0 * 1000, T0 * 1000 + 100);
+      const t = T0 * 1000 + 50_000;
+      f.ingest(two(T0 + 50, 1400), t);
+      const a = f.buses.get('1')!.glideAt, c = f.buses.get('2')!.glideAt;
+      expect(a).not.toBe(c);
+      for (const g of [a, c]) { expect(g).toBeGreaterThanOrEqual(t); expect(g).toBeLessThan(t + GLIDE_SPREAD); }
+    });
+
+    it('una lectura que llega en pleno deslizamiento sigue desde donde se ve, sin esperar otro desfase', () => {
+      const f = new Fleet(net);
+      f.ingest(snap(T0, 1000), T0 * 1000);
+      run(f, T0 * 1000, T0 * 1000 + 100);
+      f.ingest(snap(T0 + 50, 1400), T0 * 1000 + 50_000);
+      const b = f.buses.get('1')!;
+      const mid = b.glideAt + f.glideMs(400) / 2;
+      run(f, T0 * 1000 + 50_000, mid);
+      const s = b.s;
+      expect(s).toBeGreaterThan(1050);
+      f.ingest(snap(T0 + 51, 1420), mid + 16);
+      expect(b.glideAt).toBe(mid + 16);
+      expect(b.glideFrom).toBeCloseTo(s, 6);
+      run(f, mid + 16, mid + 16 + GLIDE_MAX + 50);
+      expect(b.s).toBeCloseTo(b.ts[b.ts.length - 1], 6);
+    });
+
+    it('fuera del recorrido también va rápido y con su desfase, no de un salto', () => {
+      const f = new Fleet(net);
+      f.ingest(snap(T0, 1000, 200), T0 * 1000); // a 200 m del recorrido
+      const b = f.buses.get('1')!;
+      run(f, T0 * 1000, T0 * 1000 + 100);
+      expect(b.onPath).toBe(false);
+      const x0 = b.x, t = T0 * 1000 + 50_000;
+      f.ingest(snap(T0 + 50, 1300, 200), t);
+      expect(b.t0).toBeGreaterThanOrEqual(t);
+      expect(b.t1 - b.t0).toBeCloseTo(f.glideMs(300), -1); // (300 m, con el redondeo de la lectura)
+      f.update(b.t0 - 1);
+      expect(b.x).toBeCloseTo(x0, 6); // espera su desfase
+      f.update(b.t0 + (b.t1 - b.t0) / 2);
+      expect(b.x - x0).toBeGreaterThan(100); // a mitad de camino…
+      expect(b.x - x0).toBeLessThan(200);
+      f.update(b.t1 + 10);
+      expect(b.x - x0).toBeCloseTo(300, -1); // …y llega
     });
 
     it('no retrocede por ruido del GPS', () => {
       const f = new Fleet(net);
-      f.motion = 'directo';
       f.ingest(snap(T0, 1000), T0 * 1000);
       run(f, T0 * 1000, T0 * 1000 + 600);
       const s1 = f.buses.get('1')!.s;
@@ -278,23 +354,22 @@ describe('flota', () => {
     });
 
     it('al cambiar de modo: a directo va a la última lectura; a continuo vuelve a la reproducción con retraso', () => {
-      const f = new Fleet(net);
+      const f = continuous();
       f.ingest(snap(T0, 1000), T0 * 1000 + 10_000);
       f.ingest(snap(T0 + 20, 1200), T0 * 1000 + 30_000);
       run(f, T0 * 1000 + 30_000, T0 * 1000 + 31_000);
       const b = f.buses.get('1')!;
       expect(b.s).toBeLessThan(1100); // continuo: ~40 s atrás
       f.setMotion('directo', T0 * 1000 + 31_000);
-      run(f, T0 * 1000 + 31_000, T0 * 1000 + 31_000 + GLIDE + 50);
+      run(f, T0 * 1000 + 31_000, T0 * 1000 + 31_000 + GLIDE_MAX + 50); // enseguida: sin desfase
       expect(b.s).toBeCloseTo(b.ts[b.ts.length - 1], 6);
-      f.setMotion('continuo', T0 * 1000 + 32_000);
-      f.update(T0 * 1000 + 32_000);
+      f.setMotion('continuo', T0 * 1000 + 34_000);
+      f.update(T0 * 1000 + 34_000);
       expect(b.s).toBeLessThan(1150); // de una vez a la hora de reproducción
     });
 
     it('con «reducir movimiento» (sin deslizamiento) va de una vez', () => {
       const f = new Fleet(net);
-      f.motion = 'directo';
       f.glide = 0;
       f.ingest(snap(T0, 1000), T0 * 1000);
       f.update(T0 * 1000);

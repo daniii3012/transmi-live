@@ -17,12 +17,24 @@ const CATCH = 0.2;
 /** Puntos recientes que se guardan por bus para la curva (lecturas y nudos de anclaje). */
 const TRACK = 10;
 /**
- * Movimiento entre lecturas (Configuración, decisión 013): `continuo` (por defecto) reproduce cada bus
- * con retraso sobre una curva continua; `directo` lo lleva en `GLIDE` ms por su recorrido a la última
- * lectura aceptada y lo deja ahí hasta la siguiente.
+ * Movimiento entre lecturas (Configuración, decisión 013): `directo` (por defecto desde el 15 nov. 2026)
+ * lleva cada bus rápido por su recorrido a la última lectura aceptada y lo deja ahí hasta la siguiente;
+ * `continuo` lo reproduce con retraso sobre una curva continua.
  */
 export type Motion = 'continuo' | 'directo';
-export const GLIDE = 400;
+/**
+ * Deslizamiento del modo directo: dura según lo que recorre (`GLIDE_MS_PER_M`, ~720 km/h en pantalla),
+ * entre `GLIDE_MIN` y `GLIDE_MAX` ms. Con 0,4 s fijos, los 150–400 m que avanza un bus entre lecturas
+ * (cada ~50 s desde nov. 2026) se veían como un salto. Cada bus arranca con un desfase propio de hasta
+ * `GLIDE_SPREAD` ms (su `seed`): todas las lecturas de una instantánea llegan juntas y, sin desfase, la
+ * flota entera se movía en el mismo instante.
+ */
+export const GLIDE_MIN = 600;
+export const GLIDE_MAX = 2500;
+export const GLIDE_MS_PER_M = 5;
+export const GLIDE_SPREAD = 1500;
+/** Aceleración y frenado suaves (seno): la velocidad máxima es ~1,6 veces la media, no 3 como la cúbica. */
+const ease = (u: number) => (1 - Math.cos(Math.PI * u)) / 2;
 /** Más viejo que esto, el bus se atenúa; más que `DROP_AGE`, no se dibuja. */
 export const STALE_AGE = 180;
 export const DROP_AGE = 600;
@@ -82,7 +94,8 @@ export interface Bus {
    * siguiente la confirme; si no, era un error del GPS y se descarta. El retraso de reproducción
    * permite esperar sin que se note. */
   suspect: { s: number; at: number } | null;
-  /** Modo directo: desde dónde y cuándo empezó el deslizamiento a la última lectura. */
+  /** Modo directo: desde dónde y cuándo empieza (con el desfase propio) el deslizamiento a la última
+   * lectura. */
   glideFrom: number;
   glideAt: number;
   /** Último cuadro calculado y velocidad dibujada (m/s). */
@@ -230,22 +243,35 @@ export class Fleet {
   lagCap = 120_000;
   gapCap = 60_000;
   offCap = 90_000;
-  /** Movimiento entre lecturas (ver `Motion`) y duración del deslizamiento del modo directo (0 con
-   * «reducir movimiento» del sistema: va de una vez). */
-  motion: Motion = 'continuo';
-  glide = GLIDE;
+  /** Movimiento entre lecturas (ver `Motion`) y duración máxima del deslizamiento del modo directo (0
+   * con «reducir movimiento» del sistema: va de una vez, sin desfase). */
+  motion: Motion = 'directo';
+  glide = GLIDE_MAX;
+
+  /** Duración (ms) del deslizamiento del modo directo para `d` metros. */
+  glideMs(d: number): number {
+    return this.glide <= 0 ? 0 : Math.min(this.glide, Math.max(GLIDE_MIN, d * GLIDE_MS_PER_M));
+  }
+
+  /** Desfase propio del deslizamiento que empieza en `now`. Sin desfase si el anterior empezó hace poco
+   * (dos lecturas seguidas: el bus no se detiene a esperar en medio de un deslizamiento). */
+  private glideDelay(b: Bus, now: number, prevStart: number): number {
+    return this.glide <= 0 || now - prevStart < GLIDE_SPREAD + this.glide ? 0 : b.seed * GLIDE_SPREAD;
+  }
   private delays: number[] = [];
   private gaps: number[] = [];
 
   /**
-   * Cambia el movimiento. A `directo`: cada bus va de donde se ve a su última lectura. A `continuo`:
-   * vuelve una vez a la hora de reproducción (unos segundos atrás) y sigue sin pausas desde ahí.
+   * Cambia el movimiento. A `directo`: cada bus va de donde se ve a su última lectura (enseguida, sin
+   * desfase). A `continuo`: vuelve una vez a la hora de reproducción y sigue sin pausas desde ahí.
    */
   setMotion(m: Motion, now = Date.now()) {
     if (m === this.motion) return;
     this.motion = m;
     for (const b of this.buses.values()) {
-      if (m === 'directo') { b.glideFrom = b.s; b.glideAt = now; } else b.snap = true;
+      if (m === 'continuo') { b.snap = true; continue; }
+      b.glideFrom = b.s; b.glideAt = now;
+      if (!b.onPath && now < b.t1) { b.x0 = b.x; b.y0 = b.y; b.t0 = now; b.t1 = now + this.glideMs(Math.hypot(b.x1 - b.x, b.y1 - b.y)); }
     }
     for (const f of this.listeners) f();
   }
@@ -411,7 +437,7 @@ export class Fleet {
   /** Ubica una lectura y programa el movimiento hasta ella. */
   private place(b: Bus, x: number, y: number, fixAt: number, now: number, first: boolean) {
     const path = b.path;
-    const end = now + (this.motion === 'directo' ? this.glide : this.interval);
+    const direct = this.motion === 'directo';
     if (path && path.size > 1) {
       const hit = path.nearest(x, y, first ? undefined : b.sFix, 250, 3500, MAX_OFF);
       if (hit && hit.d <= MAX_OFF) {
@@ -428,9 +454,9 @@ export class Fleet {
           if (!sus || Math.abs(hit.s - sus.s) > 300) { b.suspect = { s: hit.s, at: fixAt }; return; }
         }
         b.suspect = null;
-        // Modo directo: desde donde se ve hacia esta lectura.
+        // Modo directo: desde donde se ve hacia esta lectura, con el desfase propio del bus.
         b.glideFrom = b.s;
-        b.glideAt = now;
+        b.glideAt = now + this.glideDelay(b, now, b.glideAt);
         const reset = !wasOn || odd;
         b.onPath = true;
         b.offPath = hit.d;
@@ -504,7 +530,9 @@ export class Fleet {
       b.x0 = b.x1 = x; b.y0 = b.y1 = y; b.t0 = b.t1 = now;
       if (!first && jump > MAX_JUMP) b.bornAt = now;
     } else {
-      b.x0 = b.x; b.y0 = b.y; b.x1 = x; b.y1 = y; b.t0 = now; b.t1 = end;
+      // Modo directo: rápido y con el desfase propio, como sobre el recorrido; continuo: en un intervalo.
+      const t0 = direct ? now + this.glideDelay(b, now, b.t0) : now;
+      b.x0 = b.x; b.y0 = b.y; b.x1 = x; b.y1 = y; b.t0 = t0; b.t1 = t0 + (direct ? this.glideMs(jump) : this.interval);
     }
   }
 
@@ -518,16 +546,17 @@ export class Fleet {
   }
 
   /**
-   * Modo directo: abscisa en `now` del deslizamiento hacia la última lectura (aceleración y frenado
-   * suaves, por el recorrido: no corta esquinas). Nunca hacia atrás: una lectura apenas detrás de lo
-   * dibujado es ruido del GPS.
+   * Modo directo: abscisa en `now` del deslizamiento hacia la última lectura (por el recorrido: no corta
+   * esquinas), con aceleración y frenado suaves y una duración según la distancia (`glideMs`). Antes de
+   * su desfase, el bus espera donde estaba. Nunca hacia atrás: una lectura apenas detrás de lo dibujado
+   * es ruido del GPS.
    */
   directAt(b: Bus, now: number): number {
     const end = b.ts.length ? b.ts[b.ts.length - 1] : b.sFix;
     if (b.snap || this.glide <= 0) return end;
-    const u = Math.min(1, Math.max(0, (now - b.glideAt) / this.glide));
-    const e = u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2;
-    return b.glideFrom + Math.max(0, end - b.glideFrom) * e;
+    const d = Math.max(0, end - b.glideFrom);
+    const u = Math.min(1, Math.max(0, (now - b.glideAt) / this.glideMs(d)));
+    return b.glideFrom + d * ease(u);
   }
 
   /**
@@ -592,7 +621,8 @@ export class Fleet {
         b.v = fresh || now === b.drawnAt ? 0 : ((s - b.s) / (now - b.drawnAt)) * 1000;
         b.drawnAt = now;
         b.snap = false;
-        if (Math.abs(target - s) > 0.05 || b.v > 0.05) moving = true;
+        // En espera de su desfase, el bus está quieto pero se mueve enseguida: los cuadros siguen.
+        if (Math.abs(target - s) > 0.05 || b.v > 0.05 || (direct && now < b.glideAt)) moving = true;
         const P = b.path;
         if (s === b.s && b.x !== 0) continue;
         const i = P.segmentAt(s);
@@ -606,7 +636,8 @@ export class Fleet {
         b.s = s;
       } else {
         if (now < b.t1) moving = true;
-        const kk = now >= b.t1 || b.t1 <= b.t0 ? 1 : (now - b.t0) / (b.t1 - b.t0);
+        const lin = now >= b.t1 || b.t1 <= b.t0 ? 1 : Math.max(0, (now - b.t0) / (b.t1 - b.t0));
+        const kk = this.motion === 'directo' ? ease(lin) : lin;
         const nx = b.x0 + (b.x1 - b.x0) * kk, ny = b.y0 + (b.y1 - b.y0) * kk;
         const dx = nx - b.x, dy = ny - b.y, l = Math.hypot(dx, dy);
         if (l > 0.3) this.turn(b, dx / l, dy / l, k);

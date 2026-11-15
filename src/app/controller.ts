@@ -149,7 +149,7 @@ export class Controller {
     this.applyLayers();
     this.setHidden(app.hidden);
     // Movimiento entre lecturas (Configuración). Con «reducir movimiento» del sistema, el modo directo
-    // va de una vez, sin deslizamiento.
+    // va de una vez, sin deslizamiento ni desfase.
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) this.fleet.glide = 0;
     this.fleet.setMotion(app.motion);
     if (loadPrefs().threeD) this.set3d(true, true);
@@ -794,10 +794,10 @@ export class Controller {
   dimBuses?: BusLayer;
   speed?: import('../map/speedLayer').SpeedLayer;
 
-  /** Movimiento de los buses entre lecturas: continuo (por defecto) o directo a la última lectura. */
+  /** Movimiento de los buses entre lecturas: directo a la última lectura (por defecto) o continuo. */
   setMotion(m: 'continuo' | 'directo') {
     app.motion = m;
-    savePrefs({ motion: m });
+    savePrefs({ move: m });
     this.fleet.setMotion(m);
     this.map.triggerRepaint();
   }

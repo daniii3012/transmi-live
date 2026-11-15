@@ -19,9 +19,11 @@ function snap(t: number, m: number): VehiclesV1 {
   return { v: 1, t, n: 1, id: ['1'], label: ['A1'], plate: ['X'], route: ['R'], lat: [Math.round((lat - LAT0) * Q)], lon: [Math.round((lon - LON0) * Q)], age: [0], stop: ['s'], seq: [1], start: [300] };
 }
 
-/** Un bus a 10 m/s, con lecturas cada 20 s; `until` detiene la reproducción cuando se cumple. */
+/** Un bus a 10 m/s, con lecturas cada 20 s, en movimiento continuo; `until` detiene la reproducción
+ * cuando se cumple. */
 function moving(until?: (s: number) => boolean) {
   const f = new Fleet(net);
+  f.motion = 'continuo'; // la reproducción con retraso (el directo es el valor por defecto)
   let now = 1_000_000_000;
   for (let k = 0; k <= 14; k++) {
     f.ingest(snap(1_000_000 + 20 * k, 200 + 200 * k), now);

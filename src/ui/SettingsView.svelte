@@ -56,11 +56,11 @@
     </label>
     <p id="movimiento-nota" class="small faint">
       {#if app.motion === 'continuo'}
-        Activado: cada bus avanza sin pausas por su recorrido entre una lectura y la siguiente, unos 40 s
-        detrás del dato más reciente.
+        Activado: cada bus avanza sin pausas por su recorrido entre una lectura y la siguiente, hasta unos
+        2 min detrás del dato más reciente.
       {:else}
-        Desactivado: con cada lectura (cada ~20 s), el bus va en un instante a su última posición conocida
-        y espera ahí la siguiente.
+        Desactivado: con cada lectura nueva, el bus avanza rápido por su recorrido hasta su última posición
+        conocida y espera ahí la siguiente.
       {/if}
       Las llegadas y la velocidad no cambian.
     </p>

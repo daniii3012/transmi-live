@@ -18,7 +18,12 @@ function loadLayers() {
   try { return { ...base, ...JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '{}') }; } catch { return base; }
 }
 const PREFS_KEY = 'transmi-live:preferencias:v1';
-export interface Prefs { hidden: string[]; idleMs?: number; threeD: boolean; motion?: 'continuo' | 'directo'; camera?: { center: [number, number]; zoom: number; bearing: number; pitch: number; hash: string; at: number } }
+/**
+ * `move`: movimiento elegido en Configuración. Hasta el 14 nov. 2026 se guardaba en `motion`, con el
+ * continuo por defecto; ese valor ya no se lee, para que el directo llegue como valor por defecto también
+ * a quien probó el interruptor y lo dejó en continuo.
+ */
+export interface Prefs { hidden: string[]; idleMs?: number; threeD: boolean; move?: 'continuo' | 'directo'; camera?: { center: [number, number]; zoom: number; bearing: number; pitch: number; hash: string; at: number } }
 export function loadPrefs(): Prefs {
   try { return { hidden: [], threeD: false, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') }; } catch { return { hidden: [], threeD: false }; }
 }
@@ -34,8 +39,8 @@ class AppState {
   view = $state<View>(parse());
   /** Clases ocultas por el filtro de sistemas (R10.2); lo guardado antes, con `zonal` entero, se migra. */
   hidden = $state<FilterKey[]>(typeof localStorage !== 'undefined' ? migrateHidden(loadPrefs().hidden) : []);
-  /** Movimiento de los buses entre lecturas (Configuración); por defecto, continuo. */
-  motion = $state<'continuo' | 'directo'>(typeof localStorage !== 'undefined' ? loadPrefs().motion ?? 'continuo' : 'continuo');
+  /** Movimiento de los buses entre lecturas (Configuración); por defecto, directo. */
+  motion = $state<'continuo' | 'directo'>(typeof localStorage !== 'undefined' ? loadPrefs().move ?? 'directo' : 'directo');
   poll = $state<PollState>({ status: 'connecting', feedTime: null, receivedAt: null, error: null, vehicles: 0 });
   counts = $state<Record<FilterKey, number>>({ troncal: 0, dual: 0, alimentador: 0, cable: 0, 'zonal-urbano': 0, 'zonal-complementario': 0, 'zonal-especial': 0 });
   /** Cambia con cada instantánea nueva: las vistas que dependen de la flota se recalculan. */
